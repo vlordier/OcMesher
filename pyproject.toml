@@ -20,6 +20,10 @@ dependencies = [
 [project.optional-dependencies]
 demo = ["vnoise"]
 
+[build-system]
+requires = ["setuptools>=61"]
+build-backend = "setuptools.build_meta"
+
 [tool.ruff]
 target-version = "py311"
 line-length = 120
