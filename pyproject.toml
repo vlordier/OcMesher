@@ -1,0 +1,43 @@
+[project]
+name = "ocmesher"
+version = "1.0"
+description = "View-Dependent Octree-based Mesh Extraction in Unbounded Scenes for Procedural Synthetic Data"
+readme = "README.md"
+license = {text = "BSD-3-Clause"}
+requires-python = ">=3.11"
+dependencies = [
+    "numpy",
+    "trimesh",
+    "gin-config",
+    "tqdm",
+    "psutil",
+]
+
+[project.optional-dependencies]
+demo = ["vnoise"]
+
+[tool.ruff]
+target-version = "py311"
+line-length = 120
+
+[tool.ruff.lint]
+select = [
+    "E",     # pycodestyle errors
+    "W",     # pycodestyle warnings
+    "F",     # pyflakes
+    "I",     # isort
+    "UP",    # pyupgrade
+    "B",     # flake8-bugbear
+    "SIM",   # flake8-simplify
+    "TCH",   # flake8-type-checking
+    "RUF",   # ruff-specific rules
+]
+ignore = [
+    "E501",  # line too long (handled by formatter)
+]
+
+[tool.ruff.lint.isort]
+known-first-party = ["ocmesher"]
+
+[tool.pyright]
+pythonVersion = "3.11"

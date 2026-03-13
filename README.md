@@ -38,7 +38,7 @@ Please view the video [here](https://youtu.be/YA1c5L0Ncuw) for more qualitative 
 git clone https://github.com/princeton-vl/OcMesher.git
 cd OcMesher
 bash install.sh
-conda create --name ocmesher python=3.10
+conda create --name ocmesher python=3.11
 conda activate ocmesher
 pip install -r requirements.txt
 ```
