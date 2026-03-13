@@ -3,46 +3,67 @@
 
 # Authors: Zeyu Ma
 
-"""C-type helpers for interfacing with the native meshing library."""
+"""Ctypes helpers for loading shared libraries and converting numpy arrays to C pointers."""
 
 import sys
 from ctypes import CDLL, POINTER, RTLD_LOCAL, c_bool, c_double, c_float, c_int32
 from pathlib import Path
+from typing import Any
 
-from numpy import ascontiguousarray as AC  # noqa: F401 - re-exported for core.py
+import numpy as np
+from numpy import ascontiguousarray as AC
+
+__all__ = [
+    "AC",
+    "POINTER",
+    "AsBool",
+    "AsDouble",
+    "AsFloat",
+    "AsInt",
+    "c_bool",
+    "c_double",
+    "c_float",
+    "c_int32",
+    "load_cdll",
+    "register_func",
+]
 
 
 # note: size of x should not exceed maximum
-def AsInt(x):
+def AsInt(x: np.ndarray) -> "POINTER(c_int32)":
     """Cast *x* to a ``c_int32`` pointer."""
     return x.ctypes.data_as(POINTER(c_int32))
 
 
-def AsDouble(x):
+def AsDouble(x: np.ndarray) -> "POINTER(c_double)":
     """Cast *x* to a ``c_double`` pointer."""
     return x.ctypes.data_as(POINTER(c_double))
 
 
-def AsFloat(x):
+def AsFloat(x: np.ndarray) -> "POINTER(c_float)":
     """Cast *x* to a ``c_float`` pointer."""
     return x.ctypes.data_as(POINTER(c_float))
 
 
-def AsBool(x):
+def AsBool(x: np.ndarray) -> "POINTER(c_bool)":
     """Cast *x* to a ``c_bool`` pointer."""
     return x.ctypes.data_as(POINTER(c_bool))
 
 
-def register_func(me, dll, name, argtypes=None, restype=None, caller_name=None):  # noqa: PLR0913
+def register_func(
+    me: Any, dll: CDLL, name: str, argtypes: list | None = None, restype: Any = None, caller_name: str | None = None
+) -> None:
     """Register a C function from *dll* on object *me*."""
+    if argtypes is None:
+        argtypes = []
     if caller_name is None:
         caller_name = name
     setattr(me, caller_name, getattr(dll, name))
     func = getattr(me, caller_name)
-    func.argtypes = argtypes if argtypes is not None else []
+    func.argtypes = argtypes
     func.restype = restype
 
 
-def load_cdll(path):
+def load_cdll(path: str) -> CDLL:
     """Load a shared library from *path* relative to ``sys.path``."""
     return CDLL(Path(sys.path[-1]) / path, mode=RTLD_LOCAL)

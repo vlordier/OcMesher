@@ -3,7 +3,10 @@
 
 # Authors: Zeyu Ma
 
-"""Demo script: generate a Perlin-noise terrain mesh with OcMesher."""
+"""Demo script that meshes a Perlin noise terrain with a single camera view.
+
+Outputs the resulting mesh to ``results/demo.obj``.
+"""
 
 from pathlib import Path
 
@@ -23,30 +26,36 @@ def f(XYZ):
     return XYZ[:, 2] - h
 
 
-cam_poses = [
-    np.array(
-        [
-            [1, 0, 0, 0],
-            [0, 0, 1, 0],
-            [0, -1, 0, 3],
-            [0, 0, 0, 1],
-        ]
-    )
-]
-Ks = [
-    np.array(
-        [
-            [2000, 0, 640],
-            [0, 2000, 360],
-            [0, 0, 1],
-        ]
-    )
-]
-Hs = [720]
-Ws = [1280]
+def main():
+    """Run the demo meshing pipeline."""
+    cam_poses = [
+        np.array(
+            [
+                [1, 0, 0, 0],
+                [0, 0, 1, 0],
+                [0, -1, 0, 3],
+                [0, 0, 0, 1],
+            ]
+        )
+    ]
+    Ks = [
+        np.array(
+            [
+                [2000, 0, 640],
+                [0, 2000, 360],
+                [0, 0, 1],
+            ]
+        )
+    ]
+    Hs = [720]
+    Ws = [1280]
 
-bounds = (-10, 10, -10, 10, -2, 2)
-mesher = OcMesher((cam_poses, Ks, Hs, Ws), bounds, pixels_per_cube=16)
-meshes, in_view_tags = mesher([f])
-Path("results").mkdir(parents=True, exist_ok=True)
-meshes[0].export("results/demo.obj")
+    bounds = (-10, 10, -10, 10, -2, 2)
+    mesher = OcMesher((cam_poses, Ks, Hs, Ws), bounds, pixels_per_cube=16)
+    meshes, _in_view_tags = mesher([f])
+    Path("results").mkdir(parents=True, exist_ok=True)
+    meshes[0].export("results/demo.obj")
+
+
+if __name__ == "__main__":
+    main()

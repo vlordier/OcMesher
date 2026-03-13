@@ -7,27 +7,42 @@
 
 import os
 from datetime import datetime, timezone
+from types import TracebackType
+from typing import Self
 
 import psutil
 
 
 class Timer:
-    """Context-manager that logs elapsed time and memory usage."""
+    """Context manager that measures wall-clock duration and reports memory usage.
 
-    def __init__(self, desc, *, disable_timer=False):
+    Usage::
+
+        with Timer("my step"):
+            do_work()
+        # prints: [my step] finished in 0:00:01.234 with memory usage 0.5 GB
+    """
+
+    def __init__(self, desc: str, disable_timer: bool = False) -> None:
         """Create a timer labelled *desc*."""
         self.disable_timer = disable_timer
         if self.disable_timer:
             return
         self.name = f"[{desc}]"
 
-    def __enter__(self):
+    def __enter__(self) -> Self:
         """Record the start time."""
         if self.disable_timer:
-            return
+            return self
         self.start = datetime.now(tz=timezone.utc)
+        return self
 
-    def __exit__(self, exc_type, _exc_val, _traceback):
+    def __exit__(
+        self,
+        exc_type: type[BaseException] | None,
+        _exc_val: BaseException | None,
+        _traceback: TracebackType | None,
+    ) -> None:
         """Print elapsed time and memory on success, or the exception type on failure."""
         if self.disable_timer:
             return
