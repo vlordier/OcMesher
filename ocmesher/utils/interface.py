@@ -17,19 +17,19 @@ if TYPE_CHECKING:
 
 
 # note: size of x should not exceed maximum
-def AsInt(x: npt.NDArray[np.int32]) -> ctypes.Array[c_int32]:
+def AsInt(x: npt.NDArray[np.int32]) -> ctypes._Pointer[c_int32]:
     return x.ctypes.data_as(POINTER(c_int32))
 
 
-def AsDouble(x: npt.NDArray[np.float64]) -> ctypes.Array[c_double]:
+def AsDouble(x: npt.NDArray[np.float64]) -> ctypes._Pointer[c_double]:
     return x.ctypes.data_as(POINTER(c_double))
 
 
-def AsFloat(x: npt.NDArray[np.float32]) -> ctypes.Array[c_float]:
+def AsFloat(x: npt.NDArray[np.float32]) -> ctypes._Pointer[c_float]:
     return x.ctypes.data_as(POINTER(c_float))
 
 
-def AsBool(x: npt.NDArray[np.bool_]) -> ctypes.Array[c_bool]:
+def AsBool(x: npt.NDArray[np.bool_]) -> ctypes._Pointer[c_bool]:
     return x.ctypes.data_as(POINTER(c_bool))
 
 

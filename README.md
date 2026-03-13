@@ -40,13 +40,14 @@ cd OcMesher
 bash install.sh
 conda create --name ocmesher python=3.11
 conda activate ocmesher
-pip install -r requirements.txt
+pip install .
 ```
 
 
 ### Demo
 
 ```
+pip install ".[demo]"
 python demo.py
 ```
 
