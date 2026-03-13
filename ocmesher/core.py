@@ -13,6 +13,12 @@ from tqdm import tqdm
 from .utils.interface import AC, POINTER, AsDouble, AsFloat, AsInt, AsBool, c_bool, c_double, c_float, c_int32, load_cdll, register_func
 from .utils.timer import Timer
 
+# Camera data layout constants (must match C++ side in core.h)
+CAM_INV_POSE_SIZE = 12   # 3x4 inverse pose matrix
+CAM_K_SIZE = 9           # 3x3 intrinsic matrix
+CAM_HW_SIZE = 2          # height, width
+CAMERA_DATA_STRIDE = CAM_INV_POSE_SIZE + CAM_K_SIZE + CAM_HW_SIZE  # 23
+
 @gin.configurable
 class OcMesher:
     def __init__(self,
@@ -27,6 +33,11 @@ class OcMesher:
         simplify_occluded=True,
         visible_relax_iter=2,
         coarse_count=500000,
+        sdf_batch_size=10_000_000,
+        bounds_expansion_factor=1.1,
+        pixel_downsample_factor=10,
+        memory_threshold_coarse=0.6,
+        memory_threshold_fine=0.8,
     ):
         dll = load_cdll(str(Path(__file__).parent.resolve()/"lib"/"core.so"))
         self.float_type = c_double
@@ -37,12 +48,17 @@ class OcMesher:
         self.sdf_AF = AsFloat
         self.bounds = bounds
         self.memory_limit_mb = memory_limit_mb
+        self.sdf_batch_size = sdf_batch_size
+        self.bounds_expansion_factor = bounds_expansion_factor
+        self.pixel_downsample_factor = self.np_float_type(pixel_downsample_factor)
+        self.memory_threshold_coarse = self.np_float_type(memory_threshold_coarse)
+        self.memory_threshold_fine = self.np_float_type(memory_threshold_fine)
 
         cam_poses, Ks, Hs, Ws = cameras
         self.n_cameras = len(cam_poses)
-        self.cameras = np.zeros(23 * self.n_cameras, dtype=self.np_float_type)
+        self.cameras = np.zeros(CAMERA_DATA_STRIDE * self.n_cameras, dtype=self.np_float_type)
         for i in range(self.n_cameras):
-            self.cameras[23 * i: 23 * (i+1)] = np.concatenate([
+            self.cameras[CAMERA_DATA_STRIDE * i: CAMERA_DATA_STRIDE * (i+1)] = np.concatenate([
                 np.linalg.inv(cam_poses[i])[:3, :4].reshape(-1),
                 Ks[i].reshape(-1), [Hs[i]], [Ws[i]]
             ]).astype(self.np_float_type)
@@ -52,7 +68,7 @@ class OcMesher:
         self.min_dist = self.np_float_type(min_dist)
 
         self.center = np.array([(bounds[0]+bounds[1]) / 2, (bounds[2]+bounds[3]) / 2, (bounds[4]+bounds[5]) / 2], self.np_float_type)
-        self.size = self.np_float_type(max(max(bounds[1] - bounds[0], bounds[3] - bounds[2]), bounds[5] - bounds[4]) * 1.1)
+        self.size = self.np_float_type(max(max(bounds[1] - bounds[0], bounds[3] - bounds[2]), bounds[5] - bounds[4]) * self.bounds_expansion_factor)
 
         self.bisection_iters = bisection_iters
         self.enclosed = enclosed
@@ -65,6 +81,7 @@ class OcMesher:
             c_int32, POINTER(self.float_type),
             self.float_type, self.float_type, self.float_type,
             c_int32, c_int32, c_int32,
+            self.float_type, self.float_type, self.float_type,
         ], c_int32)
         register_func(self, dll, "fine_group", [], c_int32)
         register_func(self, dll, "fine_iteration", [POINTER(self.sdf_float_type)], c_int32)
@@ -99,7 +116,7 @@ class OcMesher:
     def kernel_caller(self, kernels, XYZ_all):
         n_XYZ = len(XYZ_all)
         if n_XYZ == 0: return np.zeros((0, len(kernels)), dtype=self.sdf_np_float_type)
-        step = 10000000
+        step = self.sdf_batch_size
         sdfs = []
         for i in range(0, n_XYZ, step):
             XYZ = XYZ_all[i: i+step]
@@ -125,7 +142,8 @@ class OcMesher:
                 self.n_cameras, self.AF(self.cameras),
                 self.inview_pixels_per_cube, 
                 self.inv_scale, self.min_dist,
-                self.coarse_count, self.memory_limit_mb, n_elements
+                self.coarse_count, self.memory_limit_mb, n_elements,
+                self.pixel_downsample_factor, self.memory_threshold_coarse, self.memory_threshold_fine,
             )
         # start considering sdf
         with Timer("coarse step part2"), tqdm(total=n_blocks) as pbar:

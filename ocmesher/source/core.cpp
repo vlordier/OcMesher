@@ -65,7 +65,10 @@ extern "C" {
         T min_dist,
         int coarse_count,
         int memory_limit_mb,
-        int n_elements
+        int n_elements,
+        T pixel_downsample_factor,
+        T memory_threshold_coarse,
+        T memory_threshold_fine
     ) {
         using namespace coarse;
         params::center = center;
@@ -78,6 +81,9 @@ extern "C" {
         params::coarse_count = coarse_count;
         params::memory_limit_mb = memory_limit_mb;
         params::n_elements = n_elements;
+        params::pixel_downsample_factor = pixel_downsample_factor;
+        params::memory_threshold_coarse = memory_threshold_coarse;
+        params::memory_threshold_fine = memory_threshold_fine;
         node root;
         mark_leaf_node(root);
         memset(root.c.coords, 0, 3 * sizeof(int));
@@ -266,11 +272,11 @@ extern "C" {
         cubes_set.clear();
 
         vector<bool> visible(cubes.size(), false);
-        T factor = 10;
+        T factor = params::pixel_downsample_factor;
         vector<T> canvas;
         for (int k = 0; k < n_cams; k++) {
-            T *current_cam = cams + k * (12 + 9 + 2);
-            int H = int(current_cam[21] / factor), W = int(current_cam[22] / factor);
+            T *current_cam = cams + k * CAM_DATA_STRIDE;
+            int H = int(current_cam[CAM_H_OFFSET] / factor), W = int(current_cam[CAM_W_OFFSET] / factor);
             if (simplify_occluded) {
                 canvas = vector<T>(H * W, std::numeric_limits<T>::infinity());
                 #pragma omp parallel for
@@ -379,7 +385,7 @@ extern "C" {
             final::bipolar_edges_vindices.push_back(vector<int>());
             final::in_view_tag.push_back(vector<bool>());
         }
-        final::vertices_cnt = vector<int>(5, 0);
+        final::vertices_cnt = vector<int>(params::n_elements, 0);
         final::bipolar_edges.push_back(vector<key_edge>());
         final::start_node = 0;
         final::gl = 0;
@@ -389,7 +395,7 @@ extern "C" {
                 int is = max(0, int_log(projected_size(final::visible_nodes_cube[i])) - final::gl);
                 total_nodes += max(0, cubex(1<<is) - cubex((1<<is)-2));
             }
-            if (((final::nodes.size()+total_nodes)>>20) * sizeof(node) < params::memory_limit_mb * 0.6) break;
+            if (((final::nodes.size()+total_nodes)>>20) * sizeof(node) < params::memory_limit_mb * params::memory_threshold_coarse) break;
             final::gl++;
         }
         return final::visible_nodes_cube.size();
@@ -397,7 +403,7 @@ extern "C" {
 
     int final_iteration() {
         using namespace final;
-        assert((nodes.size() >> 20) * sizeof(node) < params::memory_limit_mb * 0.8);
+        assert((nodes.size() >> 20) * sizeof(node) < params::memory_limit_mb * params::memory_threshold_fine);
         if (start_node == visible_nodes_cube.size()) {
             coarse::nodes.clear();
             solid::visible_set.clear();

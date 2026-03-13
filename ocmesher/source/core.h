@@ -12,11 +12,11 @@
 #include <cassert>
 #include <cmath>
 #include <cstring>
+#include <climits>
 #define mp std::make_pair
 #define pair std::pair
 #define max std::max
 #define min std::min
-#define INT_MAX 2147483647
 #define cubex(x) (x) * (x) * (x)
 #define cube_index(x, y, z, s) (x)*(s)*(s)+(y)*(s)+(z)
 #define xpp(p) p.first
@@ -42,6 +42,15 @@
 #define first_digit(j) (j&1)
 #define second_digit(j) ((j>>1)&1)
 #define make_int3(x,y,z) mp(x, mp(y, z))
+// Camera data layout constants
+static const int CAM_INV_POSE_SIZE = 12;   // 3x4 inverse pose matrix
+static const int CAM_K_SIZE = 9;           // 3x3 intrinsic matrix
+static const int CAM_HW_SIZE = 2;          // height, width
+static const int CAM_DATA_STRIDE = CAM_INV_POSE_SIZE + CAM_K_SIZE + CAM_HW_SIZE;
+static const int CAM_K_OFFSET = CAM_INV_POSE_SIZE;
+static const int CAM_H_OFFSET = CAM_INV_POSE_SIZE + CAM_K_SIZE;
+static const int CAM_W_OFFSET = CAM_H_OFFSET + 1;
+
 typedef double T;
 typedef float sdfT;
 
@@ -72,6 +81,7 @@ namespace params {
     int n_cams, memory_limit_mb, coarse_count, n_elements;
     T *center, *cams;
     T size, pixels_per_cube, occ_scale, min_dist;
+    T pixel_downsample_factor, memory_threshold_coarse, memory_threshold_fine;
 }
 
 void enumerate_vertices(vertex *v, node n) {
@@ -111,7 +121,7 @@ void compute_center(T *coords, cube v) {
 void projected_coords(cube c, int k, T *icoords, T *r) {
     using namespace params;
     T Pw[3], Pc[3];
-    T *current_cam = cams + k * (12 + 9 + 2);
+    T *current_cam = cams + k * CAM_DATA_STRIDE;
     compute_center(Pw, c);
     for (int i = 0; i < 3; i++) {
         Pc[i] = current_cam[i * 4 + 3];
@@ -127,7 +137,7 @@ void projected_coords(cube c, int k, T *icoords, T *r) {
         for (int i = 0; i < 3; i++) {
             icoords[i] = 0;
             for (int j = 0; j < 3; j++) {
-                icoords[i] += Pc[j] * current_cam[12 + i * 3 + j];
+                icoords[i] += Pc[j] * current_cam[CAM_K_OFFSET + i * 3 + j];
             }
         }
         icoords[0] /= icoords[2];
@@ -137,11 +147,11 @@ void projected_coords(cube c, int k, T *icoords, T *r) {
 
 T projected_size(cube c, int k) {
     using namespace params;
-    T *current_cam = cams + k * (12 + 9 + 2);
+    T *current_cam = cams + k * CAM_DATA_STRIDE;
     T r;
     projected_coords(c, k, NULL, &r);
-    T W = current_cam[22];
-    T pix_ang = atan(W / 2 / current_cam[12]) * 2 / W;
+    T W = current_cam[CAM_W_OFFSET];
+    T pix_ang = atan(W / 2 / current_cam[CAM_K_OFFSET]) * 2 / W;
     T ang = pix_ang * pixels_per_cube;
     return size / (1 << c.L) / r / ang;
 }
