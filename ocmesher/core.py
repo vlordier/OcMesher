@@ -3,6 +3,8 @@
 
 # Authors: Zeyu Ma
 
+"""Octree-based hierarchical 3D mesher driven by signed-distance functions."""
+
 from pathlib import Path
 
 import gin
@@ -29,6 +31,8 @@ from .utils.timer import Timer
 
 @gin.configurable
 class OcMesher:
+    """Octree-based mesher that extracts surfaces from SDF kernels."""
+
     def __init__(
         self,
         cameras,
@@ -44,7 +48,8 @@ class OcMesher:
         visible_relax_iter=2,
         coarse_count=500000,
     ):
-        dll = load_cdll(str(Path(__file__).parent.resolve()/"lib"/"core.so"))
+        """Initialise the mesher with camera intrinsics and bounds."""
+        dll = load_cdll(str(Path(__file__).parent.resolve() / "lib" / "core.so"))
         self.float_type = c_double
         self.np_float_type = np.float64
         self.AF = AsDouble
@@ -58,16 +63,22 @@ class OcMesher:
         self.n_cameras = len(cam_poses)
         self.cameras = np.zeros(23 * self.n_cameras, dtype=self.np_float_type)
         for i in range(self.n_cameras):
-            self.cameras[23 * i: 23 * (i+1)] = np.concatenate([
-                np.linalg.inv(cam_poses[i])[:3, :4].reshape(-1),
-                Ks[i].reshape(-1), [Hs[i]], [Ws[i]]
-            ]).astype(self.np_float_type)
+            self.cameras[23 * i : 23 * (i + 1)] = np.concatenate(
+                [
+                    np.linalg.inv(cam_poses[i])[:3, :4].reshape(-1),
+                    Ks[i].reshape(-1),
+                    [Hs[i]],
+                    [Ws[i]],
+                ]
+            ).astype(self.np_float_type)
 
         self.inview_pixels_per_cube = self.np_float_type(pixels_per_cube)
         self.inv_scale = self.np_float_type(inv_scale)
         self.min_dist = self.np_float_type(min_dist)
 
-        self.center = np.array([(bounds[0]+bounds[1]) / 2, (bounds[2]+bounds[3]) / 2, (bounds[4]+bounds[5]) / 2], self.np_float_type)
+        self.center = np.array(
+            [(bounds[0] + bounds[1]) / 2, (bounds[2] + bounds[3]) / 2, (bounds[4] + bounds[5]) / 2], self.np_float_type
+        )
         self.size = self.np_float_type(max(bounds[1] - bounds[0], bounds[3] - bounds[2], bounds[5] - bounds[4]) * 1.1)
 
         self.bisection_iters = bisection_iters
@@ -76,12 +87,24 @@ class OcMesher:
         self.visible_relax_iter = visible_relax_iter
         self.coarse_count = coarse_count
 
-        register_func(self, dll, "run_coarse", [
-            POINTER(self.float_type), self.float_type,
-            c_int32, POINTER(self.float_type),
-            self.float_type, self.float_type, self.float_type,
-            c_int32, c_int32, c_int32,
-        ], c_int32)
+        register_func(
+            self,
+            dll,
+            "run_coarse",
+            [
+                POINTER(self.float_type),
+                self.float_type,
+                c_int32,
+                POINTER(self.float_type),
+                self.float_type,
+                self.float_type,
+                self.float_type,
+                c_int32,
+                c_int32,
+                c_int32,
+            ],
+            c_int32,
+        )
         register_func(self, dll, "fine_group", [], c_int32)
         register_func(self, dll, "fine_iteration", [POINTER(self.sdf_float_type)], c_int32)
         register_func(self, dll, "fine_iteration_output", [POINTER(self.float_type)])
@@ -93,39 +116,71 @@ class OcMesher:
         register_func(self, dll, "final_iteration3_occluded", [POINTER(self.sdf_float_type)])
         register_func(self, dll, "final_remaining", [POINTER(c_int32)])
         register_func(self, dll, "get_verts_center", [c_int32, POINTER(self.float_type)])
-        register_func(self, dll, "update_verts", [c_int32, POINTER(self.sdf_float_type), POINTER(self.sdf_float_type), POINTER(self.float_type)])
+        register_func(
+            self,
+            dll,
+            "update_verts",
+            [c_int32, POINTER(self.sdf_float_type), POINTER(self.sdf_float_type), POINTER(self.float_type)],
+        )
         register_func(self, dll, "get_lr_verts", [c_int32, POINTER(self.float_type), POINTER(self.float_type)])
-        register_func(self, dll, "finalize_verts", [c_int32, POINTER(self.sdf_float_type), POINTER(self.sdf_float_type), POINTER(self.float_type)])
+        register_func(
+            self,
+            dll,
+            "finalize_verts",
+            [c_int32, POINTER(self.sdf_float_type), POINTER(self.sdf_float_type), POINTER(self.float_type)],
+        )
         register_func(self, dll, "construct_faces", [c_int32, POINTER(self.float_type), POINTER(c_int32)])
         register_func(self, dll, "get_extra_verts_center", [POINTER(self.float_type), POINTER(self.float_type)])
-        register_func(self, dll, "update_extra_verts", [
-            POINTER(self.sdf_float_type), POINTER(self.sdf_float_type),
-            POINTER(self.sdf_float_type), POINTER(self.sdf_float_type),
-            POINTER(self.float_type), POINTER(self.float_type),
-        ])
-        register_func(self, dll, "get_lr_extra_verts", [POINTER(self.float_type), POINTER(self.float_type), POINTER(self.float_type), POINTER(self.float_type)])
-        register_func(self, dll, "finalize_extra_verts", [
-            POINTER(self.sdf_float_type), POINTER(self.sdf_float_type), POINTER(self.float_type),
-            POINTER(self.sdf_float_type), POINTER(self.sdf_float_type), POINTER(self.float_type),
-        ])
+        register_func(
+            self,
+            dll,
+            "update_extra_verts",
+            [
+                POINTER(self.sdf_float_type),
+                POINTER(self.sdf_float_type),
+                POINTER(self.sdf_float_type),
+                POINTER(self.sdf_float_type),
+                POINTER(self.float_type),
+                POINTER(self.float_type),
+            ],
+        )
+        register_func(
+            self,
+            dll,
+            "get_lr_extra_verts",
+            [POINTER(self.float_type), POINTER(self.float_type), POINTER(self.float_type), POINTER(self.float_type)],
+        )
+        register_func(
+            self,
+            dll,
+            "finalize_extra_verts",
+            [
+                POINTER(self.sdf_float_type),
+                POINTER(self.sdf_float_type),
+                POINTER(self.float_type),
+                POINTER(self.sdf_float_type),
+                POINTER(self.sdf_float_type),
+                POINTER(self.float_type),
+            ],
+        )
         register_func(self, dll, "get_faces", [POINTER(c_int32)])
         register_func(self, dll, "get_in_view_tag", [c_int32, POINTER(c_bool)])
 
-
     def kernel_caller(self, kernels, XYZ_all):
+        """Evaluate SDF *kernels* at the given *XYZ_all* positions."""
         n_XYZ = len(XYZ_all)
         if n_XYZ == 0:
             return np.zeros((0, len(kernels)), dtype=self.sdf_np_float_type)
         step = 10000000
         sdfs = []
         for i in range(0, n_XYZ, step):
-            XYZ = XYZ_all[i: i+step]
+            XYZ = XYZ_all[i : i + step]
             sdfs_i = []
             out_bound = np.zeros(len(XYZ), dtype=bool)
             if self.enclosed:
                 for c in range(3):
-                    out_bound |= XYZ[:, c] <= self.bounds[c*2]
-                    out_bound |= XYZ[:, c] >= self.bounds[c*2+1]
+                    out_bound |= XYZ[:, c] <= self.bounds[c * 2]
+                    out_bound |= XYZ[:, c] >= self.bounds[c * 2 + 1]
             for kernel in kernels:
                 sdf = kernel(XYZ)
                 if self.enclosed:
@@ -135,15 +190,21 @@ class OcMesher:
         return np.concatenate(sdfs, 0)
 
     def __call__(self, kernels):
+        """Run the full coarse-to-fine meshing pipeline and return meshes."""
         n_elements = len(kernels)
         # octree only considering cameras, not sdf
         with Timer("coarse step part1"):
             n_blocks = self.run_coarse(
-                self.AF(self.center), self.size,
-                self.n_cameras, self.AF(self.cameras),
+                self.AF(self.center),
+                self.size,
+                self.n_cameras,
+                self.AF(self.cameras),
                 self.inview_pixels_per_cube,
-                self.inv_scale, self.min_dist,
-                self.coarse_count, self.memory_limit_mb, n_elements
+                self.inv_scale,
+                self.min_dist,
+                self.coarse_count,
+                self.memory_limit_mb,
+                n_elements,
             )
         # start considering sdf
         with Timer("coarse step part2"), tqdm(total=n_blocks) as pbar:
@@ -186,7 +247,7 @@ class OcMesher:
             meshes = []
             in_view_tags = []
             for e in range(n_elements):
-                k_e = kernels[e:e+1]
+                k_e = kernels[e : e + 1]
                 centers = np.zeros((nv[e], 3), dtype=self.np_float_type)
                 self.get_verts_center(e, self.AF(centers))
                 center_sdf = self.kernel_caller(k_e, centers)
@@ -214,22 +275,33 @@ class OcMesher:
                 edge_vertices_lr = AC(np.zeros((nve * 2, 3), dtype=self.np_float_type))
                 face_vertices_lr = AC(np.zeros((nvf * 4, 3), dtype=self.np_float_type))
                 self.update_extra_verts(
-                    POINTER(self.sdf_float_type)(), POINTER(self.sdf_float_type)(),
-                    POINTER(self.sdf_float_type)(), POINTER(self.sdf_float_type)(),
-                    self.AF(edge_vertices_lr), self.AF(face_vertices_lr),
+                    POINTER(self.sdf_float_type)(),
+                    POINTER(self.sdf_float_type)(),
+                    POINTER(self.sdf_float_type)(),
+                    POINTER(self.sdf_float_type)(),
+                    self.AF(edge_vertices_lr),
+                    self.AF(face_vertices_lr),
                 )
                 for _ in range(self.bisection_iters):
                     e_sdf = self.kernel_caller(k_e, edge_vertices_lr)
                     f_sdf = self.kernel_caller(k_e, face_vertices_lr)
                     self.update_extra_verts(
-                        self.sdf_AF(e_sdf), self.sdf_AF(f_sdf),
-                        self.sdf_AF(ecenter_sdf), self.sdf_AF(fcenter_sdf),
-                        self.AF(edge_vertices_lr), self.AF(face_vertices_lr),
+                        self.sdf_AF(e_sdf),
+                        self.sdf_AF(f_sdf),
+                        self.sdf_AF(ecenter_sdf),
+                        self.sdf_AF(fcenter_sdf),
+                        self.AF(edge_vertices_lr),
+                        self.AF(face_vertices_lr),
                     )
                 del edge_vertices_c, face_vertices_c, ecenter_sdf, fcenter_sdf
                 edge_vertices_r = AC(np.zeros((nve * 2, 3), dtype=self.np_float_type))
                 face_vertices_r = AC(np.zeros((nvf * 4, 3), dtype=self.np_float_type))
-                self.get_lr_extra_verts(self.AF(edge_vertices_lr), self.AF(edge_vertices_r), self.AF(face_vertices_lr), self.AF(face_vertices_r))
+                self.get_lr_extra_verts(
+                    self.AF(edge_vertices_lr),
+                    self.AF(edge_vertices_r),
+                    self.AF(face_vertices_lr),
+                    self.AF(face_vertices_r),
+                )
                 esdf_l = self.kernel_caller(k_e, edge_vertices_lr)
                 esdf_r = self.kernel_caller(k_e, edge_vertices_r)
                 fsdf_l = self.kernel_caller(k_e, face_vertices_lr)
@@ -237,7 +309,14 @@ class OcMesher:
                 del edge_vertices_lr, edge_vertices_r, face_vertices_lr, face_vertices_r
                 edge_vertices = np.zeros((nve, 3), dtype=self.np_float_type)
                 face_vertices = np.zeros((nvf, 3), dtype=self.np_float_type)
-                self.finalize_extra_verts(self.sdf_AF(esdf_l), self.sdf_AF(esdf_r), self.AF(edge_vertices), self.sdf_AF(fsdf_l), self.sdf_AF(fsdf_r), self.AF(face_vertices))
+                self.finalize_extra_verts(
+                    self.sdf_AF(esdf_l),
+                    self.sdf_AF(esdf_r),
+                    self.AF(edge_vertices),
+                    self.sdf_AF(fsdf_l),
+                    self.sdf_AF(fsdf_r),
+                    self.AF(face_vertices),
+                )
                 del esdf_l, esdf_r, fsdf_l, fsdf_r
                 faces = AC(np.zeros((nf, 3), dtype=np.int32))
                 self.get_faces(AsInt(faces))
