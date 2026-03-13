@@ -1,3 +1,6 @@
 __pycache__
 lib
 results
+*.egg-info/
+dist/
+build/
