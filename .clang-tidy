@@ -1,0 +1,121 @@
+---
+# Enabled checks: naming, bugprone, performance, modernize, readability, cppcoreguidelines
+Checks: >
+  -*,
+  bugprone-*,
+  performance-*,
+  modernize-*,
+  readability-identifier-naming,
+  readability-braces-around-statements,
+  readability-const-return-type,
+  readability-container-size-empty,
+  readability-delete-null-pointer,
+  readability-implicit-bool-conversion,
+  readability-inconsistent-declaration-parameter-name,
+  readability-isolate-declaration,
+  readability-magic-numbers,
+  readability-misleading-indentation,
+  readability-misplaced-array-index,
+  readability-named-parameter,
+  readability-non-const-parameter,
+  readability-qualified-auto,
+  readability-redundant-access-specifiers,
+  readability-redundant-control-flow,
+  readability-redundant-declaration,
+  readability-redundant-member-init,
+  readability-redundant-preprocessor,
+  readability-redundant-smartptr-get,
+  readability-redundant-string-cstr,
+  readability-redundant-string-init,
+  readability-simplify-boolean-expr,
+  readability-simplify-subscript-expr,
+  readability-static-accessed-through-instance,
+  readability-static-definition-in-anonymous-namespace,
+  readability-string-compare,
+  readability-uniqueptr-delete-release,
+  readability-use-anyofallof,
+  cppcoreguidelines-avoid-c-arrays,
+  cppcoreguidelines-avoid-goto,
+  cppcoreguidelines-avoid-magic-numbers,
+  cppcoreguidelines-c-copy-assignment-signature,
+  cppcoreguidelines-init-variables,
+  cppcoreguidelines-interfaces-global-init,
+  cppcoreguidelines-macro-usage,
+  cppcoreguidelines-narrowing-conversions,
+  cppcoreguidelines-no-malloc,
+  cppcoreguidelines-owning-memory,
+  cppcoreguidelines-prefer-member-initializer,
+  cppcoreguidelines-pro-bounds-array-to-pointer-decay,
+  cppcoreguidelines-pro-bounds-constant-array-index,
+  cppcoreguidelines-pro-bounds-pointer-arithmetic,
+  cppcoreguidelines-pro-type-const-cast,
+  cppcoreguidelines-pro-type-cstyle-cast,
+  cppcoreguidelines-pro-type-member-init,
+  cppcoreguidelines-pro-type-reinterpret-cast,
+  cppcoreguidelines-pro-type-static-cast-downcast,
+  cppcoreguidelines-pro-type-union-access,
+  cppcoreguidelines-pro-type-vararg,
+  cppcoreguidelines-slicing,
+  cppcoreguidelines-special-member-functions
+
+# Treat warnings as errors in CI (set via --warnings-as-errors in CI)
+WarningsAsErrors: ''
+
+# Header filter: only check our own headers
+HeaderFilterRegex: 'ocmesher/source/.*'
+
+# Check options for identifier naming
+CheckOptions:
+  # Variable naming: lower_case
+  - key: readability-identifier-naming.VariableCase
+    value: lower_case
+
+  # Member variables: m_ prefix + lower_case
+  - key: readability-identifier-naming.MemberPrefix
+    value: m_
+  - key: readability-identifier-naming.MemberCase
+    value: lower_case
+
+  # Class and struct names: CamelCase
+  - key: readability-identifier-naming.ClassCase
+    value: CamelCase
+  - key: readability-identifier-naming.StructCase
+    value: CamelCase
+
+  # Function names: camelBack
+  - key: readability-identifier-naming.FunctionCase
+    value: camelBack
+
+  # Parameter names: lower_case
+  - key: readability-identifier-naming.ParameterCase
+    value: lower_case
+
+  # Namespace names: lower_case
+  - key: readability-identifier-naming.NamespaceCase
+    value: lower_case
+
+  # Constants: UPPER_CASE or CamelCase
+  - key: readability-identifier-naming.ConstantCase
+    value: UPPER_CASE
+
+  # Enum names: CamelCase
+  - key: readability-identifier-naming.EnumCase
+    value: CamelCase
+
+  # Enum constant names: UPPER_CASE
+  - key: readability-identifier-naming.EnumConstantCase
+    value: UPPER_CASE
+
+  # Type alias: CamelCase
+  - key: readability-identifier-naming.TypeAliasCase
+    value: CamelCase
+
+  # Magic numbers: allow common ones
+  - key: readability-magic-numbers.IgnoredIntegerValues
+    value: '0;1;2;3;4;6;7;8;12;16'
+  - key: readability-magic-numbers.IgnoredFloatingPointValues
+    value: '0.0;1.0;0.5;0.6;0.8;2.0;10.0'
+  - key: cppcoreguidelines-avoid-magic-numbers.IgnoredIntegerValues
+    value: '0;1;2;3;4;6;7;8;12;16'
+  - key: cppcoreguidelines-avoid-magic-numbers.IgnoredFloatingPointValues
+    value: '0.0;1.0;0.5;0.6;0.8;2.0;10.0'
