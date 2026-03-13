@@ -4,18 +4,33 @@
 # Authors: Zeyu Ma
 
 from pathlib import Path
-import sys
+
 import gin
 import numpy as np
 import trimesh
 from tqdm import tqdm
 
-from .utils.interface import AC, POINTER, AsDouble, AsFloat, AsInt, AsBool, c_bool, c_double, c_float, c_int32, load_cdll, register_func
+from .utils.interface import (
+    AC,
+    POINTER,
+    AsBool,
+    AsDouble,
+    AsFloat,
+    AsInt,
+    c_bool,
+    c_double,
+    c_float,
+    c_int32,
+    load_cdll,
+    register_func,
+)
 from .utils.timer import Timer
+
 
 @gin.configurable
 class OcMesher:
-    def __init__(self,
+    def __init__(
+        self,
         cameras,
         bounds,
         pixels_per_cube=8,
@@ -23,6 +38,7 @@ class OcMesher:
         min_dist=1,
         memory_limit_mb=1000,
         bisection_iters=15,
+        *,
         enclosed=True,
         simplify_occluded=True,
         visible_relax_iter=2,
@@ -46,13 +62,13 @@ class OcMesher:
                 np.linalg.inv(cam_poses[i])[:3, :4].reshape(-1),
                 Ks[i].reshape(-1), [Hs[i]], [Ws[i]]
             ]).astype(self.np_float_type)
-        
+
         self.inview_pixels_per_cube = self.np_float_type(pixels_per_cube)
         self.inv_scale = self.np_float_type(inv_scale)
         self.min_dist = self.np_float_type(min_dist)
 
         self.center = np.array([(bounds[0]+bounds[1]) / 2, (bounds[2]+bounds[3]) / 2, (bounds[4]+bounds[5]) / 2], self.np_float_type)
-        self.size = self.np_float_type(max(max(bounds[1] - bounds[0], bounds[3] - bounds[2]), bounds[5] - bounds[4]) * 1.1)
+        self.size = self.np_float_type(max(bounds[1] - bounds[0], bounds[3] - bounds[2], bounds[5] - bounds[4]) * 1.1)
 
         self.bisection_iters = bisection_iters
         self.enclosed = enclosed
@@ -98,24 +114,26 @@ class OcMesher:
 
     def kernel_caller(self, kernels, XYZ_all):
         n_XYZ = len(XYZ_all)
-        if n_XYZ == 0: return np.zeros((0, len(kernels)), dtype=self.sdf_np_float_type)
+        if n_XYZ == 0:
+            return np.zeros((0, len(kernels)), dtype=self.sdf_np_float_type)
         step = 10000000
         sdfs = []
         for i in range(0, n_XYZ, step):
             XYZ = XYZ_all[i: i+step]
             sdfs_i = []
+            out_bound = np.zeros(len(XYZ), dtype=bool)
             if self.enclosed:
-                out_bound = np.zeros(len(XYZ), dtype=bool)
                 for c in range(3):
                     out_bound |= XYZ[:, c] <= self.bounds[c*2]
                     out_bound |= XYZ[:, c] >= self.bounds[c*2+1]
             for kernel in kernels:
                 sdf = kernel(XYZ)
-                if self.enclosed: sdf[out_bound] = 1
+                if self.enclosed:
+                    sdf[out_bound] = 1
                 sdfs_i.append(sdf)
             sdfs.append(np.stack(sdfs_i, -1).astype(self.sdf_np_float_type))
         return np.concatenate(sdfs, 0)
-    
+
     def __call__(self, kernels):
         n_elements = len(kernels)
         # octree only considering cameras, not sdf
@@ -123,7 +141,7 @@ class OcMesher:
             n_blocks = self.run_coarse(
                 self.AF(self.center), self.size,
                 self.n_cameras, self.AF(self.cameras),
-                self.inview_pixels_per_cube, 
+                self.inview_pixels_per_cube,
                 self.inv_scale, self.min_dist,
                 self.coarse_count, self.memory_limit_mb, n_elements
             )
@@ -131,7 +149,8 @@ class OcMesher:
         with Timer("coarse step part2"), tqdm(total=n_blocks) as pbar:
             while True:
                 inc = self.fine_group()
-                if inc == 0: break
+                if inc == 0:
+                    break
                 pbar.update(inc)
                 n = self.fine_iteration(POINTER(self.sdf_float_type)())
                 while n > 0:
@@ -146,7 +165,8 @@ class OcMesher:
             nv = np.zeros(1, dtype=np.int32)
             while True:
                 n = self.final_iteration(AsInt(nv))
-                if n == 0: break
+                if n == 0:
+                    break
                 positions = AC(np.zeros((n, 3), dtype=self.np_float_type))
                 self.final_iteration2(self.AF(positions))
                 sdf = AC(self.kernel_caller(kernels, positions))
@@ -161,7 +181,7 @@ class OcMesher:
             nv = np.zeros(n_elements, dtype=np.int32)
             self.final_remaining(AsInt(nv))
             del positions, sdf
-        
+
         with Timer("construct mesh"):
             meshes = []
             in_view_tags = []

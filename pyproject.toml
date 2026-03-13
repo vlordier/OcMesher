@@ -1,0 +1,116 @@
+[project]
+name = "ocmesher"
+version = "1.0"
+description = "Octree-based hierarchical 3D mesher from signed distance functions"
+requires-python = ">=3.10"
+dependencies = [
+    "numpy",
+    "vnoise",
+    "trimesh",
+    "gin-config",
+    "tqdm",
+    "psutil",
+]
+
+# ---------------------------------------------------------------------------
+# Ruff – tight lint & format configuration (ignoring E501 line-length)
+# ---------------------------------------------------------------------------
+[tool.ruff]
+target-version = "py310"
+line-length = 120
+
+[tool.ruff.lint]
+select = ["ALL"]
+ignore = [
+    # -- Line length (explicitly requested to ignore) -----------------------
+    "E501",
+
+    # -- Incompatible rule pairs --------------------------------------------
+    "D203",   # conflicts with D211 (no-blank-line-before-class)
+    "D213",   # conflicts with D212 (multi-line-summary-first-line)
+
+    # -- Docstring rules (too invasive for existing codebase) ---------------
+    "D100",   # missing docstring in public module
+    "D101",   # missing docstring in public class
+    "D102",   # missing docstring in public method
+    "D103",   # missing docstring in public function
+    "D104",   # missing docstring in public package
+    "D105",   # missing docstring in magic method
+    "D107",   # missing docstring in __init__
+
+    # -- Type-annotation rules (handled by pyrefly / ty instead) ------------
+    "ANN",
+
+    # -- Print statements (needed for CLI / progress output) ----------------
+    "T201",
+
+    # -- Module naming (project name is intentional) ------------------------
+    "N999",
+
+    # -- Formatter-conflicting rules ----------------------------------------
+    "COM812",
+    "ISC001",
+
+    # -- Too-many-arguments / too-many-statements (scientific code) ---------
+    "PLR0913",
+    "PLR0915",
+]
+
+[tool.ruff.lint.per-file-ignores]
+"demo.py" = [
+    "INP001",   # implicit namespace package (demo script, not a package)
+]
+"__init__.py" = [
+    "INP001",   # implicit namespace package (root init)
+]
+
+[tool.ruff.lint.isort]
+known-first-party = ["ocmesher"]
+
+[tool.ruff.lint.flake8-boolean-trap]
+extend-allowed-calls = ["gin.configurable"]
+
+[tool.ruff.lint.pep8-naming]
+classmethod-decorators = ["gin.configurable"]
+# Allow uppercase in domain-specific variable names (matrices, coordinates)
+ignore-names = [
+    "AsInt",
+    "AsDouble",
+    "AsFloat",
+    "AsBool",
+    "AC",
+    "XYZ*",
+    "Ks",
+    "Hs",
+    "Ws",
+    "n_XYZ",
+]
+
+# ---------------------------------------------------------------------------
+# Pyrefly – type-checking configuration
+# ---------------------------------------------------------------------------
+[tool.pyrefly]
+project_includes = ["ocmesher", "demo.py"]
+project_excludes = ["ocmesher/source"]
+python_version = "3.10"
+search_path = ["."]
+
+[tool.pyrefly.errors]
+# Attributes set dynamically via setattr in register_func (ctypes binding)
+missing-attribute = false
+# demo.py calls OcMesher with bounds as a gin-configurable default
+missing-argument = false
+
+# ---------------------------------------------------------------------------
+# ty (Astral) – type-checking configuration
+# ---------------------------------------------------------------------------
+[tool.ty]
+
+[tool.ty.environment]
+python-version = "3.12"
+
+[tool.ty.rules]
+# Dynamic attributes set via setattr in register_func are unresolvable
+unresolved-attribute = "ignore"
+# demo.py calls OcMesher with bounds via gin-config default
+missing-argument = "ignore"

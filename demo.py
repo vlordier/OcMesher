@@ -3,12 +3,13 @@
 
 # Authors: Zeyu Ma
 
-import os
-import sys
+from pathlib import Path
+
 import numpy as np
+import vnoise
+
 from ocmesher import OcMesher
 
-import vnoise
 noise = vnoise.Noise()
 
 def f(XYZ):
@@ -34,5 +35,5 @@ Ws = [1280]
 
 mesher = OcMesher((cam_poses, Ks, Hs, Ws), pixels_per_cube=16)
 meshes, in_view_tags = mesher([f])
-os.makedirs("results", exist_ok=True)
+Path("results").mkdir(parents=True, exist_ok=True)
 meshes[0].export("results/demo.obj")

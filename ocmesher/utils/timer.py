@@ -3,35 +3,35 @@
 
 # Authors: Zeyu Ma
 
-from datetime import datetime
 import os
+from datetime import datetime, timezone
 
 import psutil
 
 
 class Timer:
 
-    def __init__(self, desc, disable_timer=False):
+    def __init__(self, desc, *, disable_timer=False):
         self.disable_timer = disable_timer
-        if self.disable_timer:    
+        if self.disable_timer:
             return
-        self.name = f'[{desc}]'
+        self.name = f"[{desc}]"
 
     def __enter__(self):
         if self.disable_timer:
             return
-        self.start = datetime.now()
+        self.start = datetime.now(tz=timezone.utc)
 
 
     def __exit__(self, exc_type, exc_val, traceback):
         if self.disable_timer:
             return
-        self.end = datetime.now()
+        self.end = datetime.now(tz=timezone.utc)
         self.duration = self.end - self.start # timedelta
         if exc_type is None:
             process = psutil.Process(os.getpid())
-            print(f'{self.name} finished in {str(self.duration)} with memory usage {process.memory_info().rss / 1024**3} GB')
+            print(f"{self.name} finished in {self.duration!s} with memory usage {process.memory_info().rss / 1024**3} GB")
         else:
-            print(f'{self.name} failed with {exc_type}')
+            print(f"{self.name} failed with {exc_type}")
 
 
