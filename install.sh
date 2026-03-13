@@ -29,3 +29,4 @@ alias gx2="${compiler} \$LDFLAGS -O3 -shared -fopenmp "
 mkdir -p ocmesher/lib
 gx1 -o ocmesher/lib/core.o ocmesher/source/core.cpp
 gx2 -o ocmesher/lib/core.so ocmesher/lib/core.o
+rm -f ocmesher/lib/core.o
