@@ -3,6 +3,8 @@
 
 # Authors: Zeyu Ma
 
+"""Ctypes helpers for loading shared libraries and converting numpy arrays to C pointers."""
+
 import os
 import sys
 from ctypes import CDLL, POINTER, RTLD_LOCAL, c_bool, c_double, c_float, c_int32
