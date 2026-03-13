@@ -45,7 +45,7 @@ class OcMesher:
                 np.linalg.inv(cam_poses[i])[:3, :4].reshape(-1),
                 Ks[i].reshape(-1), [Hs[i]], [Ws[i]]
             ]).astype(self.np_float_type)
-        
+
         self.inview_pixels_per_cube = self.np_float_type(pixels_per_cube)
         self.inv_scale = self.np_float_type(inv_scale)
         self.min_dist = self.np_float_type(min_dist)
@@ -114,7 +114,7 @@ class OcMesher:
                 sdfs_i.append(sdf)
             sdfs.append(np.stack(sdfs_i, -1).astype(self.sdf_np_float_type))
         return np.concatenate(sdfs, 0)
-    
+
     def __call__(self, kernels):
         n_elements = len(kernels)
         # octree only considering cameras, not sdf
@@ -122,7 +122,7 @@ class OcMesher:
             n_blocks = self.run_coarse(
                 self.AF(self.center), self.size,
                 self.n_cameras, self.AF(self.cameras),
-                self.inview_pixels_per_cube, 
+                self.inview_pixels_per_cube,
                 self.inv_scale, self.min_dist,
                 self.coarse_count, self.memory_limit_mb, n_elements
             )
@@ -160,7 +160,7 @@ class OcMesher:
             nv = np.zeros(n_elements, dtype=np.int32)
             self.final_remaining(AsInt(nv))
             del positions, sdf
-        
+
         with Timer("construct mesh"):
             meshes = []
             in_view_tags = []

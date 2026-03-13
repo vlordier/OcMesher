@@ -15,7 +15,7 @@ class Timer:
 
     def __init__(self, desc: str, disable_timer: bool = False) -> None:
         self.disable_timer = disable_timer
-        if self.disable_timer:    
+        if self.disable_timer:
             return
         self.name = f'[{desc}]'
 
