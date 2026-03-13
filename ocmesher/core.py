@@ -42,7 +42,6 @@ class OcMesher:
         min_dist=1,
         memory_limit_mb=1000,
         bisection_iters=15,
-        *,
         enclosed=True,
         simplify_occluded=True,
         visible_relax_iter=2,

@@ -49,10 +49,11 @@ ignore = [
 "__init__.py" = [
     "INP001",   # implicit namespace package
     "N999",     # module name matches project, intentional
-    "D104",     # package docstring not required at root
+    "D104",     # empty __init__.py marker files need no docstring
 ]
 # core.py – complex scientific code with many C-bindings
 "ocmesher/core.py" = [
+    "FBT002",   # boolean default positional args (API backwards-compat)
     "PLR0913",  # too-many-arguments (ctypes register_func calls)
     "PLR0915",  # too-many-statements (__call__ orchestrates meshing)
     "T201",     # print statements for progress output
