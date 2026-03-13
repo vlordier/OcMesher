@@ -16,14 +16,18 @@ from numpy import ascontiguousarray as AC
 def AsInt(x: np.ndarray) -> "POINTER(c_int32)":
     return x.ctypes.data_as(POINTER(c_int32))
 
+
 def AsDouble(x: np.ndarray) -> "POINTER(c_double)":
     return x.ctypes.data_as(POINTER(c_double))
+
 
 def AsFloat(x: np.ndarray) -> "POINTER(c_float)":
     return x.ctypes.data_as(POINTER(c_float))
 
+
 def AsBool(x: np.ndarray) -> "POINTER(c_bool)":
     return x.ctypes.data_as(POINTER(c_bool))
+
 
 def register_func(me: Any, dll: CDLL, name: str, argtypes: Optional[list] = None, restype: Any = None, caller_name: Optional[str] = None) -> None:
     if argtypes is None:
@@ -34,6 +38,7 @@ def register_func(me: Any, dll: CDLL, name: str, argtypes: Optional[list] = None
     func = getattr(me, caller_name)
     func.argtypes = argtypes
     func.restype = restype
+
 
 def load_cdll(path: str) -> CDLL:
     return CDLL(os.path.join(sys.path[-1], path), mode=RTLD_LOCAL)
