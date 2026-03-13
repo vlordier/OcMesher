@@ -57,9 +57,12 @@ This example uses one camera and the Perlin Noise from the Python library `vnois
 
 ## Validation
 
-Install the validation dependencies:
+Before running validation, ensure that the native extension is built (this is done by `install.sh` in the Standalone Installation section).
+
+Install the validation dependencies (from the repository root):
 
 ```
+bash install.sh
 pip install -r requirements-dev.txt
 ```
 
