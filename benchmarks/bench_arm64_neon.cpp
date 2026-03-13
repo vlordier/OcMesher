@@ -43,7 +43,7 @@ static BenchStats compute_stats(std::vector<double> &times) {
     s.median_ms = times[times.size() / 2];
     double sum  = std::accumulate(times.begin(), times.end(), 0.0);
     s.mean_ms   = sum / s.samples;
-    double sq   = 0;
+    double sq   = 0.0;
     for (double t : times) sq += (t - s.mean_ms) * (t - s.mean_ms);
     s.stddev_ms = std::sqrt(sq / s.samples);
     return s;
