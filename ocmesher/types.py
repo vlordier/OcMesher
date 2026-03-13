@@ -27,11 +27,20 @@ class Bounds:
     z_min: float
     z_max: float
 
+    def __post_init__(self) -> None:
+        """Validate that each min is strictly less than its corresponding max."""
+        for axis in ("x", "y", "z"):
+            lo = getattr(self, f"{axis}_min")
+            hi = getattr(self, f"{axis}_max")
+            if lo >= hi:
+                msg = f"{axis}_min ({lo}) must be strictly less than {axis}_max ({hi})"
+                raise ValueError(msg)
+
     @classmethod
     def from_sequence(cls, seq: Sequence[float]) -> Bounds:
         """Create from flat [x_min, x_max, y_min, y_max, z_min, z_max]."""
-        if len(seq) < 6:
-            msg = f"Expected at least 6 values, got {len(seq)}"
+        if len(seq) != 6:
+            msg = f"Expected exactly 6 values, got {len(seq)}"
             raise ValueError(msg)
         return cls(
             x_min=float(seq[0]),
@@ -85,6 +94,16 @@ class CameraSet:
         if not (len(self.intrinsics) == len(self.heights) == len(self.widths) == n):
             msg = "All camera arrays must have the same length"
             raise ValueError(msg)
+        for i, pose in enumerate(self.poses):
+            arr = np.asarray(pose)
+            if arr.shape != (4, 4):
+                msg = f"poses[{i}] must be (4, 4), got {arr.shape}"
+                raise ValueError(msg)
+        for i, k in enumerate(self.intrinsics):
+            arr = np.asarray(k)
+            if arr.shape != (3, 3):
+                msg = f"intrinsics[{i}] must be (3, 3), got {arr.shape}"
+                raise ValueError(msg)
 
     @classmethod
     def from_tuple(

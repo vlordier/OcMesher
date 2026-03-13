@@ -8,7 +8,7 @@ import os
 import numpy as np
 import vnoise
 
-from ocmesher import CameraSet, OcMesher
+from ocmesher import Bounds, CameraSet, OcMesher
 
 noise = vnoise.Noise()
 
@@ -37,7 +37,8 @@ cameras = CameraSet(
     widths=[1280],
 )
 
-mesher = OcMesher(cameras, pixels_per_cube=16)
+bounds = Bounds(x_min=-10, x_max=10, y_min=-10, y_max=10, z_min=-5, z_max=5)
+mesher = OcMesher(cameras, bounds=bounds, pixels_per_cube=16)
 meshes, in_view_tags = mesher([f])
 os.makedirs("results", exist_ok=True)
 meshes[0].export("results/demo.obj")
