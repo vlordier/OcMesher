@@ -67,10 +67,7 @@ extern "C" {
         int memory_limit_mb,
         int n_elements
     ) {
-        assert(center != NULL && "center pointer must not be NULL");
-        assert(cams != NULL && "cams pointer must not be NULL");
-        assert(n_cams > 0 && "n_cams must be positive");
-        assert(n_elements > 0 && "n_elements must be positive");
+        if (center == NULL || cams == NULL || n_cams <= 0 || n_elements <= 0) return -1;
         using namespace coarse;
         params::center = center;
         params::size = size;
@@ -1123,9 +1120,9 @@ extern "C" {
         }
         {
             vector<cube>().swap(solid::cubes);
-            solid::cubes_set.clear();
-            solid::visible_set.clear();
-            solid::occluded_set.clear();
+            std::unordered_set<key_cube, PairHash>().swap(solid::cubes_set);
+            std::unordered_set<key_cube, PairHash>().swap(solid::visible_set);
+            std::unordered_set<key_cube, PairHash>().swap(solid::occluded_set);
         }
         {
             final::new_nodes = queue<int>();
@@ -1136,11 +1133,11 @@ extern "C" {
             final::start_node = 0;
             final::end_node = 0;
             final::size0 = 0;
-            final::vertices.clear();
+            std::unordered_map<key_cube, int, PairHash>().swap(final::vertices);
             vector<int>().swap(final::bipolar_edges_s);
             vector<vector<key_edge> >().swap(final::bipolar_edges);
             vector<vector<int> >().swap(final::bipolar_edges_vindices);
-            final::bipolar_edges_vertices.clear();
+            std::unordered_map<pair<int, key_cube>, int, PairHash>().swap(final::bipolar_edges_vertices);
             vector<int>().swap(final::vertices_cnt);
             vector<vector<key_cube> >().swap(final::bipolar_edges_vertices_vector);
             vector<vector<computed_vertex> >().swap(final::bipolar_edges_computed_vertices);
@@ -1154,7 +1151,7 @@ extern "C" {
             vector<bool>().swap(computing::edge_vertices_in_view_tag);
             vector<pair<int, computed_vertex> >().swap(computing::face_vertices);
             vector<bool>().swap(computing::face_vertices_in_view_tag);
-            computing::face_vertices_map.clear();
+            std::unordered_map<pair<int, int>, int, PairHash>().swap(computing::face_vertices_map);
         }
         params::center = NULL;
         params::cams = NULL;
