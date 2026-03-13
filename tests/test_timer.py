@@ -153,7 +153,7 @@ class TestTimerEdgeCases:
         with Timer("测试 タイマー"):
             pass
         captured = capsys.readouterr()
-        assert "[測試 タイマー]" in captured.out or "[测试 タイマー]" in captured.out
+        assert "[测试 タイマー]" in captured.out
 
     def test_sequential_timers(self, capsys):
         """Multiple sequential timers should each produce output."""

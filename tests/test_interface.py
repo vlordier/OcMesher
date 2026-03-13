@@ -219,6 +219,7 @@ class TestAsBool:
         assert ptr[0] is False
 
     def test_single_element_true(self):
+        """AsBool with single True element."""
         arr = np.array([True], dtype=bool)
         ptr = AsBool(arr)
         assert ptr[0] is True
@@ -338,7 +339,7 @@ class TestRegisterFunc:
 
         register_func(me, dll, "my_func")
 
-        assert me.my_func is not "old_value"
+        assert me.my_func != "old_value"
 
     def test_complex_argtypes(self):
         """register_func with pointer and mixed argtypes."""
