@@ -81,6 +81,9 @@ extern "C" {
         params::coarse_count = coarse_count;
         params::memory_limit_mb = memory_limit_mb;
         params::n_elements = n_elements;
+        assert(pixel_downsample_factor > 0);
+        assert(memory_threshold_coarse > 0 && memory_threshold_coarse <= 1);
+        assert(memory_threshold_fine > 0 && memory_threshold_fine <= 1);
         params::pixel_downsample_factor = pixel_downsample_factor;
         params::memory_threshold_coarse = memory_threshold_coarse;
         params::memory_threshold_fine = memory_threshold_fine;

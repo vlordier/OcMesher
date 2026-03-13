@@ -3,6 +3,11 @@
 
 # Authors: Zeyu Ma
 
+"""Demo script that meshes a Perlin noise terrain with a single camera view.
+
+Outputs the resulting mesh to ``results/demo.obj``.
+"""
+
 import argparse
 import os
 
