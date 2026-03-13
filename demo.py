@@ -9,10 +9,12 @@ Outputs the resulting mesh to ``results/demo.obj``.
 """
 
 import os
+
 import numpy as np
+import vnoise
+
 from ocmesher import OcMesher
 
-import vnoise
 noise = vnoise.Noise()
 
 def f(XYZ):
