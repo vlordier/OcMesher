@@ -3,13 +3,10 @@
 
 # Authors: Zeyu Ma
 
-import logging
 import os
 from datetime import datetime
 
 import psutil
-
-logger = logging.getLogger(__name__)
 
 
 class Timer:

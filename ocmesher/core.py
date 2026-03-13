@@ -3,7 +3,6 @@
 
 # Authors: Zeyu Ma
 
-import logging
 from pathlib import Path
 
 import gin
@@ -13,8 +12,6 @@ from tqdm import tqdm
 
 from .utils.interface import AC, POINTER, AsDouble, AsFloat, AsInt, AsBool, c_bool, c_double, c_float, c_int32, load_cdll, register_func
 from .utils.timer import Timer
-
-logger = logging.getLogger(__name__)
 
 CAMERA_DATA_STRIDE = 23
 
