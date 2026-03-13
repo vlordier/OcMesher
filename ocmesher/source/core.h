@@ -16,44 +16,45 @@
 #include <set>
 #include <vector>
 
-typedef double T;
-typedef float sdfT;
+using T = double;
+using sdfT = float; // NOLINT(readability-identifier-naming)
 
 struct ComputedVertex {
-    T m_c[3], m_l, m_r;
+    T m_c[3], m_l, m_r; // NOLINT(modernize-avoid-c-arrays)
 };
 
 struct Cube {
-    int m_coords[3], m_l;
+    int m_coords[3], m_l; // NOLINT(modernize-avoid-c-arrays)
 };
 
-typedef Cube Vertex;
-typedef std::pair<int, std::pair<int, int>> Int3;
-typedef std::pair<int, std::pair<int, std::pair<int, int>>> KeyCube;
-typedef std::pair<int, KeyCube> KeyEdge;
+using Vertex = Cube;
+using Int3 = std::pair<int, std::pair<int, int>>;
+using KeyCube = std::pair<int, std::pair<int, std::pair<int, int>>>;
+using KeyEdge = std::pair<int, KeyCube>;
 
 struct Node {
     Cube m_c;
-    int m_nxts[8];
+    int m_nxts[8]; // NOLINT(modernize-avoid-c-arrays)
 };
 
-inline int intLog(T x) {
+inline auto intLog(T x) -> int { // NOLINT(modernize-use-trailing-return-type)
     return static_cast<int>(std::max(T(0), static_cast<T>(std::ceil(std::log2(x)))));
 }
 
-inline int cubex(int x) {
+inline auto cubex(int x) -> int { // NOLINT(modernize-use-trailing-return-type)
     return x * x * x;
 }
 
-inline int cubeIndex(int x, int y, int z, int s) {
+inline auto cubeIndex(int x, int y, int z,
+                      int s) -> int { // NOLINT(modernize-use-trailing-return-type)
     return x * s * s + y * s + z;
 }
 
-inline Int3 makeInt3(int x, int y, int z) {
+inline auto makeInt3(int x, int y, int z) -> Int3 { // NOLINT(modernize-use-trailing-return-type)
     return std::make_pair(x, std::make_pair(y, z));
 }
 
-inline KeyCube cubeToKey(const Cube& c) {
+inline auto cubeToKey(const Cube& c) -> KeyCube { // NOLINT(modernize-use-trailing-return-type)
     return std::make_pair(c.m_coords[0],
                           std::make_pair(c.m_coords[1], std::make_pair(c.m_coords[2], c.m_l)));
 }
@@ -70,7 +71,7 @@ inline void assign(int& x, int y, int a, int b) {
     x = y * a + b;
 }
 
-inline bool isLeafNode(const Node& n) {
+inline auto isLeafNode(const Node& n) -> bool { // NOLINT(modernize-use-trailing-return-type)
     return n.m_nxts[0] <= -2;
 }
 
@@ -82,19 +83,19 @@ inline void markGridNode(Node& n, int gl) {
     n.m_nxts[0] = -2 - gl;
 }
 
-inline int gridNodeLevel(const Node& n) {
+inline auto gridNodeLevel(const Node& n) -> int { // NOLINT(modernize-use-trailing-return-type)
     return -n.m_nxts[0] - 2;
 }
 
-inline bool isRegular(const Cube& c) {
+inline auto isRegular(const Cube& c) -> bool { // NOLINT(modernize-use-trailing-return-type)
     return c.m_l >= 0;
 }
 
-inline bool isBoundary(const Cube& c) {
+inline auto isBoundary(const Cube& c) -> bool { // NOLINT(modernize-use-trailing-return-type)
     return c.m_l == -1;
 }
 
-inline bool isExterior(const Cube& c) {
+inline auto isExterior(const Cube& c) -> bool { // NOLINT(modernize-use-trailing-return-type)
     return c.m_l == -2;
 }
 
@@ -113,11 +114,11 @@ inline void addFaces(std::vector<int>& faces, int v1, int v2, int v3) {
     faces.push_back(v3);
 }
 
-inline int firstDigit(int j) { // NOLINT(readability-identifier-length)
+inline auto firstDigit(int j) -> int { // NOLINT(readability-identifier-length)
     return j & 1;
 }
 
-inline int secondDigit(int j) { // NOLINT(readability-identifier-length)
+inline auto secondDigit(int j) -> int { // NOLINT(readability-identifier-length)
     return (j >> 1) & 1;
 }
 
@@ -143,14 +144,14 @@ void enumerateVertices(Vertex* v, const Node& n) {
                     if (v[vid].m_l == 0)
                         break;
                     bool flag = true;
-                    for (int p = 0; p < 3; p++)
+                    for (int p = 0; p < 3; p++) // NOLINT(modernize-loop-convert)
                         if ((v[vid].m_coords[p] & 1) != 0) {
                             flag = false;
                             break;
                         }
                     if (!flag)
                         break;
-                    for (int p = 0; p < 3; p++)
+                    for (int p = 0; p < 3; p++) // NOLINT(modernize-loop-convert)
                         v[vid].m_coords[p] >>= 1;
                     v[vid].m_l--;
                 }
@@ -168,16 +169,16 @@ void computeCenter(T* coords, const Cube& v) {
                     params::size * (v.m_coords[j] + 0.5) / (1 << v.m_l);
 }
 
-void projectedCoords(const Cube& c, int k, T* icoords,
-                     T* r) { // NOLINT(readability-identifier-length)
+void projectedCoords(                         // NOLINT(readability-identifier-length)
+    const Cube& c, int k, T* icoords, T* r) { // NOLINT(bugprone-easily-swappable-parameters)
     using namespace params;
-    T pw[3], pc[3];
-    T* current_cam = cams + k * (12 + 9 + 2);
+    T pw[3], pc[3]; // NOLINT(modernize-avoid-c-arrays)
+    T* current_cam = cams + static_cast<ptrdiff_t>(k) * (12 + 9 + 2);
     computeCenter(pw, c);
     for (int i = 0; i < 3; i++) {
-        pc[i] = current_cam[i * 4 + 3];
+        pc[i] = current_cam[static_cast<ptrdiff_t>(i) * 4 + 3];
         for (int j = 0; j < 3; j++) { // NOLINT(readability-identifier-length)
-            pc[i] += pw[j] * current_cam[i * 4 + j];
+            pc[i] += pw[j] * current_cam[static_cast<ptrdiff_t>(i) * 4 + j];
         }
     }
     if (r != nullptr) {
@@ -188,7 +189,7 @@ void projectedCoords(const Cube& c, int k, T* icoords,
         for (int i = 0; i < 3; i++) {
             icoords[i] = 0;
             for (int j = 0; j < 3; j++) { // NOLINT(readability-identifier-length)
-                icoords[i] += pc[j] * current_cam[12 + i * 3 + j];
+                icoords[i] += pc[j] * current_cam[12 + static_cast<ptrdiff_t>(i) * 3 + j];
             }
         }
         icoords[0] /= icoords[2];
@@ -196,9 +197,10 @@ void projectedCoords(const Cube& c, int k, T* icoords,
     }
 }
 
-T projectedSize(const Cube& c, int k) { // NOLINT(readability-identifier-length)
+auto projectedSize(const Cube& c, int k)
+    -> T { // NOLINT(readability-identifier-length, modernize-use-trailing-return-type)
     using namespace params;
-    T* current_cam = cams + k * (12 + 9 + 2);
+    T* current_cam = cams + static_cast<ptrdiff_t>(k) * (12 + 9 + 2);
     T r; // NOLINT(readability-identifier-length)
     projectedCoords(c, k, nullptr, &r);
     T w = current_cam[22]; // NOLINT(readability-identifier-length)
@@ -207,7 +209,7 @@ T projectedSize(const Cube& c, int k) { // NOLINT(readability-identifier-length)
     return size / (1 << c.m_l) / r / ang;
 }
 
-T projectedSize(const Cube& c) {
+auto projectedSize(const Cube& c) -> T { // NOLINT(modernize-use-trailing-return-type)
     T max_size = 0;
     for (int k = 0; k < params::n_cams; k++) { // NOLINT(readability-identifier-length)
         T size_k = projectedSize(c, k);
@@ -232,7 +234,9 @@ void expandOctree(std::vector<Node>& nodes, int index) {
     }
 }
 
-void partialExpandOctree(std::vector<Node>& nodes, int index, int instance) {
+void partialExpandOctree(std::vector<Node>& nodes,
+                         int index, // NOLINT(bugprone-easily-swappable-parameters)
+                         int instance) {
     assert(!isLeafNode(nodes[index]));
     for (int i = 0; i < 8; i++) {
         Node* current = &nodes[index];
@@ -252,28 +256,28 @@ void partialExpandOctree(std::vector<Node>& nodes, int index, int instance) {
     }
 }
 
-Cube search(Node* nodes, int* coords, int L,
-            bool include_exterior = false) { // NOLINT(readability-identifier-length)
-    assert(L > 0);
+auto search(Node* nodes, int* coords, int depth, // NOLINT(modernize-use-trailing-return-type)
+            bool include_exterior = false) -> Cube {
+    assert(depth > 0);
     Cube res;
     for (int i = 0; i < 3; i++)
-        if (!(coords[i] > 0 && coords[i] < (1 << L))) {
+        if (!(coords[i] > 0 && coords[i] < (1 << depth))) {
             markBoundary(res);
             return res;
         }
     Node current = nodes[0];
     int current_id = 0;
-    for (int l = 0; l < L - 1; l++) { // NOLINT(readability-identifier-length)
+    for (int l = 0; l < depth - 1; l++) { // NOLINT(readability-identifier-length)
         if (isLeafNode(current))
             break;
         for (int i = 0; i < 3; i++)
-            if ((coords[i] & ((1 << (L - current.m_c.m_l - 1)) - 1)) == 0) {
+            if ((coords[i] & ((1 << (depth - current.m_c.m_l - 1)) - 1)) == 0) {
                 markBoundary(res);
                 return res;
             }
         int nxt = 0;
         for (int p = 0; p < 3; p++)
-            if (2 * current.m_c.m_coords[p] + 1 <= (coords[p] >> (L - current.m_c.m_l - 1)))
+            if (2 * current.m_c.m_coords[p] + 1 <= (coords[p] >> (depth - current.m_c.m_l - 1)))
                 nxt += (1 << p);
         current_id = current.m_nxts[nxt];
         if (current_id == -1) {
@@ -295,22 +299,23 @@ Cube search(Node* nodes, int* coords, int L,
         return res;
     }
     int gl = gridNodeLevel(current);
-    if (L <= current.m_c.m_l + gl) {
+    if (depth <= current.m_c.m_l + gl) {
         markBoundary(res);
         return res;
     }
     for (int i = 0; i < 3; i++)
-        if ((coords[i] & ((1 << (L - current.m_c.m_l - gl)) - 1)) == 0) {
+        if ((coords[i] & ((1 << (depth - current.m_c.m_l - gl)) - 1)) == 0) {
             markBoundary(res);
             return res;
         }
     res.m_l = current.m_c.m_l + gl;
     for (int p = 0; p < 3; p++)
-        res.m_coords[p] = coords[p] >> (L - res.m_l);
+        res.m_coords[p] = coords[p] >> (depth - res.m_l);
     return res;
 }
 
-int divideToCube(std::vector<Node>& nodes, const Cube& c) {
+auto divideToCube(std::vector<Node>& nodes,
+                  const Cube& c) -> int { // NOLINT(modernize-use-trailing-return-type)
     Node current = nodes[0];
     int current_id = 0;
     for (;;) {
@@ -336,17 +341,18 @@ int divideToCube(std::vector<Node>& nodes, const Cube& c) {
 void findEdges(const Node& n, std::map<KeyCube, int>& vertices, sdfT* sdf,
                std::vector<std::vector<KeyEdge>>& bipolar_edges) {
     int s = gridNodeLevel(n), ss = 1 << s;
-    Vertex v[cubex(ss + 1)];    // NOLINT(cppcoreguidelines-avoid-c-arrays)
-    sdfT* sdf_v[cubex(ss + 1)]; // NOLINT(cppcoreguidelines-avoid-c-arrays)
+    Vertex v[cubex(ss + 1)]; // NOLINT(cppcoreguidelines-avoid-c-arrays, modernize-avoid-c-arrays)
+    // NOLINTNEXTLINE(cppcoreguidelines-avoid-c-arrays, modernize-avoid-c-arrays)
+    sdfT* sdf_v[cubex(ss + 1)];
     enumerateVertices(v, n);
     for (int i = 0; i < cubex(ss + 1); i++) {
-        sdf_v[i] = sdf + vertices[cubeToKey(v[i])] * params::n_elements;
+        sdf_v[i] = sdf + static_cast<ptrdiff_t>(vertices[cubeToKey(v[i])]) * params::n_elements;
     }
     for (int edir = 0; edir < 3; edir++)
         for (int i = 0; i < ss; i++)
             for (int j = 0; j <= ss; j++)       // NOLINT(readability-identifier-length)
                 for (int k = 0; k <= ss; k++) { // NOLINT(readability-identifier-length)
-                    int coords[3];
+                    int coords[3];              // NOLINT(modernize-avoid-c-arrays)
                     coords[edir] = i + 1;
                     coords[(edir + 1) % 3] = j;
                     coords[(edir + 2) % 3] = k;
@@ -369,7 +375,7 @@ void findEdges(const Node& n, std::map<KeyCube, int>& vertices, sdfT* sdf,
                             int dir = edir + 1;
                             if (sdf1[e] < 0)
                                 dir *= -1;
-                            bipolar_edges[e].push_back(std::make_pair(dir, cubeToKey(c0)));
+                            bipolar_edges[e].emplace_back(dir, cubeToKey(c0));
                         }
                     }
                     if ((sdf1_min >= 0) != (sdf2_min >= 0)) {
@@ -380,14 +386,14 @@ void findEdges(const Node& n, std::map<KeyCube, int>& vertices, sdfT* sdf,
                         int dir = edir + 1;
                         if (sdf1_min < 0)
                             dir *= -1;
-                        bipolar_edges[params::n_elements].push_back(
-                            std::make_pair(dir, cubeToKey(c0)));
+                        bipolar_edges[params::n_elements].emplace_back(dir, cubeToKey(c0));
                     }
                 }
 }
 
-int computeBoundary(const Cube& c, const Cube& bound) {
-    int b[3][2];
+auto computeBoundary(const Cube& c,
+                     const Cube& bound) -> int { // NOLINT(modernize-use-trailing-return-type)
+    int b[3][2];                                 // NOLINT(modernize-avoid-c-arrays)
     for (int i = 0; i < 3; i++)
         for (int p = 0; p < 2; p++) {
             b[i][p] = static_cast<int>((c.m_coords[i] + p) ==
@@ -404,15 +410,17 @@ int computeBoundary(const Cube& c, const Cube& bound) {
     return instance;
 }
 
-inline T det(T matrix[3][3]) {
+inline auto
+det(T matrix[3][3]) -> T { // NOLINT(modernize-use-trailing-return-type, modernize-avoid-c-arrays)
     return matrix[0][0] * (matrix[1][1] * matrix[2][2] - matrix[1][2] * matrix[2][1]) -
            matrix[0][1] * (matrix[1][0] * matrix[2][2] - matrix[1][2] * matrix[2][0]) +
            matrix[0][2] * (matrix[1][0] * matrix[2][1] - matrix[1][1] * matrix[2][0]);
 }
 
-bool triSegIntersect(T* t1, T* t2, T* t3, T* s1, T* s2) {
+auto triSegIntersect(T* t1, T* t2, T* t3, T* s1, T* s2)
+    -> bool { // NOLINT(modernize-use-trailing-return-type, bugprone-easily-swappable-parameters)
     // note (t1,t3) of the tri is allowed to intersect
-    T m[3][3];
+    T m[3][3]; // NOLINT(modernize-avoid-c-arrays)
     for (int i = 0; i < 3; i++) {
         m[0][i] = t1[i] - s1[i];
         m[1][i] = t2[i] - s1[i];

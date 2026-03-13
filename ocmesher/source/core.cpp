@@ -73,9 +73,8 @@ std::map<std::pair<int, int>, int>
 } // namespace computing
 
 extern "C" {
-int run_coarse( // NOLINT(readability-identifier-naming, modernize-use-trailing-return-type,
-                // bugprone-easily-swappable-parameters)
-    T* center, T size, int n_cams, T* cams, T pixels_per_cube, T occ_scale, T min_dist,
+int run_coarse(                                                                         // NOLINT
+    T* center, T size, int n_cams, T* cams, T pixels_per_cube, T occ_scale, T min_dist, // NOLINT
     int coarse_count, int memory_limit_mb, int n_elements) {
     using namespace coarse;
     params::center = center;
@@ -171,12 +170,13 @@ int fine_group() { // NOLINT(readability-identifier-naming, modernize-use-traili
     return end_node - start_node;
 }
 
-int fine_iteration(
-    sdfT* sdf) { // NOLINT(readability-identifier-naming, modernize-use-trailing-return-type)
+int fine_iteration( // NOLINT(readability-identifier-naming, modernize-use-trailing-return-type)
+    sdfT* sdf) {
     using namespace coarse;
     using namespace fine;
     if (sdf != nullptr) {
-        for (int i = 0; i < static_cast<int>(output_vertices.size()); i++) {
+        for (int i = 0; i < static_cast<int>(output_vertices.size());
+             i++) { // NOLINT(modernize-loop-convert)
             assert(!std::isnan(sdf[i]));
             vertices[output_vertices_index[i]] = sdf[i] >= 0 ? 1 : 2;
         }
@@ -196,12 +196,12 @@ int fine_iteration(
                 int sign1 = vertices[vertices_index[i] +
                                      cubeIndex(vcoords[0], vcoords[1], vcoords[2], ss + 1)];
                 bool border1 = false, border2 = false;
-                for (int p = 0; p < 3; p++)
+                for (int p = 0; p < 3; p++) // NOLINT(modernize-loop-convert)
                     border1 = border1 || (vcoords[p] == 0 || vcoords[p] == ss);
                 vcoords[e / 4] = coords[e / 4];
                 int sign2 = vertices[vertices_index[i] +
                                      cubeIndex(vcoords[0], vcoords[1], vcoords[2], ss + 1)];
-                for (int p = 0; p < 3; p++)
+                for (int p = 0; p < 3; p++) // NOLINT(modernize-loop-convert)
                     border2 = border2 || (vcoords[p] == 0 || vcoords[p] == ss);
                 if (sign1 != sign2) {
                     flag = true;
@@ -280,19 +280,20 @@ int fine_iteration(
     return static_cast<int>(output_vertices.size());
 }
 
-void fine_iteration_output(
-    T* xyz) { // NOLINT(readability-identifier-naming, modernize-use-trailing-return-type)
+void fine_iteration_output( // NOLINT(readability-identifier-naming,
+                            // modernize-use-trailing-return-type)
+    T* xyz) {
     using namespace params;
     using namespace fine;
-    for (int i = 0; i < static_cast<int>(output_vertices.size()); i++) {
+    for (int i = 0; i < static_cast<int>(output_vertices.size());
+         i++) { // NOLINT(modernize-loop-convert)
         computeCoords(xyz + static_cast<ptrdiff_t>(i) * 3, output_vertices[i].m_coords,
                       output_vertices[i].m_l);
     }
 }
 
-int vis_filter(
-    bool simplify_occluded,
-    int relax_iters) { // NOLINT(readability-identifier-naming, modernize-use-trailing-return-type)
+int vis_filter( // NOLINT(readability-identifier-naming, modernize-use-trailing-return-type)
+    bool simplify_occluded, int relax_iters) {
     using namespace params;
     using namespace solid;
     for (const auto& key : cubes_set) {
@@ -313,9 +314,9 @@ int vis_filter(
             canvas =
                 std::vector<T>(static_cast<std::size_t>(height) * static_cast<std::size_t>(width),
                                std::numeric_limits<T>::infinity());
+            int cubes_n = static_cast<int>(cubes.size());
 #pragma omp parallel for
-            for (int i = 0; i < static_cast<int>(cubes.size());
-                 i++) { // NOLINT(modernize-loop-convert)
+            for (int i = 0; i < cubes_n; i++) { // NOLINT(modernize-loop-convert)
                 T image_coords[3];
                 projectedCoords(cubes[i], k, image_coords, nullptr);
                 if (image_coords[2] >= 0) {
@@ -337,7 +338,7 @@ int vis_filter(
             }
         }
 #pragma omp parallel for
-        for (int i = 0; i < static_cast<int>(cubes.size()); i++) {
+        for (int i = 0; i < static_cast<int>(cubes.size()); i++) { // NOLINT(modernize-loop-convert)
             T image_coords[3];
             projectedCoords(cubes[i], k, image_coords, nullptr);
             if (image_coords[2] >= 0) {
@@ -368,7 +369,7 @@ int vis_filter(
     visible_set.clear();
     occluded_set.clear();
     std::set<KeyCube> new_visible_set, old_visible_set;
-    for (int i = 0; i < static_cast<int>(visible.size()); i++) {
+    for (int i = 0; i < static_cast<int>(visible.size()); i++) { // NOLINT(modernize-loop-convert)
         if (visible[i])
             visible_set.insert(cubeToKey(cubes[i]));
         else
@@ -437,7 +438,8 @@ int vis_filter(
     final_ns::gl = 0;
     for (;;) {
         int total_nodes = 0;
-        for (int i = 0; i < static_cast<int>(final_ns::visible_nodes_cube.size()); i++) {
+        int vis_cube_n = static_cast<int>(final_ns::visible_nodes_cube.size());
+        for (int i = 0; i < vis_cube_n; i++) { // NOLINT(modernize-loop-convert)
             int is =
                 std::max(0, intLog(projectedSize(final_ns::visible_nodes_cube[i])) - final_ns::gl);
             total_nodes += std::max(0, cubex(1 << is) - cubex((1 << is) - 2));
@@ -508,7 +510,8 @@ int final_iteration() { // NOLINT(readability-identifier-naming, modernize-use-t
 int final_iteration_occluded() { // NOLINT(readability-identifier-naming,
                                  // modernize-use-trailing-return-type)
     using namespace final_ns;
-    for (int i = 0; i < static_cast<int>(occluded_nodes_id.size()); i++) {
+    int occl_n = static_cast<int>(occluded_nodes_id.size());
+    for (int i = 0; i < occl_n; i++) { // NOLINT(modernize-loop-convert)
         v.resize(8);
         enumerateVertices(&v[0], nodes[occluded_nodes_id[i]]);
         for (int j = 0; j < 8; j++) // NOLINT(readability-identifier-length)
@@ -518,8 +521,8 @@ int final_iteration_occluded() { // NOLINT(readability-identifier-naming,
     return static_cast<int>(vertices.size());
 }
 
-void final_iteration2(
-    T* xyz) { // NOLINT(readability-identifier-naming, modernize-use-trailing-return-type)
+void final_iteration2( // NOLINT(readability-identifier-naming, modernize-use-trailing-return-type)
+    T* xyz) {
     using namespace params;
     using namespace final_ns;
     for (const auto& [key, val] : vertices) {
@@ -529,8 +532,8 @@ void final_iteration2(
     }
 }
 
-int final_iteration3(
-    sdfT* sdf) { // NOLINT(readability-identifier-naming, modernize-use-trailing-return-type)
+int final_iteration3( // NOLINT(readability-identifier-naming, modernize-use-trailing-return-type)
+    sdfT* sdf) {
     using namespace final_ns;
     using namespace solid;
     int start = static_cast<int>(visible_nodes_cube.size()) - start_node;
@@ -647,8 +650,8 @@ int final_iteration3(
         bei.erase(bei.begin() + j1, bei.end());
     }
 
-    for (int i = 0; i < size0; i++)
-        for (int j = 0; j < 8; j++) // NOLINT(readability-identifier-length)
+    for (int i = 0; i < size0; i++) // NOLINT(modernize-loop-convert)
+        for (int j = 0; j < 8; j++) // NOLINT(readability-identifier-length, modernize-loop-convert)
             if (nodes[i].m_nxts[j] >= size0)
                 nodes[i].m_nxts[j] = -1;
     nodes.erase(nodes.begin() + size0, nodes.end());
@@ -675,7 +678,7 @@ int final_iteration3(
     }
 
     auto& ben = bipolar_edges[params::n_elements];
-    for (int i = 0; i < static_cast<int>(ben.size()); i++) {
+    for (int i = 0; i < static_cast<int>(ben.size()); i++) { // NOLINT(modernize-loop-convert)
         int dir = ben[i].first;
         Cube e0;
         keyToCube(e0, ben[i].second);
@@ -701,20 +704,23 @@ int final_iteration3(
     return start - (static_cast<int>(visible_nodes_cube.size()) - start_node);
 }
 
-void final_iteration3_occluded(
-    sdfT* sdf) { // NOLINT(readability-identifier-naming, modernize-use-trailing-return-type)
+void final_iteration3_occluded( // NOLINT(readability-identifier-naming,
+                                // modernize-use-trailing-return-type)
+    sdfT* sdf) {
     using namespace final_ns;
     using namespace solid;
-    for (int i = 0; i < static_cast<int>(vertices.size()) * params::n_elements; i++)
+    int vert_n = static_cast<int>(vertices.size()) * params::n_elements;
+    for (int i = 0; i < vert_n; i++) // NOLINT(modernize-loop-convert)
         assert(!std::isnan(sdf[i]));
-    for (int i = 0; i < static_cast<int>(occluded_nodes_id.size()); i++)
+    int occl_n = static_cast<int>(occluded_nodes_id.size());
+    for (int i = 0; i < occl_n; i++) // NOLINT(modernize-loop-convert)
         findEdges(nodes[occluded_nodes_id[i]], vertices, sdf, bipolar_edges);
     vertices.clear();
     occluded_nodes_id.clear();
 }
 
-void final_remaining(
-    int* nv) { // NOLINT(readability-identifier-naming, modernize-use-trailing-return-type)
+void final_remaining( // NOLINT(readability-identifier-naming, modernize-use-trailing-return-type)
+    int* nv) {
     using namespace final_ns;
     bipolar_edges_computed_vertices.clear();
     bipolar_edges_vertices_vector.clear();
@@ -827,9 +833,9 @@ void final_remaining(
     solid::occluded_set.clear();
 }
 
-void get_verts_center(
-    int e, T* positions) { // NOLINT(readability-identifier-length, readability-identifier-naming,
-                           // modernize-use-trailing-return-type)
+void get_verts_center( // NOLINT(readability-identifier-length, readability-identifier-naming,
+                       // modernize-use-trailing-return-type)
+    int e, T* positions) {
     using namespace final_ns;
     auto& becv = bipolar_edges_computed_vertices[e];
     for (int i = 0; i < static_cast<int>(becv.size()); i++) {
@@ -837,9 +843,9 @@ void get_verts_center(
     }
 }
 
-void get_extra_verts_center(
-    T* epositions,
-    T* fpositions) { // NOLINT(readability-identifier-naming, modernize-use-trailing-return-type)
+void get_extra_verts_center( // NOLINT(readability-identifier-naming,
+                             // modernize-use-trailing-return-type)
+    T* epositions, T* fpositions) {
     using namespace computing;
     for (int i = 0; i < static_cast<int>(edge_vertices.size()); i++) {
         memcpy(epositions + static_cast<ptrdiff_t>(3) * i, edge_vertices[i].second.m_c,
@@ -851,10 +857,9 @@ void get_extra_verts_center(
     }
 }
 
-void update_verts(
-    int e, sdfT* sdf, sdfT* center_sdf,
-    T* positions) { // NOLINT(readability-identifier-length, readability-identifier-naming,
-                    // modernize-use-trailing-return-type)
+void update_verts( // NOLINT(readability-identifier-length, readability-identifier-naming,
+                   // modernize-use-trailing-return-type)
+    int e, sdfT* sdf, sdfT* center_sdf, T* positions) {
     using namespace final_ns;
     auto& becv = bipolar_edges_computed_vertices[e];
 #pragma omp parallel for
@@ -881,10 +886,8 @@ void update_verts(
     }
 }
 
-void update_extra_verts(
-    sdfT* esdf, sdfT* fsdf, sdfT* ecenter_sdf, sdfT* fcenter_sdf, T* epositions,
-    T* fpositions) { // NOLINT(readability-identifier-naming, modernize-use-trailing-return-type,
-                     // bugprone-easily-swappable-parameters)
+void update_extra_verts(sdfT* esdf, sdfT* fsdf, sdfT* ecenter_sdf, sdfT* fcenter_sdf, // NOLINT
+                        T* epositions, T* fpositions) {
     using namespace computing;
     int edge_n = 2;
 #pragma omp parallel for
@@ -942,9 +945,9 @@ void update_extra_verts(
     }
 }
 
-void get_lr_verts(int e, T* cube_l,
-                  T* cube_r) { // NOLINT(readability-identifier-length,
-                               // readability-identifier-naming, modernize-use-trailing-return-type)
+void get_lr_verts( // NOLINT(readability-identifier-length, readability-identifier-naming,
+                   // modernize-use-trailing-return-type)
+    int e, T* cube_l, T* cube_r) {
     using namespace final_ns;
     auto& becv = bipolar_edges_computed_vertices[e];
     for (int i = 0; i < static_cast<int>(becv.size()); i++) {
@@ -958,10 +961,9 @@ void get_lr_verts(int e, T* cube_l,
     }
 }
 
-void get_lr_extra_verts(
-    T* epos_l, T* epos_r, T* fpos_l,
-    T* fpos_r) { // NOLINT(readability-identifier-naming, modernize-use-trailing-return-type,
-                 // bugprone-easily-swappable-parameters)
+void get_lr_extra_verts(                          // NOLINT(readability-identifier-naming,
+                                                  // modernize-use-trailing-return-type)
+    T* epos_l, T* epos_r, T* fpos_l, T* fpos_r) { // NOLINT(bugprone-easily-swappable-parameters)
     using namespace computing;
     for (int i = 0; i < static_cast<int>(edge_vertices.size()); i++) {
         for (int j = 0; j < 2; j++) { // NOLINT(readability-identifier-length)
@@ -996,10 +998,9 @@ void get_lr_extra_verts(
 }
 
 // todo consider more than corners when a vertex cube has complex side face
-void finalize_verts(
-    int e, sdfT* sdf_l, sdfT* sdf_r,
-    T* verts) { // NOLINT(readability-identifier-length, readability-identifier-naming,
-                // modernize-use-trailing-return-type)
+void finalize_verts( // NOLINT(readability-identifier-length, readability-identifier-naming,
+                     // modernize-use-trailing-return-type)
+    int e, sdfT* sdf_l, sdfT* sdf_r, T* verts) {
     using namespace final_ns;
     auto& becv = bipolar_edges_computed_vertices[e];
     for (int i = 0; i < static_cast<int>(becv.size()); i++) {
@@ -1024,9 +1025,9 @@ void finalize_verts(
     bipolar_edges_computed_vertices[e].clear();
 }
 
-void finalize_extra_verts(
-    sdfT* esdf_l, sdfT* esdf_r, T* everts, sdfT* fsdf_l, sdfT* fsdf_r,
-    T* fverts) { // NOLINT(readability-identifier-naming, modernize-use-trailing-return-type)
+void finalize_extra_verts( // NOLINT(readability-identifier-naming,
+                           // modernize-use-trailing-return-type)
+    sdfT* esdf_l, sdfT* esdf_r, T* everts, sdfT* fsdf_l, sdfT* fsdf_r, T* fverts) {
     using namespace computing;
     for (int i = 0; i < static_cast<int>(edge_vertices.size()); i++) {
         T vx[3] = {0};
@@ -1073,31 +1074,32 @@ void finalize_extra_verts(
     face_vertices.clear();
 }
 
-void get_in_view_tag(
-    int e, bool* output) { // NOLINT(readability-identifier-length, readability-identifier-naming,
-                           // modernize-use-trailing-return-type)
+void get_in_view_tag( // NOLINT(readability-identifier-length, readability-identifier-naming,
+                      // modernize-use-trailing-return-type)
+    int e, bool* output) {
     using namespace final_ns;
     using namespace computing;
     int cnt = 0;
     auto& ivt = in_view_tag[e];
-    for (int i = 0; i < static_cast<int>(ivt.size()); i++) {
+    for (int i = 0; i < static_cast<int>(ivt.size()); i++) { // NOLINT(modernize-loop-convert)
         output[cnt++] = ivt[i];
     }
     ivt.clear();
-    for (int i = 0; i < static_cast<int>(edge_vertices_in_view_tag.size()); i++) {
+    int evt_n = static_cast<int>(edge_vertices_in_view_tag.size());
+    for (int i = 0; i < evt_n; i++) { // NOLINT(modernize-loop-convert)
         output[cnt++] = edge_vertices_in_view_tag[i];
     }
     edge_vertices_in_view_tag.clear();
-    for (int i = 0; i < static_cast<int>(face_vertices_in_view_tag.size()); i++) {
+    int fvt_n = static_cast<int>(face_vertices_in_view_tag.size());
+    for (int i = 0; i < fvt_n; i++) { // NOLINT(modernize-loop-convert)
         output[cnt++] = face_vertices_in_view_tag[i];
     }
     face_vertices_in_view_tag.clear();
 }
 
-void construct_faces(
-    int e, T* final_vertices,
-    int* cnt) { // NOLINT(readability-identifier-length, readability-identifier-naming,
-                // modernize-use-trailing-return-type)
+void construct_faces( // NOLINT(readability-identifier-length, readability-identifier-naming,
+                      // modernize-use-trailing-return-type)
+    int e, T* final_vertices, int* cnt) {
     using namespace final_ns;
     using namespace computing;
     auto& edge_e = bipolar_edges[e];
@@ -1281,7 +1283,7 @@ void construct_faces(
         }
     }
     face_vertices_map.clear();
-    for (int i = 0; i < static_cast<int>(faces.size()); i++) {
+    for (int i = 0; i < static_cast<int>(faces.size()); i++) { // NOLINT(modernize-loop-convert)
         if (faces[i] < 0)
             faces[i] = nv + static_cast<int>(edge_vertices.size()) + (-faces[i] - 1);
     }
@@ -1293,8 +1295,8 @@ void construct_faces(
     cnt[2] = static_cast<int>(faces.size()) / 3;
 }
 
-void get_faces(int* faces_output) { // NOLINT(readability-identifier-naming,
-                                    // modernize-use-trailing-return-type)
+void get_faces( // NOLINT(readability-identifier-naming, modernize-use-trailing-return-type)
+    int* faces_output) {
     using namespace computing;
     memcpy(faces_output, &faces[0], sizeof(int) * faces.size());
     faces.clear();
