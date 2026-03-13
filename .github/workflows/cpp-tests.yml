@@ -1,0 +1,26 @@
+name: C++ Tests
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  build-and-test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y g++ libomp-dev
+
+      - name: Build shared library
+        run: bash install.sh
+
+      - name: Build C++ tests
+        run: g++ -std=c++11 -O2 -o tests/cpp/test_core tests/cpp/test_core.cpp -lm
+
+      - name: Run C++ tests
+        run: ./tests/cpp/test_core
