@@ -81,12 +81,12 @@ def run_case(name, repeats, structure_mesh=None, edge_fine_factor=2):
         elapsed = time.perf_counter() - start
         runtimes.append(elapsed)
 
-        mesh = meshes[0]
-        mesh_stats = {
-            "vertices": int(mesh.vertices.shape[0]),
-            "faces": int(mesh.faces.shape[0]),
-            "in_view_vertices": int(np.count_nonzero(in_view_tags[0])),
-        }
+    mesh = meshes[0]
+    mesh_stats = {
+        "vertices": int(mesh.vertices.shape[0]),
+        "faces": int(mesh.faces.shape[0]),
+        "in_view_vertices": int(np.count_nonzero(in_view_tags[0])),
+    }
 
     return {
         "name": name,
