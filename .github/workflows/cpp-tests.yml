@@ -22,8 +22,22 @@ jobs:
       - name: Build shared library
         run: bash install.sh
 
-      - name: Build C++ tests
-        run: g++ -std=c++11 -O2 -o tests/cpp/test_core tests/cpp/test_core.cpp -lm
+      - name: Build and run C++ tests
+        run: |
+          failed=0
+          for src in tests/cpp/test_*.cpp; do
+            name=$(basename "$src" .cpp)
+            echo "::group::Building $name"
+            g++ -std=c++11 -O2 -o "tests/cpp/$name" "$src" -lm
+            echo "::endgroup::"
+            echo "::group::Running $name"
+            if ! "./tests/cpp/$name"; then
+              failed=1
+            fi
+            echo "::endgroup::"
+          done
+          if [ "$failed" -ne 0 ]; then
+            echo "::error::Some test suites failed"
+            exit 1
+          fi
 
-      - name: Run C++ tests
-        run: ./tests/cpp/test_core
