@@ -1,6 +1,5 @@
 #!/bin/bash
 
-shopt -s expand_aliases
 set -e
 
 OS=$(uname -s)
@@ -19,13 +18,22 @@ else
         fi
     else
         echo "Unsupported OS"
-        exit -1
+        exit 1
     fi
 fi
 
-alias gx1="${compiler} \$CXXFLAGS -O3 -c -fpic -fopenmp "
-alias gx2="${compiler} \$LDFLAGS -O3 -shared -fopenmp "
+CXXFLAGS_ARRAY=()
+if [[ -n "${CXXFLAGS:-}" ]]; then
+    read -ra CXXFLAGS_ARRAY <<< "${CXXFLAGS}"
+fi
+LDFLAGS_ARRAY=()
+if [[ -n "${LDFLAGS:-}" ]]; then
+    read -ra LDFLAGS_ARRAY <<< "${LDFLAGS}"
+fi
+gx1() { "${compiler}" "${CXXFLAGS_ARRAY[@]}" -O3 -c -fpic -fopenmp "$@"; }
+gx2() { "${compiler}" "${LDFLAGS_ARRAY[@]}" -O3 -shared -fopenmp "$@"; }
 
 mkdir -p ocmesher/lib
 gx1 -o ocmesher/lib/core.o ocmesher/source/core.cpp
 gx2 -o ocmesher/lib/core.so ocmesher/lib/core.o
+rm -f ocmesher/lib/core.o
