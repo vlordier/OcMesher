@@ -191,9 +191,10 @@ class OcMesher:
         center_sdf = self.kernel_caller(k_e, centers)
         cubes = AC(np.zeros((num_verts * 8, 3), dtype=self.np_float_type))
         self.update_verts(e, POINTER(self.sdf_float_type)(), POINTER(self.sdf_float_type)(), self.AF(cubes))
+        center_sdf_ptr = self.sdf_AF(AC(center_sdf))
         for _ in tqdm(range(self.bisection_iters)):
             sdf = self.kernel_caller(k_e, cubes)
-            self.update_verts(e, self.sdf_AF(AC(sdf)), self.sdf_AF(AC(center_sdf)), self.AF(cubes))
+            self.update_verts(e, self.sdf_AF(AC(sdf)), center_sdf_ptr, self.AF(cubes))
         cubes_r = AC(np.zeros((num_verts * 8, 3), dtype=self.np_float_type))
         self.get_lr_verts(e, self.AF(cubes), self.AF(cubes_r))
         sdf_l = self.kernel_caller(k_e, cubes)
