@@ -3,10 +3,13 @@
 
 # Authors: Zeyu Ma
 
-from datetime import datetime
+import logging
 import os
+from datetime import datetime
 
 import psutil
+
+logger = logging.getLogger(__name__)
 
 
 class Timer:
@@ -19,9 +22,9 @@ class Timer:
 
     def __enter__(self):
         if self.disable_timer:
-            return
+            return self
         self.start = datetime.now()
-
+        return self
 
     def __exit__(self, exc_type, exc_val, traceback):
         if self.disable_timer:
@@ -29,9 +32,11 @@ class Timer:
         self.end = datetime.now()
         self.duration = self.end - self.start # timedelta
         if exc_type is None:
-            process = psutil.Process(os.getpid())
-            print(f'{self.name} finished in {str(self.duration)} with memory usage {process.memory_info().rss / 1024**3} GB')
+            try:
+                process = psutil.Process(os.getpid())
+                mem_gb = process.memory_info().rss / 1024**3
+                print(f'{self.name} finished in {self.duration!s} with memory usage {mem_gb:.2f} GB')
+            except (psutil.NoSuchProcess, psutil.AccessDenied):
+                print(f'{self.name} finished in {self.duration!s}')
         else:
-            print(f'{self.name} failed with {exc_type}')
-
-
+            print(f'{self.name} failed with {exc_type.__name__}: {exc_val}')

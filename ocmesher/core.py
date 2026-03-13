@@ -3,8 +3,9 @@
 
 # Authors: Zeyu Ma
 
+import logging
 from pathlib import Path
-import sys
+
 import gin
 import numpy as np
 import trimesh
@@ -12,6 +13,49 @@ from tqdm import tqdm
 
 from .utils.interface import AC, POINTER, AsDouble, AsFloat, AsInt, AsBool, c_bool, c_double, c_float, c_int32, load_cdll, register_func
 from .utils.timer import Timer
+
+logger = logging.getLogger(__name__)
+
+CAMERA_DATA_STRIDE = 23
+
+
+def _validate_cameras(cameras):
+    """Validate camera tuple and return (cam_poses, Ks, Hs, Ws)."""
+    if not isinstance(cameras, (tuple, list)) or len(cameras) != 4:
+        msg = "cameras must be a tuple/list of (cam_poses, Ks, Hs, Ws)"
+        raise ValueError(msg)
+    cam_poses, Ks, Hs, Ws = cameras
+    n = len(cam_poses)
+    if len(Ks) != n or len(Hs) != n or len(Ws) != n:
+        msg = f"Camera arrays must all have the same length, got poses={len(cam_poses)}, Ks={len(Ks)}, Hs={len(Hs)}, Ws={len(Ws)}"
+        raise ValueError(msg)
+    if n == 0:
+        msg = "At least one camera is required"
+        raise ValueError(msg)
+    for i, pose in enumerate(cam_poses):
+        pose = np.asarray(pose)
+        if pose.shape != (4, 4):
+            msg = f"cam_poses[{i}] must be a 4x4 matrix, got shape {pose.shape}"
+            raise ValueError(msg)
+    for i, K in enumerate(Ks):
+        K = np.asarray(K)
+        if K.shape != (3, 3):
+            msg = f"Ks[{i}] must be a 3x3 matrix, got shape {K.shape}"
+            raise ValueError(msg)
+    return cam_poses, Ks, Hs, Ws
+
+
+def _validate_bounds(bounds):
+    """Validate bounds array: 6 elements [x_min, x_max, y_min, y_max, z_min, z_max]."""
+    bounds = np.asarray(bounds, dtype=np.float64)
+    if bounds.shape != (6,):
+        msg = f"bounds must have 6 elements [x_min, x_max, y_min, y_max, z_min, z_max], got shape {bounds.shape}"
+        raise ValueError(msg)
+    for axis, name in enumerate(["x", "y", "z"]):
+        if bounds[axis * 2] >= bounds[axis * 2 + 1]:
+            msg = f"bounds {name}_min ({bounds[axis * 2]}) must be less than {name}_max ({bounds[axis * 2 + 1]})"
+            raise ValueError(msg)
+    return bounds
 
 @gin.configurable
 class OcMesher:
@@ -28,6 +72,9 @@ class OcMesher:
         visible_relax_iter=2,
         coarse_count=500000,
     ):
+        cam_poses, Ks, Hs, Ws = _validate_cameras(cameras)
+        bounds = _validate_bounds(bounds)
+
         dll = load_cdll(str(Path(__file__).parent.resolve()/"lib"/"core.so"))
         self.float_type = c_double
         self.np_float_type = np.float64
@@ -38,11 +85,10 @@ class OcMesher:
         self.bounds = bounds
         self.memory_limit_mb = memory_limit_mb
 
-        cam_poses, Ks, Hs, Ws = cameras
         self.n_cameras = len(cam_poses)
-        self.cameras = np.zeros(23 * self.n_cameras, dtype=self.np_float_type)
+        self.cameras = np.zeros(CAMERA_DATA_STRIDE * self.n_cameras, dtype=self.np_float_type)
         for i in range(self.n_cameras):
-            self.cameras[23 * i: 23 * (i+1)] = np.concatenate([
+            self.cameras[CAMERA_DATA_STRIDE * i: CAMERA_DATA_STRIDE * (i+1)] = np.concatenate([
                 np.linalg.inv(cam_poses[i])[:3, :4].reshape(-1),
                 Ks[i].reshape(-1), [Hs[i]], [Ws[i]]
             ]).astype(self.np_float_type)
@@ -110,6 +156,9 @@ class OcMesher:
                     out_bound |= XYZ[:, c] <= self.bounds[c*2]
                     out_bound |= XYZ[:, c] >= self.bounds[c*2+1]
             for kernel in kernels:
+                if not callable(kernel):
+                    msg = f"Each kernel must be callable, got {type(kernel).__name__}"
+                    raise TypeError(msg)
                 sdf = kernel(XYZ)
                 if self.enclosed: sdf[out_bound] = 1
                 sdfs_i.append(sdf)
@@ -117,6 +166,9 @@ class OcMesher:
         return np.concatenate(sdfs, 0)
     
     def __call__(self, kernels):
+        if not isinstance(kernels, (list, tuple)) or len(kernels) == 0:
+            msg = "kernels must be a non-empty list/tuple of callable SDF functions"
+            raise ValueError(msg)
         n_elements = len(kernels)
         # octree only considering cameras, not sdf
         with Timer("coarse step part1"):

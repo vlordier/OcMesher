@@ -1,3 +1,10 @@
 __pycache__
 lib
 results
+.venv
+*.egg-info
+.pytest_cache
+htmlcov
+.coverage
+dist
+build
