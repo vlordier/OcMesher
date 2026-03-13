@@ -51,7 +51,10 @@ static BenchStats compute_stats(std::vector<double> &times) {
     s.samples   = static_cast<int>(times.size());
     s.min_ms    = times.front();
     s.max_ms    = times.back();
-    s.median_ms = times[times.size() / 2];
+    if (times.size() % 2 == 0)
+        s.median_ms = (times[times.size() / 2 - 1] + times[times.size() / 2]) / 2.0;
+    else
+        s.median_ms = times[times.size() / 2];
     double sum  = std::accumulate(times.begin(), times.end(), 0.0);
     s.mean_ms   = sum / s.samples;
     double sq   = 0.0;
@@ -305,6 +308,12 @@ static void bench_vertex_enumeration(int iterations, int warmup) {
         times.push_back(elapsed_ms(t0, t1));
     }
 
+    // Prevent dead store elimination
+    volatile int vert_sink = 0;
+    for (int i = 0; i < VERT_COUNT; i += VERT_COUNT / 8)
+        vert_sink += verts[i].coords[0] + verts[i].L;
+    (void)vert_sink;
+
     auto st = compute_stats(times);
     char label[128];
     std::snprintf(label, sizeof(label), "Vertex enum (%d nodes, level %d)",
@@ -483,6 +492,12 @@ static void bench_sdf_bisection(int iterations, int warmup) {
         auto t1 = hrc::now();
         times.push_back(elapsed_ms(t0, t1));
     }
+
+    // Prevent dead store elimination on positions
+    volatile T pos_sink = 0;
+    for (int i = 0; i < N_VERTS * 8 * 3; i += N_VERTS)
+        pos_sink += positions[i];
+    (void)pos_sink;
 
     auto st = compute_stats(times);
     char label[128];
@@ -798,13 +813,18 @@ static void bench_compute_coords(int iterations, int warmup) {
     // Warmup
     for (int w = 0; w < warmup; w++) compute();
 
+    volatile T coord_sink = 0;
     std::vector<double> times;
     for (int iter = 0; iter < iterations; iter++) {
         auto t0 = hrc::now();
         compute();
         auto t1 = hrc::now();
+        // Prevent dead store elimination
+        for (int i = 0; i < N * 3; i += N)
+            coord_sink += out[i];
         times.push_back(elapsed_ms(t0, t1));
     }
+    (void)coord_sink;
 
     auto st = compute_stats(times);
     print_stats("Coordinate compute (500k verts)", st);

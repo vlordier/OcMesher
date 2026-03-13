@@ -40,7 +40,10 @@ static BenchStats compute_stats(std::vector<double> &times) {
     s.samples   = static_cast<int>(times.size());
     s.min_ms    = times.front();
     s.max_ms    = times.back();
-    s.median_ms = times[times.size() / 2];
+    if (times.size() % 2 == 0)
+        s.median_ms = (times[times.size() / 2 - 1] + times[times.size() / 2]) / 2.0;
+    else
+        s.median_ms = times[times.size() / 2];
     double sum  = std::accumulate(times.begin(), times.end(), 0.0);
     s.mean_ms   = sum / s.samples;
     double sq   = 0.0;
@@ -125,12 +128,16 @@ static void bench_coord_transform(int iterations, int warmup) {
         coord_transform_scalar(icoords.data(), levels.data(), out.data(), N,
                                center, size);
 
+    volatile double coord_sink = 0;
     std::vector<double> scalar_times;
     for (int iter = 0; iter < iterations; iter++) {
         auto t0 = hrc::now();
         coord_transform_scalar(icoords.data(), levels.data(), out.data(), N,
                                center, size);
         auto t1 = hrc::now();
+        // Prevent dead store elimination
+        for (int i = 0; i < N * 3; i += N)
+            coord_sink += out[i];
         scalar_times.push_back(elapsed_ms(t0, t1));
     }
     auto ss = compute_stats(scalar_times);
@@ -147,6 +154,9 @@ static void bench_coord_transform(int iterations, int warmup) {
         coord_transform_neon(icoords.data(), levels.data(), out.data(), N,
                              center, size);
         auto t1 = hrc::now();
+        // Prevent dead store elimination
+        for (int i = 0; i < N * 3; i += N)
+            coord_sink += out[i];
         neon_times.push_back(elapsed_ms(t0, t1));
     }
     auto sn = compute_stats(neon_times);
@@ -156,6 +166,7 @@ static void bench_coord_transform(int iterations, int warmup) {
     std::printf("  %-48s  SKIPPED (NEON not available)\n",
                 "Coord transform NEON (500k)");
 #endif
+    (void)coord_sink;
 }
 
 // ===========================================================================
@@ -406,11 +417,15 @@ static void bench_vertex_pos(int iterations, int warmup) {
     for (int w = 0; w < warmup; w++)
         vertex_pos_scalar(centers.data(), mids.data(), out.data(), N);
 
+    volatile double pos_sink = 0;
     std::vector<double> scalar_times;
     for (int iter = 0; iter < iterations; iter++) {
         auto t0 = hrc::now();
         vertex_pos_scalar(centers.data(), mids.data(), out.data(), N);
         auto t1 = hrc::now();
+        // Prevent dead store elimination
+        for (int i = 0; i < N * 8 * 3; i += N * 8)
+            pos_sink += out[i];
         scalar_times.push_back(elapsed_ms(t0, t1));
     }
     auto ss = compute_stats(scalar_times);
@@ -425,6 +440,9 @@ static void bench_vertex_pos(int iterations, int warmup) {
         auto t0 = hrc::now();
         vertex_pos_neon(centers.data(), mids.data(), out.data(), N);
         auto t1 = hrc::now();
+        // Prevent dead store elimination
+        for (int i = 0; i < N * 8 * 3; i += N * 8)
+            pos_sink += out[i];
         neon_times.push_back(elapsed_ms(t0, t1));
     }
     auto sn = compute_stats(neon_times);
@@ -434,6 +452,7 @@ static void bench_vertex_pos(int iterations, int warmup) {
     std::printf("  %-48s  SKIPPED (NEON not available)\n",
                 "Vertex pos NEON (200k)");
 #endif
+    (void)pos_sink;
 }
 
 // ===========================================================================

@@ -13,9 +13,21 @@ OUTPUT=""
 # Parse arguments
 while [[ $# -gt 0 ]]; do
     case $1 in
-        --iterations) ITERATIONS="$2"; shift 2 ;;
-        --warmup)     WARMUP="$2";     shift 2 ;;
-        --output)     OUTPUT="$2";     shift 2 ;;
+        --iterations)
+            if [[ -z "${2:-}" ]] || ! [[ "$2" =~ ^[0-9]+$ ]]; then
+                echo "Error: --iterations requires a numeric argument" >&2; exit 1
+            fi
+            ITERATIONS="$2"; shift 2 ;;
+        --warmup)
+            if [[ -z "${2:-}" ]] || ! [[ "$2" =~ ^[0-9]+$ ]]; then
+                echo "Error: --warmup requires a numeric argument" >&2; exit 1
+            fi
+            WARMUP="$2"; shift 2 ;;
+        --output)
+            if [[ -z "${2:-}" ]]; then
+                echo "Error: --output requires a file path argument" >&2; exit 1
+            fi
+            OUTPUT="$2"; shift 2 ;;
         --help)
             echo "Usage: $0 [--iterations N] [--warmup N] [--output FILE]"
             echo ""
@@ -25,7 +37,7 @@ while [[ $# -gt 0 ]]; do
             echo "  --output FILE    Write output to file in addition to stdout"
             exit 0
             ;;
-        *) echo "Unknown option: $1"; exit 1 ;;
+        *) echo "Unknown option: $1" >&2; exit 1 ;;
     esac
 done
 
@@ -36,7 +48,7 @@ if [ ! -f "${BUILD_DIR}/bench_core" ] || [ ! -f "${BUILD_DIR}/bench_arm64_neon" 
     echo ""
 fi
 
-ARGS="--iterations ${ITERATIONS} --warmup ${WARMUP}"
+ARGS=("--iterations" "${ITERATIONS}" "--warmup" "${WARMUP}")
 
 run_bench() {
     local name="$1"
@@ -45,7 +57,7 @@ run_bench() {
     echo " Running: ${name}"
     echo "============================================================"
     echo ""
-    "${binary}" ${ARGS}
+    "${binary}" "${ARGS[@]}"
     echo ""
 }
 

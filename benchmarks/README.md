@@ -7,7 +7,7 @@ Performance analysis suite for OcMesher's C++ core, with a focus on **arm64 Appl
 These benchmarks measure the performance of OcMesher's key computational kernels, providing:
 
 - **Micro-benchmarks**: Individual kernel-level measurements (determinant, dot product, coordinate transforms, SDF bisection, triangle–segment intersection)
-- **Data structure benchmarks**: `std::map`, `std::set`, and `std::priority_queue` performance with OcMesher's key types
+- **Data structure benchmarks**: `std::map` and `std::priority_queue` performance with OcMesher's key types
 - **Algorithm benchmarks**: End-to-end octree expansion, vertex enumeration, and camera projection
 - **System benchmarks**: Memory bandwidth and OpenMP parallel scaling
 - **ARM64 NEON SIMD benchmarks**: Scalar vs. NEON comparisons for critical hot-path kernels

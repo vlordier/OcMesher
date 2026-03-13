@@ -45,14 +45,14 @@ BASE_FLAGS="-std=c++17 -O3 -DNDEBUG"
 OMP_FLAGS=""
 if [ "${OS}" = "Darwin" ]; then
     OMP_FLAGS="-Xpreprocessor -fopenmp"
-    OMP_LINK="-lomp"
     if [ "${ARCH}" = "arm64" ]; then
+        OMP_LIB_DIR="/opt/homebrew/opt/libomp/lib"
         OMP_FLAGS="${OMP_FLAGS} -I/opt/homebrew/opt/libomp/include"
-        OMP_LINK="${OMP_LINK} -L/opt/homebrew/opt/libomp/lib"
     else
+        OMP_LIB_DIR="/usr/local/opt/libomp/lib"
         OMP_FLAGS="${OMP_FLAGS} -I/usr/local/opt/libomp/include"
-        OMP_LINK="${OMP_LINK} -L/usr/local/opt/libomp/lib"
     fi
+    OMP_LINK="-lomp -L${OMP_LIB_DIR} -Wl,-rpath,${OMP_LIB_DIR}"
 else
     OMP_FLAGS="-fopenmp"
     OMP_LINK="-fopenmp"
