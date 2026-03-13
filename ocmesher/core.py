@@ -42,6 +42,23 @@ class OcMesher:
     Accepts camera data and axis-aligned bounds, then uses an octree to
     adaptively evaluate SDF kernels and extract a triangle mesh via
     bisection-based surface finding.
+
+    Args:
+        cameras: Camera parameters as a ``CameraSet`` or legacy tuple
+            ``(poses, intrinsics, heights, widths)``.
+        bounds: Axis-aligned bounding box as a ``Bounds`` dataclass or a flat
+            sequence ``[x_min, x_max, y_min, y_max, z_min, z_max]``.
+        pixels_per_cube: Minimum projected cube size in pixels for octree
+            subdivision.
+        inv_scale: Inverse scale factor for SDF evaluation.
+        min_dist: Minimum distance from cameras for projection.
+        memory_limit_mb: Memory budget in MB for fine-step batching.
+        bisection_iters: Number of bisection iterations for vertex refinement.
+        enclosed: If True, clamp SDF to positive outside bounds.
+        simplify_occluded: If True, simplify geometry in occluded regions.
+        visible_relax_iter: Number of relaxation iterations for visibility
+            filtering.
+        coarse_count: Maximum number of octree nodes in the coarse step.
     """
 
     def __init__(
