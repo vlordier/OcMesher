@@ -66,7 +66,7 @@ extern "C" {
         int coarse_count,
         int memory_limit_mb,
         int n_elements
-    ) {
+    ) { // NOLINT(readability-identifier-naming, modernize-use-trailing-return-type)
         using namespace coarse;
         params::center = center;
         params::size = size;
@@ -85,7 +85,7 @@ extern "C" {
         nodes.clear();
         nodes.push_back(root);
         nodes_heap = std::priority_queue<std::pair<T, int>>();
-        nodes_heap.push(std::make_pair(projectedSize(root.m_c), 0));
+        nodes_heap.emplace(projectedSize(root.m_c), 0);
 
         while (!nodes_heap.empty() && nodes.size() < static_cast<size_t>(coarse_count)) {
             auto top = nodes_heap.top();
@@ -93,7 +93,7 @@ extern "C" {
             nodes_heap.pop();
             int i0 = static_cast<int>(nodes.size());
             expandOctree(nodes, top.second);
-            for (int i = 0; i < 8; i++) nodes_heap.push(std::make_pair(projectedSize(nodes[i0 + i].m_c), i0 + i));
+            for (int i = 0; i < 8; i++) nodes_heap.emplace(projectedSize(nodes[i0 + i].m_c), i0 + i);
         }
         fine::end_node = 0;
         solid::cubes.clear();
@@ -108,7 +108,7 @@ extern "C" {
         return static_cast<int>(nodes_vector.size());
     }
 
-    int fine_group() {
+    int fine_group() { // NOLINT(readability-identifier-naming, modernize-use-trailing-return-type)
         using namespace coarse;
         using namespace fine;
         cubes_queue.clear();
@@ -147,13 +147,13 @@ extern "C" {
                 int ci = cubeIndex(coords[0], coords[1], coords[2], ss), ici = cubes_index[i] + ci;
                 if (cubes[ici]) continue;
                 cubes[ici] = true;
-                cubes_queue.push_back(std::make_pair(i, makeInt3(coords[0], coords[1], coords[2])));
+                cubes_queue.emplace_back(i, makeInt3(coords[0], coords[1], coords[2]));
             }
         }
         return end_node - start_node;
     }
 
-    int fine_iteration(sdfT *sdf) {
+    int fine_iteration(sdfT *sdf) { // NOLINT(readability-identifier-naming, modernize-use-trailing-return-type)
         using namespace coarse;
         using namespace fine;
         if (sdf != nullptr) {
@@ -201,7 +201,7 @@ extern "C" {
                                 int ci = cubeIndex(ccoords[0], ccoords[1], ccoords[2], ss), ici = cubes_index[i] + ci;
                                 if (cubes[ici]) continue;
                                 cubes[ici] = true;
-                                cubes_queue.push_back(std::make_pair(i, makeInt3(ccoords[0], ccoords[1], ccoords[2])));
+                                cubes_queue.emplace_back(i, makeInt3(ccoords[0], ccoords[1], ccoords[2]));
                                 Cube c0;
                                 for (int p = 0; p < 3; p++) assign(c0.m_coords[p], cubei.m_coords[p], 1 << s, ccoords[p]);
                                 c0.m_l = cubei.m_l + s;
@@ -245,20 +245,20 @@ extern "C" {
         return static_cast<int>(output_vertices.size());
     }
 
-    void fine_iteration_output(T *xyz) {
+    void fine_iteration_output(T *xyz) { // NOLINT(readability-identifier-naming, modernize-use-trailing-return-type)
         using namespace params;
         using namespace fine;
         for (int i = 0; i < static_cast<int>(output_vertices.size()); i++) {
-            computeCoords(xyz + i * 3, output_vertices[i].m_coords, output_vertices[i].m_l);
+            computeCoords(xyz + static_cast<ptrdiff_t>(i) * 3, output_vertices[i].m_coords, output_vertices[i].m_l);
         }
     }
 
-    int vis_filter(bool simplify_occluded, int relax_iters) {
+    int vis_filter(bool simplify_occluded, int relax_iters) { // NOLINT(readability-identifier-naming, modernize-use-trailing-return-type)
         using namespace params;
         using namespace solid;
-        for (auto iter = cubes_set.begin(); iter != cubes_set.end(); iter++) {
+        for (const auto& key : cubes_set) {
             Cube c;
-            keyToCube(c, *iter);
+            keyToCube(c, key);
             cubes.push_back(c);
         }
         cubes_set.clear();
@@ -268,9 +268,9 @@ extern "C" {
         std::vector<T> canvas;
         for (int k = 0; k < n_cams; k++) { // NOLINT(readability-identifier-length)
             T* current_cam = cams + k * (12 + 9 + 2);
-            int H = static_cast<int>(current_cam[21] / factor), W = static_cast<int>(current_cam[22] / factor);
+            int height = static_cast<int>(current_cam[21] / factor), width = static_cast<int>(current_cam[22] / factor);
             if (simplify_occluded) {
-                canvas = std::vector<T>(H * W, std::numeric_limits<T>::infinity());
+                canvas = std::vector<T>(static_cast<std::size_t>(height) * static_cast<std::size_t>(width), std::numeric_limits<T>::infinity());
                 #pragma omp parallel for
                 for (int i = 0; i < static_cast<int>(cubes.size()); i++) {
                     T image_coords[3];
@@ -278,11 +278,11 @@ extern "C" {
                     if (image_coords[2] >= 0) {
                         int x = static_cast<int>(std::floor(image_coords[0] / factor));
                         int y = static_cast<int>(std::floor(image_coords[1] / factor));
-                        if (x >= 0 && y >= 0 && x < W && y < H) {
+                        if (x >= 0 && y >= 0 && x < width && y < height) {
                             #pragma omp critical
                             {
-                                if (image_coords[2] <= canvas[x * H + y]) {
-                                    canvas[x * H + y] = image_coords[2];
+                                if (image_coords[2] <= canvas[static_cast<std::size_t>(x) * static_cast<std::size_t>(height) + static_cast<std::size_t>(y)]) {
+                                    canvas[static_cast<std::size_t>(x) * static_cast<std::size_t>(height) + static_cast<std::size_t>(y)] = image_coords[2];
                                 }
                             }
                         }
@@ -296,13 +296,13 @@ extern "C" {
                 if (image_coords[2] >= 0) {
                     int x = static_cast<int>(std::floor(image_coords[0] / factor));
                     int y = static_cast<int>(std::floor(image_coords[1] / factor));
-                    if (x >= -relax_iters && y >= -relax_iters && x < W + relax_iters && y < H + relax_iters) {
+                    if (x >= -relax_iters && y >= -relax_iters && x < width + relax_iters && y < height + relax_iters) {
                         if (simplify_occluded) {
                             for (int dx = -relax_iters; dx <= relax_iters; dx++)
                             for (int dy = -relax_iters; dy <= relax_iters; dy++) {
                                 int nx = x + dx, ny = y + dy;
-                                if (nx >= 0 && ny >= 0 && nx < W && ny < H) {
-                                    if (image_coords[2] <= canvas[nx * H + ny]) {
+                                if (nx >= 0 && ny >= 0 && nx < width && ny < height) {
+                                    if (image_coords[2] <= canvas[static_cast<std::size_t>(nx) * static_cast<std::size_t>(height) + static_cast<std::size_t>(ny)]) {
                                         visible[i] = true;
                                     }
                                 }
@@ -324,9 +324,9 @@ extern "C" {
         visible.clear();
         cubes.clear();
         for (int i = 0; i < relax_iters; i++) {
-            for (auto iter = visible_set.begin(); iter != visible_set.end(); iter++) {
+            for (const auto& key : visible_set) {
                 Cube c;
-                keyToCube(c, *iter);
+                keyToCube(c, key);
                 int coords[3];
                 for (int f = 0; f < 6; f++) {
                     assign(coords[f / 3], c.m_coords[f / 3], 2, -1 + 4 * (f & 1));
@@ -357,14 +357,14 @@ extern "C" {
         final_ns::nodes.push_back(root);
         final_ns::visible_nodes_cube.clear();
         final_ns::occluded_nodes_id.clear();
-        for (auto iter = visible_set.begin(); iter != visible_set.end(); iter++) {
+        for (const auto& key : visible_set) {
             Cube c;
-            keyToCube(c, *iter);
+            keyToCube(c, key);
             final_ns::visible_nodes_cube.push_back(c);
         }
-        for (auto iter = occluded_set.begin(); iter != occluded_set.end(); iter++) {
+        for (const auto& key : occluded_set) {
             Cube c;
-            keyToCube(c, *iter);
+            keyToCube(c, key);
             final_ns::occluded_nodes_id.push_back(divideToCube(final_ns::nodes, c));
         }
         final_ns::bipolar_edges.clear();
@@ -373,13 +373,13 @@ extern "C" {
         final_ns::in_view_tag.clear();
         final_ns::bipolar_edges_vindices.clear();
         for (int i = 0; i < params::n_elements; i++) {
-            final_ns::bipolar_edges.push_back(std::vector<KeyEdge>());
+            final_ns::bipolar_edges.emplace_back();
             final_ns::bipolar_edges_s.push_back(0);
-            final_ns::bipolar_edges_vindices.push_back(std::vector<int>());
-            final_ns::in_view_tag.push_back(std::vector<bool>());
+            final_ns::bipolar_edges_vindices.emplace_back();
+            final_ns::in_view_tag.emplace_back();
         }
         final_ns::vertices_cnt = std::vector<int>(5, 0);
-        final_ns::bipolar_edges.push_back(std::vector<KeyEdge>());
+        final_ns::bipolar_edges.emplace_back();
         final_ns::start_node = 0;
         final_ns::gl = 0;
         for (;;) {
@@ -394,7 +394,7 @@ extern "C" {
         return static_cast<int>(final_ns::visible_nodes_cube.size());
     }
 
-    int final_iteration() {
+    int final_iteration() { // NOLINT(readability-identifier-naming, modernize-use-trailing-return-type)
         using namespace final_ns;
         assert(((nodes.size() >> 20) * sizeof(Node)) < static_cast<size_t>(params::memory_limit_mb * 0.8));
         if (start_node == static_cast<int>(visible_nodes_cube.size())) {
@@ -439,7 +439,7 @@ extern "C" {
         return static_cast<int>(vertices.size());
     }
 
-    int final_iteration_occluded() {
+    int final_iteration_occluded() { // NOLINT(readability-identifier-naming, modernize-use-trailing-return-type)
         using namespace final_ns;
         for (int i = 0; i < static_cast<int>(occluded_nodes_id.size()); i++) {
             v.resize(8);
@@ -450,17 +450,17 @@ extern "C" {
         return static_cast<int>(vertices.size());
     }
 
-    void final_iteration2(T *xyz) {
+    void final_iteration2(T *xyz) { // NOLINT(readability-identifier-naming, modernize-use-trailing-return-type)
         using namespace params;
         using namespace final_ns;
-        for (auto iter = vertices.begin(); iter != vertices.end(); iter++) {
+        for (const auto& [key, val] : vertices) {
             Vertex vx;
-            keyToCube(vx, iter->first);
-            computeCoords(xyz + iter->second * 3, vx.m_coords, vx.m_l);
+            keyToCube(vx, key);
+            computeCoords(xyz + static_cast<ptrdiff_t>(val) * 3, vx.m_coords, vx.m_l);
         }
     }
 
-    int final_iteration3(sdfT *sdf) {
+    int final_iteration3(sdfT *sdf) { // NOLINT(readability-identifier-naming, modernize-use-trailing-return-type)
         using namespace final_ns;
         using namespace solid;
         int start = static_cast<int>(visible_nodes_cube.size()) - start_node;
@@ -474,13 +474,13 @@ extern "C" {
             std::sort(bei.begin() + s, bei.end());
             bei.erase(std::unique(bei.begin() + s, bei.end()), bei.end());
             int e = static_cast<int>(bei.size()); // NOLINT(readability-identifier-length)
-            searched.resize((e - s) * 4);
+            searched.resize(static_cast<std::size_t>(e - s) * 4);
             #pragma omp parallel for
             for (int j = s; j < e; j++) { // NOLINT(readability-identifier-length)
                 Cube e0;
                 keyToCube(e0, bei[j].second);
                 int dir = bei[j].first;
-                int coords[3], L = e0.m_l + 1; // NOLINT(readability-identifier-length)
+                int coords[3], level = e0.m_l + 1;
                 int ks[4] = {0, 1, 3, 2};
                 bool flag = true, flag2 = true;
                 for (int ik = 0; ik < 4; ik++) {
@@ -489,8 +489,8 @@ extern "C" {
                     assign(coords[c0], e0.m_coords[c0], 2, 1);
                     assign(coords[c1], e0.m_coords[c1], 2, -1 + 2 * (k & 1));
                     assign(coords[c2], e0.m_coords[c2], 2, -1 + 2 * ((k >> 1) & 1));
-                    Cube& cx = searched[(j - s) * 4 + ik];
-                    cx = search(&nodes[0], coords, L);
+                    Cube& cx = searched[static_cast<std::size_t>(j - s) * 4 + static_cast<std::size_t>(ik)];
+                    cx = search(&nodes[0], coords, level);
                     if (isBoundary(cx)) {
                         flag = false;
                         break;
@@ -500,21 +500,21 @@ extern "C" {
                 }
                 if (!flag) {
                     for (int k = 0; k < 4; k++) // NOLINT(readability-identifier-length)
-                        markBoundary(searched[(j - s) * 4 + k]);
+                        markBoundary(searched[static_cast<std::size_t>(j - s) * 4 + static_cast<std::size_t>(k)]);
                 } else if (!flag2) {
                     for (int k = 0; k < 4; k++) // NOLINT(readability-identifier-length)
-                        markExterior(searched[(j - s) * 4 + k]);
+                        markExterior(searched[static_cast<std::size_t>(j - s) * 4 + static_cast<std::size_t>(k)]);
                 }
             }
             if (i == params::n_elements) continue;
             int j1 = s, j2 = e - 1;
             while (j1 < j2) {
-                while (j1 < e && isRegular(searched[4 * (j1 - s)])) j1++;
-                while (j2 >= s && !isRegular(searched[4 * (j2 - s)])) j2--;
+                while (j1 < e && isRegular(searched[static_cast<std::size_t>(4) * static_cast<std::size_t>(j1 - s)])) j1++;
+                while (j2 >= s && !isRegular(searched[static_cast<std::size_t>(4) * static_cast<std::size_t>(j2 - s)])) j2--;
                 if (j1 < j2) {
                     std::swap(bei[j1], bei[j2]);
                     for (int k = 0; k < 4; k++) // NOLINT(readability-identifier-length)
-                        std::swap(searched[4 * (j1 - s) + k], searched[4 * (j2 - s) + k]);
+                        std::swap(searched[static_cast<std::size_t>(4) * static_cast<std::size_t>(j1 - s) + static_cast<std::size_t>(k)], searched[static_cast<std::size_t>(4) * static_cast<std::size_t>(j2 - s) + static_cast<std::size_t>(k)]);
                     j1++;
                     j2--;
                 }
@@ -522,7 +522,7 @@ extern "C" {
             auto& ivt = in_view_tag[i];
             for (int j = s; j < j1; j++) { // NOLINT(readability-identifier-length)
                 for (int k = 0; k < 4; k++) { // NOLINT(readability-identifier-length)
-                    Cube cx = searched[(j - s) * 4 + k];
+                    Cube cx = searched[static_cast<std::size_t>(j - s) * 4 + static_cast<std::size_t>(k)];
                     int vid;
                     KeyCube key = cubeToKey(cx);
                     if (bipolar_edges_vertices.count(std::make_pair(i, key))) vid = bipolar_edges_vertices[std::make_pair(i, key)];
@@ -536,12 +536,12 @@ extern "C" {
             bipolar_edges_s[i] = j1;
             j2 = e - 1;
             while (j1 < j2) {
-                while (j1 < e && isExterior(searched[4 * (j1 - s)])) j1++;
-                while (j2 >= bipolar_edges_s[i] && isBoundary(searched[4 * (j2 - s)])) j2--;
+                while (j1 < e && isExterior(searched[static_cast<std::size_t>(4) * static_cast<std::size_t>(j1 - s)])) j1++;
+                while (j2 >= bipolar_edges_s[i] && isBoundary(searched[static_cast<std::size_t>(4) * static_cast<std::size_t>(j2 - s)])) j2--;
                 if (j1 < j2) {
                     std::swap(bei[j1], bei[j2]);
                     for (int k = 0; k < 4; k++) // NOLINT(readability-identifier-length)
-                        std::swap(searched[4 * (j1 - s) + k], searched[4 * (j2 - s) + k]);
+                        std::swap(searched[static_cast<std::size_t>(4) * static_cast<std::size_t>(j1 - s) + static_cast<std::size_t>(k)], searched[static_cast<std::size_t>(4) * static_cast<std::size_t>(j2 - s) + static_cast<std::size_t>(k)]);
                     j1++;
                     j2--;
                 }
@@ -579,13 +579,13 @@ extern "C" {
             int dir = ben[i].first;
             Cube e0;
             keyToCube(e0, ben[i].second);
-            int coords[3], L = e0.m_l + 1; // NOLINT(readability-identifier-length)
+            int coords[3], level = e0.m_l + 1;
             for (int k = 0; k < 4; k++) { // NOLINT(readability-identifier-length)
                 int c0 = std::abs(dir) - 1, c1 = (c0 + 1) % 3, c2 = (c1 + 1) % 3;
                 assign(coords[c0], e0.m_coords[c0], 2, 1);
                 assign(coords[c1], e0.m_coords[c1], 2, -1 + 2 * (k & 1));
                 assign(coords[c2], e0.m_coords[c2], 2, -1 + 2 * ((k >> 1) & 1));
-                Cube c = search(&coarse::nodes[0], coords, L);
+                Cube c = search(&coarse::nodes[0], coords, level);
                 if (!isBoundary(c)) {
                     KeyCube key = cubeToKey(c);
                     if (solid::occluded_set.count(key) || solid::visible_set.count(key)) continue;
@@ -600,7 +600,7 @@ extern "C" {
         return start - (static_cast<int>(visible_nodes_cube.size()) - start_node);
     }
 
-    void final_iteration3_occluded(sdfT *sdf) {
+    void final_iteration3_occluded(sdfT *sdf) { // NOLINT(readability-identifier-naming, modernize-use-trailing-return-type)
         using namespace final_ns;
         using namespace solid;
         for (int i = 0; i < static_cast<int>(vertices.size()) * params::n_elements; i++) assert(!std::isnan(sdf[i]));
@@ -610,7 +610,7 @@ extern "C" {
         occluded_nodes_id.clear();
     }
 
-    void final_remaining(int *nv) {
+    void final_remaining(int *nv) { // NOLINT(readability-identifier-naming, modernize-use-trailing-return-type)
         using namespace final_ns;
         bipolar_edges_computed_vertices.clear();
         bipolar_edges_vertices_vector.clear();
@@ -620,14 +620,14 @@ extern "C" {
             std::sort(bei.begin() + s, bei.end());
             bei.erase(std::unique(bei.begin() + s, bei.end()), bei.end());
             int e = static_cast<int>(bei.size()); // NOLINT(readability-identifier-length)
-            searched.resize((e - s) * 4);
-            std::vector<bool> tags((e - s) * 4);
+            searched.resize(static_cast<std::size_t>(e - s) * 4);
+            std::vector<bool> tags(static_cast<std::size_t>(e - s) * 4);
             #pragma omp parallel for
             for (int j = s; j < e; j++) { // NOLINT(readability-identifier-length)
                 Cube e0;
                 keyToCube(e0, bei[j].second);
                 int dir = bei[j].first;
-                int coords[3], L = e0.m_l + 1; // NOLINT(readability-identifier-length)
+                int coords[3], level = e0.m_l + 1;
                 int ks[4] = {0, 1, 3, 2};
                 bool flag = false;
                 for (int ik = 0; ik < 4; ik++) {
@@ -636,31 +636,31 @@ extern "C" {
                     assign(coords[c0], e0.m_coords[c0], 2, 1);
                     assign(coords[c1], e0.m_coords[c1], 2, -1 + 2 * (k & 1));
                     assign(coords[c2], e0.m_coords[c2], 2, -1 + 2 * ((k >> 1) & 1));
-                    Cube& cx = searched[(j - s) * 4 + ik];
-                    cx = search(&nodes[0], coords, L, true);
+                    Cube& cx = searched[static_cast<std::size_t>(j - s) * 4 + static_cast<std::size_t>(ik)];
+                    cx = search(&nodes[0], coords, level, true);
                     if (isBoundary(cx)) {
                         flag = true;
                         break;
                     } else {
-                        tags[(j - s) * 4 + ik] = solid::occluded_set.count(cubeToKey(cx)) == 0 && !isExterior(search(&nodes[0], coords, L));
+                        tags[static_cast<std::size_t>(j - s) * 4 + static_cast<std::size_t>(ik)] = solid::occluded_set.count(cubeToKey(cx)) == 0 && !isExterior(search(&nodes[0], coords, level));
                     }
                 }
                 if (flag) {
                     for (int k = 0; k < 4; k++) // NOLINT(readability-identifier-length)
-                        markBoundary(searched[(j - s) * 4 + k]);
+                        markBoundary(searched[static_cast<std::size_t>(j - s) * 4 + static_cast<std::size_t>(k)]);
                 }
             }
             int j1 = s, j2 = e - 1;
             while (j1 < j2) {
-                while (j1 < e && isRegular(searched[4 * (j1 - s)])) j1++;
-                while (j2 >= s && !isRegular(searched[4 * (j2 - s)])) j2--;
+                while (j1 < e && isRegular(searched[static_cast<std::size_t>(4) * static_cast<std::size_t>(j1 - s)])) j1++;
+                while (j2 >= s && !isRegular(searched[static_cast<std::size_t>(4) * static_cast<std::size_t>(j2 - s)])) j2--;
                 if (j1 < j2) {
                     std::swap(bei[j1], bei[j2]);
                     for (int k = 0; k < 4; k++) { // NOLINT(readability-identifier-length)
-                        std::swap(searched[4 * (j1 - s) + k], searched[4 * (j2 - s) + k]);
-                        bool tmp = tags[4 * (j1 - s) + k];
-                        tags[4 * (j1 - s) + k] = tags[4 * (j2 - s) + k];
-                        tags[4 * (j2 - s) + k] = tmp;
+                        std::swap(searched[static_cast<std::size_t>(4) * static_cast<std::size_t>(j1 - s) + static_cast<std::size_t>(k)], searched[static_cast<std::size_t>(4) * static_cast<std::size_t>(j2 - s) + static_cast<std::size_t>(k)]);
+                        bool tmp = tags[static_cast<std::size_t>(4) * static_cast<std::size_t>(j1 - s) + static_cast<std::size_t>(k)];
+                        tags[static_cast<std::size_t>(4) * static_cast<std::size_t>(j1 - s) + static_cast<std::size_t>(k)] = tags[static_cast<std::size_t>(4) * static_cast<std::size_t>(j2 - s) + static_cast<std::size_t>(k)];
+                        tags[static_cast<std::size_t>(4) * static_cast<std::size_t>(j2 - s) + static_cast<std::size_t>(k)] = tmp;
                     }
                     j1++;
                     j2--;
@@ -669,39 +669,39 @@ extern "C" {
             auto& ivt = in_view_tag[i];
             for (int j = s; j < j1; j++) { // NOLINT(readability-identifier-length)
                 for (int k = 0; k < 4; k++) { // NOLINT(readability-identifier-length)
-                    Cube cx = searched[(j - s) * 4 + k];
+                    Cube cx = searched[static_cast<std::size_t>(j - s) * 4 + static_cast<std::size_t>(k)];
                     int vid;
                     KeyCube key = cubeToKey(cx);
                     if (bipolar_edges_vertices.count(std::make_pair(i, key))) vid = bipolar_edges_vertices[std::make_pair(i, key)];
                     else {
                         vid = bipolar_edges_vertices[std::make_pair(i, key)] = vertices_cnt[i]++;
-                        ivt.push_back(tags[(j - s) * 4 + k]);
+                        ivt.push_back(tags[static_cast<std::size_t>(j - s) * 4 + static_cast<std::size_t>(k)]);
                     }
                     bipolar_edges_vindices[i].push_back(vid);
                 }
             }
             bei.erase(bei.begin() + j1, bei.end());
-            bipolar_edges_computed_vertices.push_back(std::vector<ComputedVertex>(vertices_cnt[i]));
-            bipolar_edges_vertices_vector.push_back(std::vector<KeyCube>(vertices_cnt[i]));
+            bipolar_edges_computed_vertices.emplace_back(vertices_cnt[i]);
+            bipolar_edges_vertices_vector.emplace_back(vertices_cnt[i]);
             nv[i] = vertices_cnt[i];
         }
-        for (auto iter = bipolar_edges_vertices.begin(); iter != bipolar_edges_vertices.end(); iter++) {
-            int i = iter->first.first;
+        for (const auto& [bkey, bval] : bipolar_edges_vertices) {
+            int i = bkey.first;
             auto& becvi = bipolar_edges_computed_vertices[i];
             auto& bevvi = bipolar_edges_vertices_vector[i];
             Cube c;
-            keyToCube(c, iter->first.second);
-            computeCenter(becvi[iter->second].m_c, c);
-            becvi[iter->second].m_l = 0;
-            becvi[iter->second].m_r = 0.5 * params::size / (1 << c.m_l);
-            bevvi[iter->second] = iter->first.second;
+            keyToCube(c, bkey.second);
+            computeCenter(becvi[bval].m_c, c);
+            becvi[bval].m_l = 0;
+            becvi[bval].m_r = 0.5 * params::size / (1 << c.m_l);
+            bevvi[bval] = bkey.second;
         }
         bipolar_edges_vertices.clear();
         nodes.clear();
         solid::occluded_set.clear();
     }
 
-    void get_verts_center(int e, T *positions) { // NOLINT(readability-identifier-length)
+    void get_verts_center(int e, T *positions) { // NOLINT(readability-identifier-length, readability-identifier-naming, modernize-use-trailing-return-type)
         using namespace final_ns;
         auto& becv = bipolar_edges_computed_vertices[e];
         for (int i = 0; i < static_cast<int>(becv.size()); i++) {
@@ -709,7 +709,7 @@ extern "C" {
         }
     }
 
-    void get_extra_verts_center(T *epositions, T *fpositions) {
+    void get_extra_verts_center(T *epositions, T *fpositions) { // NOLINT(readability-identifier-naming, modernize-use-trailing-return-type)
         using namespace computing;
         for (int i = 0; i < static_cast<int>(edge_vertices.size()); i++) {
             memcpy(epositions + 3 * i, edge_vertices[i].second.m_c, 3 * sizeof(T));
@@ -719,7 +719,7 @@ extern "C" {
         }
     }
 
-    void update_verts(int e, sdfT *sdf, sdfT *center_sdf, T *positions) { // NOLINT(readability-identifier-length)
+    void update_verts(int e, sdfT *sdf, sdfT *center_sdf, T *positions) { // NOLINT(readability-identifier-length, readability-identifier-naming, modernize-use-trailing-return-type)
         using namespace final_ns;
         auto& becv = bipolar_edges_computed_vertices[e];
         #pragma omp parallel for
@@ -744,7 +744,7 @@ extern "C" {
         }
     }
 
-    void update_extra_verts(sdfT *esdf, sdfT *fsdf, sdfT *ecenter_sdf, sdfT *fcenter_sdf, T *epositions, T *fpositions) {
+    void update_extra_verts(sdfT *esdf, sdfT *fsdf, sdfT *ecenter_sdf, sdfT *fcenter_sdf, T *epositions, T *fpositions) { // NOLINT(readability-identifier-naming, modernize-use-trailing-return-type)
         using namespace computing;
         int edge_n = 2;
         #pragma omp parallel for
@@ -795,7 +795,7 @@ extern "C" {
         }
     }
 
-    void get_lr_verts(int e, T *cube_l, T *cube_r) { // NOLINT(readability-identifier-length)
+    void get_lr_verts(int e, T *cube_l, T *cube_r) { // NOLINT(readability-identifier-length, readability-identifier-naming, modernize-use-trailing-return-type)
         using namespace final_ns;
         auto& becv = bipolar_edges_computed_vertices[e];
         for (int i = 0; i < static_cast<int>(becv.size()); i++) {
@@ -809,7 +809,7 @@ extern "C" {
         }
     }
 
-    void get_lr_extra_verts(T *epos_l, T *epos_r, T *fpos_l, T *fpos_r) {
+    void get_lr_extra_verts(T *epos_l, T *epos_r, T *fpos_l, T *fpos_r) { // NOLINT(readability-identifier-naming, modernize-use-trailing-return-type)
         using namespace computing;
         for (int i = 0; i < static_cast<int>(edge_vertices.size()); i++) {
             for (int j = 0; j < 2; j++) { // NOLINT(readability-identifier-length)
@@ -838,7 +838,7 @@ extern "C" {
     }
 
     // todo consider more than corners when a vertex cube has complex side face
-    void finalize_verts(int e, sdfT *sdf_l, sdfT *sdf_r, T *verts) { // NOLINT(readability-identifier-length)
+    void finalize_verts(int e, sdfT *sdf_l, sdfT *sdf_r, T *verts) { // NOLINT(readability-identifier-length, readability-identifier-naming, modernize-use-trailing-return-type)
         using namespace final_ns;
         auto& becv = bipolar_edges_computed_vertices[e];
         for (int i = 0; i < static_cast<int>(becv.size()); i++) {
@@ -860,7 +860,7 @@ extern "C" {
         bipolar_edges_computed_vertices[e].clear();
     }
 
-    void finalize_extra_verts(sdfT *esdf_l, sdfT *esdf_r, T *everts, sdfT *fsdf_l, sdfT *fsdf_r, T *fverts) {
+    void finalize_extra_verts(sdfT *esdf_l, sdfT *esdf_r, T *everts, sdfT *fsdf_l, sdfT *fsdf_r, T *fverts) { // NOLINT(readability-identifier-naming, modernize-use-trailing-return-type)
         using namespace computing;
         for (int i = 0; i < static_cast<int>(edge_vertices.size()); i++) {
             T vx[3] = {0};
@@ -900,7 +900,7 @@ extern "C" {
         face_vertices.clear();
     }
 
-    void get_in_view_tag(int e, bool *output) { // NOLINT(readability-identifier-length)
+    void get_in_view_tag(int e, bool *output) { // NOLINT(readability-identifier-length, readability-identifier-naming, modernize-use-trailing-return-type)
         using namespace final_ns;
         using namespace computing;
         int cnt = 0;
@@ -919,7 +919,7 @@ extern "C" {
         face_vertices_in_view_tag.clear();
     }
 
-    void construct_faces(int e, T *final_vertices, int *cnt) { // NOLINT(readability-identifier-length)
+    void construct_faces(int e, T *final_vertices, int *cnt) { // NOLINT(readability-identifier-length, readability-identifier-naming, modernize-use-trailing-return-type)
         using namespace final_ns;
         using namespace computing;
         auto& edge_e = bipolar_edges[e];
@@ -992,7 +992,7 @@ extern "C" {
                     cv.m_c[j] = (computed_edge[j] + computed_edge[j + 3]) / 2;
                 cv.m_l = 0;
                 cv.m_r = 0.5 * params::size / (1 << c.m_l);
-                edge_vertices.push_back(std::make_pair(dir, cv));
+                edge_vertices.emplace_back(dir, cv);
                 bool edge_in_view = false;
                 for (int j = 0; j < 4; j++) edge_in_view = edge_in_view || in_view_tag[e][vertices_ids[i * 4 + j]]; // NOLINT(readability-identifier-length)
                 edge_vertices_in_view_tag.push_back(edge_in_view);
@@ -1013,7 +1013,7 @@ extern "C" {
                                 cv2.m_c[k] = (computed_faces[12 * j + k + 3] + computed_faces[12 * j + k + 6]) / 2;
                             cv2.m_l = 0;
                             cv2.m_r = 0.5 * params::size / (1 << computed_faces_L[j]);
-                            face_vertices.push_back(std::make_pair(computed_faces_dir[j], cv2));
+                            face_vertices.emplace_back(computed_faces_dir[j], cv2);
                             bool face_in_view = in_view_tag[e][v1] || in_view_tag[e][v2];
                             face_vertices_in_view_tag.push_back(face_in_view);
                         }
@@ -1029,7 +1029,7 @@ extern "C" {
                 for (int j = 0; j < 4; j++) { // NOLINT(readability-identifier-length)
                     int v1 = vertices_ids[i * 4 + j], v2 = vertices_ids[i * 4 + (j + 1) % 4], v3 = vertices_ids[i * 4 + (j + 2) % 4];
                     if (v1 == v2 || v2 == v3 || v1 == v3) continue;
-                    if (triSegIntersect(final_vertices + v1 * 3, final_vertices + v2 * 3, final_vertices + v3 * 3, computed_edge, computed_edge + 3)) {
+                    if (triSegIntersect(final_vertices + static_cast<ptrdiff_t>(v1) * 3, final_vertices + static_cast<ptrdiff_t>(v2) * 3, final_vertices + static_cast<ptrdiff_t>(v3) * 3, computed_edge, computed_edge + 3)) {
                         start_j = j;
                     }
                 }
@@ -1037,7 +1037,7 @@ extern "C" {
                     int j = start_j; // NOLINT(readability-identifier-length)
                     int v1 = vertices_ids[i * 4 + j], v2 = vertices_ids[i * 4 + (j + 1) % 4], v3 = vertices_ids[i * 4 + (j + 2) % 4];
                     int v4 = vertices_ids[i * 4 + (j + 3) % 4];
-                    if (v4 == v3 || v4 == v1 || triSegIntersect(computed_edge, final_vertices + v4 * 3, computed_edge + 3, final_vertices + v1 * 3, final_vertices + v3 * 3)) {
+                    if (v4 == v3 || v4 == v1 || triSegIntersect(computed_edge, final_vertices + static_cast<ptrdiff_t>(v4) * 3, computed_edge + 3, final_vertices + static_cast<ptrdiff_t>(v1) * 3, final_vertices + static_cast<ptrdiff_t>(v3) * 3)) {
                         condition2 = true;
                     }
                 }
@@ -1047,7 +1047,7 @@ extern "C" {
                         cv.m_c[j] = (computed_edge[j] + computed_edge[j + 3]) / 2;
                     cv.m_l = 0;
                     cv.m_r = 0.5 * params::size / (1 << c.m_l);
-                    edge_vertices.push_back(std::make_pair(dir, cv));
+                    edge_vertices.emplace_back(dir, cv);
                     bool edge_in_view = false;
                     for (int j = 0; j < 4; j++) edge_in_view = edge_in_view || in_view_tag[e][vertices_ids[i * 4 + j]]; // NOLINT(readability-identifier-length)
                     edge_vertices_in_view_tag.push_back(edge_in_view);
@@ -1078,7 +1078,7 @@ extern "C" {
         cnt[2] = static_cast<int>(faces.size()) / 3;
     }
 
-    void get_faces(int *faces_output) {
+    void get_faces(int *faces_output) { // NOLINT(readability-identifier-naming, modernize-use-trailing-return-type)
         using namespace computing;
         memcpy(faces_output, &faces[0], sizeof(int) * faces.size());
         faces.clear();
