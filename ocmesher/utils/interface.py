@@ -3,6 +3,7 @@
 
 # Authors: Zeyu Ma
 
+import os
 import sys
 from ctypes import CDLL, POINTER, RTLD_LOCAL, c_double, c_float, c_int32, c_bool
 from typing import Any, Optional
@@ -35,4 +36,4 @@ def register_func(me: Any, dll: CDLL, name: str, argtypes: Optional[list] = None
     func.restype = restype
 
 def load_cdll(path: str) -> CDLL:
-    return CDLL(str(sys.path[-1]) + "/" + path, mode=RTLD_LOCAL)
+    return CDLL(os.path.join(sys.path[-1], path), mode=RTLD_LOCAL)
