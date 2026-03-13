@@ -41,3 +41,4 @@ known-first-party = ["ocmesher"]
 
 [tool.pyright]
 pythonVersion = "3.11"
+typeCheckingMode = "basic"

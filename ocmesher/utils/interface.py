@@ -38,7 +38,7 @@ def register_func(
     dll: CDLL,
     name: str,
     argtypes: list[Any] | None = None,
-    restype: type[ctypes._SimpleCData[Any]] | None = None,
+    restype: Any | None = None,
     caller_name: str | None = None,
 ) -> None:
     if argtypes is None:

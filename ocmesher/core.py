@@ -29,6 +29,8 @@ from .utils.interface import (
 )
 from .utils.timer import Timer
 
+AC = np.ascontiguousarray
+
 CamerasTuple = tuple[
     Sequence[npt.NDArray[np.floating]],
     Sequence[npt.NDArray[np.floating]],
@@ -199,7 +201,6 @@ class OcMesher:
         kernels: Sequence[Callable[[npt.NDArray[np.floating]], npt.NDArray[np.floating]]],
     ) -> tuple[list[trimesh.Trimesh], list[npt.NDArray[np.bool_]]]:
         n_elements = len(kernels)
-        AC = np.ascontiguousarray
         # octree only considering cameras, not sdf
         with Timer("coarse step part1"):
             n_blocks = self.run_coarse(
