@@ -94,6 +94,7 @@ class OcMesher:
         ])
         register_func(self, dll, "get_faces", [POINTER(c_int32)])
         register_func(self, dll, "get_in_view_tag", [c_int32, POINTER(c_bool)])
+        register_func(self, dll, "cleanup", [])
 
 
     def kernel_caller(self, kernels, XYZ_all):
@@ -227,4 +228,5 @@ class OcMesher:
                 in_view_tags.append(in_view_tag)
                 meshes.append(trimesh.Trimesh(vertices=vertices, faces=faces, process=False))
                 print(f"element {e} has vertices #{meshes[-1].vertices.shape[0]} faces #{meshes[-1].faces.shape[0]}")
+        self.cleanup()
         return meshes, in_view_tags

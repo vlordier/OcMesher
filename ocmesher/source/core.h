@@ -7,16 +7,18 @@
 #include <vector>
 #include <set>
 #include <map>
+#include <unordered_map>
+#include <unordered_set>
 #include <queue>
 #include <algorithm>
 #include <cassert>
 #include <cmath>
 #include <cstring>
+#include <climits>
 #define mp std::make_pair
 #define pair std::pair
 #define max std::max
 #define min std::min
-#define INT_MAX 2147483647
 #define cubex(x) (x) * (x) * (x)
 #define cube_index(x, y, z, s) (x)*(s)*(s)+(y)*(s)+(z)
 #define xpp(p) p.first
@@ -64,6 +66,23 @@ struct node {
     int nxts[8];
 };
 
+struct PairHash {
+    std::size_t hash_value(int v) const noexcept {
+        return std::hash<int>{}(v);
+    }
+    template<typename T1, typename T2>
+    std::size_t hash_value(const pair<T1, T2>& p) const noexcept {
+        std::size_t h1 = hash_value(p.first);
+        std::size_t h2 = hash_value(p.second);
+        h1 ^= h2 + 0x9e3779b9 + (h1 << 6) + (h1 >> 2);
+        return h1;
+    }
+    template<typename T1, typename T2>
+    std::size_t operator()(const pair<T1, T2>& p) const noexcept {
+        return hash_value(p);
+    }
+};
+
 int int_log(T x) {
     return int(max(T(0), (T)ceil(log2(x))));
 }
@@ -87,7 +106,7 @@ void enumerate_vertices(vertex *v, node n) {
             if (v[vid].L == 0) break;
             bool flag = 1;
             for (int p = 0; p < 3; p++)
-                if (v[vid].coords[p]&1 != 0) {
+                if ((v[vid].coords[p] & 1) != 0) {
                     flag = 0;
                     break;
                 }
@@ -195,7 +214,7 @@ void partial_expand_octree(vector<node> &nodes, int index, int instance) {
 
 cube search(node *nodes, int *coords, int L, bool include_exterior=0) {
     assert(L > 0);
-    cube res;
+    cube res = {};
     for (int i = 0; i < 3; i++)
         if (!(coords[i] > 0 && coords[i] < 1<<L)) {
             mark_boundary(res);
@@ -206,7 +225,7 @@ cube search(node *nodes, int *coords, int L, bool include_exterior=0) {
     for (int l = 0; l < L - 1; l++) {
         if (leaf_node(current)) break;
         for (int i = 0; i < 3; i++)
-            if (coords[i] & ((1<<(L-current.c.L-1))-1) == 0) {
+            if ((coords[i] & ((1<<(L-current.c.L-1))-1)) == 0) {
                 mark_boundary(res);
                 return res;
             }
@@ -239,7 +258,7 @@ cube search(node *nodes, int *coords, int L, bool include_exterior=0) {
         return res;
     }
     for (int i = 0; i < 3; i++)
-        if (coords[i] & ((1<<(L-current.c.L-gl))-1) == 0) {
+        if ((coords[i] & ((1<<(L-current.c.L-gl))-1)) == 0) {
             mark_boundary(res);
             return res;
         }
@@ -269,12 +288,13 @@ int divide_to_cube(vector<node> &nodes, cube c) {
     }
 }
 
-void find_edges(node n, map<key_cube, int> &vertices, sdfT *sdf, vector<vector<key_edge> > &bipolar_edges) {
+void find_edges(node n, std::unordered_map<key_cube, int, PairHash> &vertices, sdfT *sdf, vector<vector<key_edge> > &bipolar_edges) {
     int s = grid_node_level(n), ss=1<<s;
-    vertex v[cubex(ss+1)];
-    sdfT *sdf_v[cubex(ss+1)];
-    enumerate_vertices(v, n);
-    for (int i = 0; i < cubex(ss+1); i++) {
+    int vsize = cubex(ss+1);
+    vector<vertex> v(vsize);
+    vector<sdfT*> sdf_v(vsize);
+    enumerate_vertices(&v[0], n);
+    for (int i = 0; i < vsize; i++) {
         sdf_v[i] = sdf + vertices[cube_to_key(v[i])] * params::n_elements;
     }
     for (int edir = 0; edir < 3; edir++)
@@ -320,7 +340,7 @@ int compute_boundary(cube c, cube bound) {
     int b[3][2];
     for (int i = 0; i < 3; i++)
     for (int p = 0; p < 2; p++) {
-        b[i][p] = c.coords[i] + p == (bound.coords[i]+p) << (c.L-bound.L);
+        b[i][p] = (c.coords[i] + p) == ((bound.coords[i]+p) << (c.L-bound.L));
     }
     int instance=0;
     for (int i = 0; i < 8; i++) {
@@ -361,7 +381,7 @@ bool tri_seg_intersect(T *t1, T *t2, T *t3, T *s1, T *s2) {
         m[2][i] = t3[i] - s2[i];
     }
     T det2 = det(m);
-    if (!(det1 > 0 && det2 < 0 || det1 < 0 && det2 > 0)) return 0;
+    if (!((det1 > 0 && det2 < 0) || (det1 < 0 && det2 > 0))) return 0;
 
     for (int i = 0; i < 3; i++) {
         m[0][i] = t1[i] - s1[i];
@@ -374,12 +394,12 @@ bool tri_seg_intersect(T *t1, T *t2, T *t3, T *s1, T *s2) {
         m[1][i] = t3[i] - s1[i];
     }
     det2 = det(m);
-    if (!(det1 > 0 && det2 > 0 || det1 < 0 && det2 < 0)) return 0;
+    if (!((det1 > 0 && det2 > 0) || (det1 < 0 && det2 < 0))) return 0;
     for (int i = 0; i < 3; i++) {
         m[0][i] = t3[i] - s1[i];
         m[1][i] = t1[i] - s1[i];
     }
     det1 = det(m);
-    if (!(det1 >= 0 && det2 > 0 || det1 <= 0 && det2 < 0)) return 0;
+    if (!((det1 >= 0 && det2 > 0) || (det1 <= 0 && det2 < 0))) return 0;
     return 1;
 }

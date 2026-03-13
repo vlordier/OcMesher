@@ -24,8 +24,8 @@ namespace fine {
 
 namespace solid {
     vector<cube> cubes;
-    set<key_cube> cubes_set;
-    set<key_cube> visible_set, occluded_set;
+    std::unordered_set<key_cube, PairHash> cubes_set;
+    std::unordered_set<key_cube, PairHash> visible_set, occluded_set;
 }
 
 namespace final {
@@ -34,11 +34,11 @@ namespace final {
     vector<cube> visible_nodes_cube;
     vector<int> occluded_nodes_id;
     int gl, start_node, end_node, size0;
-    map<key_cube, int> vertices;
+    std::unordered_map<key_cube, int, PairHash> vertices;
     vector<int> bipolar_edges_s;
     vector<vector<key_edge> > bipolar_edges;
     vector<vector<int> > bipolar_edges_vindices;
-    map<pair<int, key_cube>, int> bipolar_edges_vertices;
+    std::unordered_map<pair<int, key_cube>, int, PairHash> bipolar_edges_vertices;
     vector<int> vertices_cnt;
     vector<vector<key_cube> > bipolar_edges_vertices_vector;
     vector<vector<computed_vertex> > bipolar_edges_computed_vertices;
@@ -53,7 +53,7 @@ namespace computing {
     vector<bool> edge_vertices_in_view_tag;
     vector<pair<int, computed_vertex> > face_vertices;
     vector<bool> face_vertices_in_view_tag;
-    map<pair<int, int>, int> face_vertices_map;
+    std::unordered_map<pair<int, int>, int, PairHash> face_vertices_map;
 }
 
 extern "C" {
@@ -67,6 +67,10 @@ extern "C" {
         int memory_limit_mb,
         int n_elements
     ) {
+        assert(center != NULL && "center pointer must not be NULL");
+        assert(cams != NULL && "cams pointer must not be NULL");
+        assert(n_cams > 0 && "n_cams must be positive");
+        assert(n_elements > 0 && "n_elements must be positive");
         using namespace coarse;
         params::center = center;
         params::size = size;
@@ -83,6 +87,7 @@ extern "C" {
         memset(root.c.coords, 0, 3 * sizeof(int));
         root.c.L = 0;
         nodes.clear();
+        nodes.reserve(coarse_count);
         nodes.push_back(root);
         nodes_heap = std::priority_queue<pair<T, int> >();
         nodes_heap.push(mp(projected_size(root.c), 0));
@@ -219,7 +224,9 @@ extern "C" {
                     solid::cubes_set.insert(cube_to_key(c0));
                 }
             }
-            cubes_queue.erase(cubes_queue.begin(), cubes_queue.begin() + cqs);
+            if (cqs > 0) {
+                cubes_queue.erase(cubes_queue.begin(), cubes_queue.begin() + cqs);
+            }
         }
         output_vertices.clear();
         output_vertices_index.clear();
@@ -258,14 +265,15 @@ extern "C" {
     int vis_filter(bool simplify_occluded, int relax_iters) {
         using namespace params;
         using namespace solid;
-        for (set<key_cube>::iterator iter = cubes_set.begin(); iter != cubes_set.end(); iter++) {
+        cubes.reserve(cubes.size() + cubes_set.size());
+        for (std::unordered_set<key_cube, PairHash>::iterator iter = cubes_set.begin(); iter != cubes_set.end(); iter++) {
             cube c;
             key_to_cube(c, *iter);
             cubes.push_back(c);
         }
         cubes_set.clear();
 
-        vector<bool> visible(cubes.size(), false);
+        vector<char> visible(cubes.size(), 0);
         T factor = 10;
         vector<T> canvas;
         for (int k = 0; k < n_cams; k++) {
@@ -274,7 +282,7 @@ extern "C" {
             if (simplify_occluded) {
                 canvas = vector<T>(H * W, std::numeric_limits<T>::infinity());
                 #pragma omp parallel for
-                for (int i = 0; i < cubes.size(); i++) {
+                for (int i = 0; i < (int)cubes.size(); i++) {
                     T image_coords[3];
                     projected_coords(cubes[i], k, image_coords, NULL);
                     if (image_coords[2] >= 0) {
@@ -292,7 +300,7 @@ extern "C" {
                 }
             }
             #pragma omp parallel for
-            for (int i = 0; i < cubes.size(); i++) {
+            for (int i = 0; i < (int)cubes.size(); i++) {
                 T image_coords[3];
                 projected_coords(cubes[i], k, image_coords, NULL);
                 if (image_coords[2] >= 0) {
@@ -305,27 +313,27 @@ extern "C" {
                                 int nx = x + dx, ny = y + dy;
                                 if (nx >= 0 && ny >= 0 && nx < W && ny < H) {
                                     if (image_coords[2] <= canvas[nx * H + ny]) {
-                                        visible[i] = true;
+                                        visible[i] = 1;
                                     }
                                 }
                             }
                         }
-                        else visible[i] = true;
+                        else visible[i] = 1;
                     }
                 }
             }
         }
         visible_set.clear();
         occluded_set.clear();
-        set<key_cube> new_visible_set, old_visible_set;
-        for (int i = 0; i < visible.size(); i++) {
+        std::unordered_set<key_cube, PairHash> new_visible_set, old_visible_set;
+        for (int i = 0; i < (int)visible.size(); i++) {
             if (visible[i]) visible_set.insert(cube_to_key(cubes[i]));
             else occluded_set.insert(cube_to_key(cubes[i]));
         }
         visible.clear();
         cubes.clear();
         for (int i = 0; i < relax_iters; i++) {
-            for (set<key_cube>::iterator iter = visible_set.begin(); iter != visible_set.end(); iter++) {
+            for (std::unordered_set<key_cube, PairHash>::iterator iter = visible_set.begin(); iter != visible_set.end(); iter++) {
                 cube c;
                 key_to_cube(c, *iter);
                 int coords[3];
@@ -358,12 +366,14 @@ extern "C" {
         final::nodes.push_back(root);
         final::visible_nodes_cube.clear();
         final::occluded_nodes_id.clear();
-        for (set<key_cube>::iterator iter = visible_set.begin(); iter != visible_set.end(); iter++) {
+        final::visible_nodes_cube.reserve(visible_set.size());
+        for (std::unordered_set<key_cube, PairHash>::iterator iter = visible_set.begin(); iter != visible_set.end(); iter++) {
             cube c;
             key_to_cube(c, *iter);
             final::visible_nodes_cube.push_back(c);
         }
-        for (set<key_cube>::iterator iter = occluded_set.begin(); iter != occluded_set.end(); iter++) {
+        final::occluded_nodes_id.reserve(occluded_set.size());
+        for (std::unordered_set<key_cube, PairHash>::iterator iter = occluded_set.begin(); iter != occluded_set.end(); iter++) {
             cube c;
             key_to_cube(c, *iter);
             final::occluded_nodes_id.push_back(divide_to_cube(final::nodes, c));
@@ -453,7 +463,7 @@ extern "C" {
     void final_iteration2(T *xyz) {
         using namespace params;
         using namespace final;
-        for (map<key_cube, int>::iterator iter = vertices.begin(); iter != vertices.end(); iter++) {
+        for (std::unordered_map<key_cube, int, PairHash>::iterator iter = vertices.begin(); iter != vertices.end(); iter++) {
             vertex v;
             key_to_cube(v, iter->first);
             compute_coords(xyz + iter->second*3, v.coords, v.L);
@@ -559,7 +569,7 @@ extern "C" {
         for (int i = start_node; i < end_node; i++) {
             assert(new_nodes.empty());
             int nodes_id = divide_to_cube(nodes, visible_nodes_cube[i]);
-            memset(nodes[nodes_id].nxts, -1, 3 * sizeof(int));
+            memset(nodes[nodes_id].nxts, -1, 8 * sizeof(int));
             new_nodes.push(nodes_id);
             while (!new_nodes.empty()) {
                 int ind = new_nodes.front();
@@ -624,7 +634,7 @@ extern "C" {
             bei.erase(std::unique(bei.begin() + s, bei.end()), bei.end());
             int e = bei.size();
             searched.resize((e-s)*4);
-            vector<bool> tags((e-s)*4);
+            vector<char> tags((e-s)*4, 0);
             #pragma omp parallel for
             for (int j = s; j < e; j++) {
                 cube e0;
@@ -662,7 +672,7 @@ extern "C" {
                     std::swap(bei[j1], bei[j2]);
                     for (int k = 0; k < 4; k++) {
                         std::swap(searched[4*(j1-s) + k], searched[4*(j2-s) + k]);
-                        bool tmp = tags[4*(j1-s) + k];
+                        char tmp = tags[4*(j1-s) + k];
                         tags[4*(j1-s)+k] = tags[4*(j2-s) + k];
                         tags[4*(j2-s)+k] = tmp;
                     }
@@ -689,7 +699,7 @@ extern "C" {
             bipolar_edges_vertices_vector.push_back(vector<key_cube>(vertices_cnt[i]));
             nv[i] = vertices_cnt[i];
         }
-        for (map<pair<int, key_cube>, int>::iterator iter = bipolar_edges_vertices.begin(); iter != bipolar_edges_vertices.end(); iter++) {
+        for (std::unordered_map<pair<int, key_cube>, int, PairHash>::iterator iter = bipolar_edges_vertices.begin(); iter != bipolar_edges_vertices.end(); iter++) {
             int i = iter->first.first;
             vector<computed_vertex> &becvi = bipolar_edges_computed_vertices[i];
             vector<key_cube> &bevvi = bipolar_edges_vertices_vector[i];
@@ -1093,5 +1103,62 @@ extern "C" {
         using namespace computing;
         memcpy(faces_output, &faces[0], sizeof(int) * faces.size());
         faces.clear();
+    }
+
+    void cleanup() {
+        // Release all global state to prevent memory leaks across calls
+        {
+            vector<node>().swap(coarse::nodes);
+            coarse::nodes_heap = std::priority_queue<pair<T, int> >();
+            vector<int>().swap(coarse::nodes_vector);
+        }
+        {
+            fine::start_node = 0;
+            fine::end_node = 0;
+            vector<pair<int, int3> >().swap(fine::cubes_queue);
+            vector<bool>().swap(fine::cubes);
+            vector<int>().swap(fine::cubes_index);
+            vector<int>().swap(fine::vertices);
+            vector<int>().swap(fine::vertices_index);
+            vector<vertex>().swap(fine::output_vertices);
+            vector<int>().swap(fine::output_vertices_index);
+        }
+        {
+            vector<cube>().swap(solid::cubes);
+            solid::cubes_set.clear();
+            solid::visible_set.clear();
+            solid::occluded_set.clear();
+        }
+        {
+            final::new_nodes = queue<int>();
+            vector<vertex>().swap(final::v);
+            vector<cube>().swap(final::visible_nodes_cube);
+            vector<int>().swap(final::occluded_nodes_id);
+            final::gl = 0;
+            final::start_node = 0;
+            final::end_node = 0;
+            final::size0 = 0;
+            final::vertices.clear();
+            vector<int>().swap(final::bipolar_edges_s);
+            vector<vector<key_edge> >().swap(final::bipolar_edges);
+            vector<vector<int> >().swap(final::bipolar_edges_vindices);
+            final::bipolar_edges_vertices.clear();
+            vector<int>().swap(final::vertices_cnt);
+            vector<vector<key_cube> >().swap(final::bipolar_edges_vertices_vector);
+            vector<vector<computed_vertex> >().swap(final::bipolar_edges_computed_vertices);
+            vector<node>().swap(final::nodes);
+            vector<vector<bool> >().swap(final::in_view_tag);
+            vector<cube>().swap(final::searched);
+        }
+        {
+            vector<int>().swap(computing::faces);
+            vector<pair<int, computed_vertex> >().swap(computing::edge_vertices);
+            vector<bool>().swap(computing::edge_vertices_in_view_tag);
+            vector<pair<int, computed_vertex> >().swap(computing::face_vertices);
+            vector<bool>().swap(computing::face_vertices_in_view_tag);
+            computing::face_vertices_map.clear();
+        }
+        params::center = NULL;
+        params::cams = NULL;
     }
 }
