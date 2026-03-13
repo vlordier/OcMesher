@@ -44,10 +44,10 @@ class TestTimerDisabled:
             pass
         assert not hasattr(t, "duration")
 
-    def test_enter_returns_none_when_disabled(self):
+    def test_enter_returns_self_when_disabled(self):
         t = Timer("disabled", disable_timer=True)
         result = t.__enter__()
-        assert result is None
+        assert result is t
 
 
 class TestTimerException:
