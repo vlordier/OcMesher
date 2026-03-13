@@ -1,0 +1,49 @@
+[build-system]
+requires = ["setuptools>=61.0"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "ocmesher"
+version = "1.0.0"
+description = "View-Dependent Octree-based Mesh Extraction in Unbounded Scenes for Procedural Synthetic Data"
+readme = "README.md"
+license = { file = "LICENSE" }
+requires-python = ">=3.10"
+authors = [
+    { name = "Zeyu Ma" },
+    { name = "Alexander Raistrick" },
+    { name = "Lahav Lipson" },
+    { name = "Jia Deng" },
+]
+keywords = ["mesh", "octree", "sdf", "3d", "procedural"]
+classifiers = [
+    "License :: OSI Approved :: BSD License",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Topic :: Scientific/Engineering :: Artificial Intelligence",
+]
+dependencies = [
+    "numpy",
+    "vnoise",
+    "trimesh",
+    "gin-config",
+    "tqdm",
+    "psutil",
+]
+
+[project.urls]
+Homepage = "https://github.com/princeton-vl/OcMesher"
+Repository = "https://github.com/princeton-vl/OcMesher"
+Paper = "https://arxiv.org/abs/2312.08364"
+
+[tool.setuptools.packages.find]
+include = ["ocmesher*"]
+
+[tool.ruff]
+line-length = 120
+
+[tool.ruff.lint]
+select = ["ALL"]
+ignore = ["E501"]
