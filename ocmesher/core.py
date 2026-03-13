@@ -4,7 +4,6 @@
 # Authors: Zeyu Ma
 
 from pathlib import Path
-import sys
 import gin
 import numpy as np
 import trimesh

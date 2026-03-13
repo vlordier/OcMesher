@@ -5,7 +5,6 @@
 
 import sys
 from ctypes import CDLL, POINTER, RTLD_LOCAL, c_double, c_float, c_int32, c_bool
-from pathlib import Path
 
 from numpy import ascontiguousarray as AC
 
