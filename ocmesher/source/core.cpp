@@ -224,9 +224,7 @@ extern "C" {
                     solid::cubes_set.insert(cube_to_key(c0));
                 }
             }
-            if (cqs > 0) {
-                cubes_queue.erase(cubes_queue.begin(), cubes_queue.begin() + cqs);
-            }
+            cubes_queue.erase(cubes_queue.begin(), cubes_queue.begin() + cqs);
         }
         output_vertices.clear();
         output_vertices_index.clear();
