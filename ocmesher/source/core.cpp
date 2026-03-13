@@ -865,7 +865,8 @@ extern "C" {
                 }
             // Second pass: edge crossings on cube faces
             // When two adjacent corners have opposite SDF signs at the outer boundary,
-            // interpolate to find the crossing point on that edge
+            // interpolate to find the crossing point on that edge.
+            // Use becv[i].r to match the radius at which sdf_r was sampled.
             for (int ei = 0; ei < 12; ei++) {
                 int j1 = cube_edges[ei][0], j2 = cube_edges[ei][1];
                 sdfT s1 = sdf_r[i * 8 + j1], s2 = sdf_r[i * 8 + j2];
@@ -873,8 +874,8 @@ extern "C" {
                     T t = (T)s1 / ((T)s1 - (T)s2);
                     w++;
                     for (int k = 0; k < 3; k++) {
-                        T p1 = becv[i].c[k] + (((j1>>k)&1)*2-1) * mid;
-                        T p2 = becv[i].c[k] + (((j2>>k)&1)*2-1) * mid;
+                        T p1 = becv[i].c[k] + (((j1>>k)&1)*2-1) * becv[i].r;
+                        T p2 = becv[i].c[k] + (((j2>>k)&1)*2-1) * becv[i].r;
                         v[k] += p1 * (1 - t) + p2 * t;
                     }
                 }
