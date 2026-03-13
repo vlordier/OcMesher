@@ -108,7 +108,6 @@ class OcMesher:
         register_func(self, dll, "get_faces", [POINTER(c_int32)])
         register_func(self, dll, "get_in_view_tag", [c_int32, POINTER(c_bool)])
 
-
     def kernel_caller(self, kernels, XYZ_all):
         n_XYZ = len(XYZ_all)
         if n_XYZ == 0: return np.zeros((0, len(kernels)), dtype=self.sdf_np_float_type)
