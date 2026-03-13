@@ -2,6 +2,7 @@
 
 import io
 import sys
+import time
 from unittest.mock import patch
 
 import pytest
@@ -102,3 +103,85 @@ class TestTimerEdgeCases:
     def test_name_not_set_when_disabled(self):
         t = Timer("disabled", disable_timer=True)
         assert not hasattr(t, "name")
+
+    def test_reuse_timer_object(self, capsys):
+        """Using the same Timer object twice should work for each invocation."""
+        t = Timer("reuse")
+        with t:
+            pass
+        captured1 = capsys.readouterr()
+        assert "[reuse]" in captured1.out
+
+        with t:
+            pass
+        captured2 = capsys.readouterr()
+        assert "[reuse]" in captured2.out
+
+    def test_duration_reflects_elapsed_time(self):
+        """Duration should reflect at least the time spent inside the block."""
+        t = Timer("sleeper")
+        with t:
+            time.sleep(0.05)
+        assert t.duration.total_seconds() >= 0.04
+
+    def test_start_and_end_attributes(self):
+        """Timer should set start and end attributes after use."""
+        t = Timer("attrs")
+        with t:
+            pass
+        assert hasattr(t, "start")
+        assert hasattr(t, "end")
+        assert t.end >= t.start
+
+    def test_exit_does_not_suppress_exception(self):
+        """Timer.__exit__ should return None/falsy so exceptions propagate."""
+        t = Timer("nosuppress")
+        t.__enter__()
+        result = t.__exit__(ValueError, ValueError("test"), None)
+        # __exit__ returns None (falsy) — exception is not suppressed
+        assert not result
+
+    def test_disabled_exit_does_not_suppress_exception(self):
+        """Disabled Timer.__exit__ should also not suppress exceptions."""
+        t = Timer("disabled_nosuppress", disable_timer=True)
+        t.__enter__()
+        result = t.__exit__(RuntimeError, RuntimeError("test"), None)
+        assert not result
+
+    def test_unicode_description(self, capsys):
+        """Timer should handle Unicode characters in description."""
+        with Timer("测试 タイマー"):
+            pass
+        captured = capsys.readouterr()
+        assert "[測試 タイマー]" in captured.out or "[测试 タイマー]" in captured.out
+
+    def test_sequential_timers(self, capsys):
+        """Multiple sequential timers should each produce output."""
+        for name in ["first", "second", "third"]:
+            with Timer(name):
+                pass
+        captured = capsys.readouterr()
+        assert "[first]" in captured.out
+        assert "[second]" in captured.out
+        assert "[third]" in captured.out
+
+    def test_memory_output_format(self, capsys):
+        """Memory usage should be reported in GB."""
+        with Timer("mem_check"):
+            pass
+        captured = capsys.readouterr()
+        assert "GB" in captured.out
+
+    def test_exception_type_in_failure_message(self, capsys):
+        """Different exception types should be correctly reported."""
+        with pytest.raises(TypeError):
+            with Timer("type_err"):
+                raise TypeError("bad type")
+        captured = capsys.readouterr()
+        assert "TypeError" in captured.out
+
+        with pytest.raises(KeyError):
+            with Timer("key_err"):
+                raise KeyError("missing")
+        captured2 = capsys.readouterr()
+        assert "KeyError" in captured2.out
