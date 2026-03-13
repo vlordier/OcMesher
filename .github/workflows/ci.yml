@@ -1,0 +1,62 @@
+name: CI
+
+on:
+  push:
+    branches:
+      - main
+      - develop
+  pull_request:
+    branches:
+      - main
+      - develop
+
+permissions:
+  contents: read
+
+jobs:
+  build-and-test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y g++ libomp-dev
+
+      - name: Build shared library
+        run: bash install.sh
+
+      - name: Build and run C++ tests
+        run: |
+          failed=0
+          for src in tests/cpp/test_*.cpp; do
+            [ -e "$src" ] || continue
+            name=$(basename "$src" .cpp)
+            echo "::group::Building $name"
+            g++ -std=c++11 -O2 -o "tests/cpp/$name" "$src" -lm
+            echo "::endgroup::"
+            echo "::group::Running $name"
+            if ! "./tests/cpp/$name"; then
+              failed=1
+            fi
+            echo "::endgroup::"
+          done
+          if [ "$failed" -ne 0 ]; then
+            echo "::error::Some test suites failed"
+            exit 1
+          fi
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v5
+
+      - name: Install Python dependencies
+        run: uv sync
+
+      - name: Run Python tests
+        run: |
+          if [ -d tests ]; then
+            uv run python -m pytest tests/ -v --ignore=tests/cpp
+          else
+            echo "No Python tests directory found, skipping."
+          fi

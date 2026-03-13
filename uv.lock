@@ -187,12 +187,12 @@ dependencies = [
 
 [package.metadata]
 requires-dist = [
-    { name = "gin-config" },
-    { name = "numpy" },
-    { name = "psutil" },
-    { name = "tqdm" },
-    { name = "trimesh" },
-    { name = "vnoise" },
+    { name = "gin-config", specifier = ">=0.5.0" },
+    { name = "numpy", specifier = ">=1.24.0" },
+    { name = "psutil", specifier = ">=5.9.0" },
+    { name = "tqdm", specifier = ">=4.65.0" },
+    { name = "trimesh", specifier = ">=4.0.0" },
+    { name = "vnoise", specifier = ">=0.1.0" },
 ]
 
 [[package]]
