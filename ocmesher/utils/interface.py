@@ -3,29 +3,56 @@
 
 # Authors: Zeyu Ma
 
-import sys
-from ctypes import CDLL, POINTER, RTLD_LOCAL, c_double, c_float, c_int32, c_bool
+"""ctypes helper utilities for C++ shared library interop."""
+
+from __future__ import annotations
+
+from ctypes import CDLL, POINTER, RTLD_LOCAL, c_bool, c_double, c_float, c_int32
 from pathlib import Path
+from typing import TYPE_CHECKING, Any
 
 from numpy import ascontiguousarray as AC
 
+if TYPE_CHECKING:
+    from numpy.typing import NDArray
 
-# note: size of x should not exceed maximum
-def AsInt(x):
+
+def as_int(x: NDArray) -> Any:
+    """Convert int32 array to ctypes pointer."""
     return x.ctypes.data_as(POINTER(c_int32))
-def AsDouble(x):
+
+
+def as_double(x: NDArray) -> Any:
+    """Convert float64 array to ctypes pointer."""
     return x.ctypes.data_as(POINTER(c_double))
-def AsFloat(x):
+
+
+def as_float(x: NDArray) -> Any:
+    """Convert float32 array to ctypes pointer."""
     return x.ctypes.data_as(POINTER(c_float))
-def AsBool(x):
+
+
+def as_bool(x: NDArray) -> Any:
+    """Convert bool array to ctypes pointer."""
     return x.ctypes.data_as(POINTER(c_bool))
 
-def register_func(me, dll, name, argtypes=[], restype=None, caller_name=None):
-    if caller_name is None: caller_name = name
-    setattr(me, caller_name, getattr(dll, name))
-    func = getattr(me, caller_name)
-    func.argtypes = argtypes
+
+def register_func(
+    obj: Any,
+    dll: CDLL,
+    name: str,
+    argtypes: list | None = None,
+    restype: Any = None,
+    caller_name: str | None = None,
+) -> None:
+    """Register a C function from a DLL onto an object."""
+    caller_name = caller_name or name
+    setattr(obj, caller_name, getattr(dll, name))
+    func = getattr(obj, caller_name)
+    func.argtypes = argtypes if argtypes is not None else []
     func.restype = restype
 
-def load_cdll(path):
-    return CDLL(Path(sys.path[-1]) / path, mode=RTLD_LOCAL)
+
+def load_cdll(path: str | Path) -> CDLL:
+    """Load a shared library as a CDLL."""
+    return CDLL(str(path), mode=RTLD_LOCAL)

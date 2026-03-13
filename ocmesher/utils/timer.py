@@ -3,35 +3,46 @@
 
 # Authors: Zeyu Ma
 
-from datetime import datetime
+"""Context manager for timing code blocks with memory reporting."""
+
+from __future__ import annotations
+
 import os
+import time
 
 import psutil
 
 
 class Timer:
+    """Context manager that measures elapsed time and reports memory usage."""
 
-    def __init__(self, desc, disable_timer=False):
+    def __init__(self, desc: str, disable_timer: bool = False) -> None:
         self.disable_timer = disable_timer
-        if self.disable_timer:    
-            return
-        self.name = f'[{desc}]'
+        if not self.disable_timer:
+            self.name = f"[{desc}]"
+        self._start: float = 0.0
+        self.elapsed: float = 0.0
 
-    def __enter__(self):
+    def __enter__(self) -> Timer:
+        if not self.disable_timer:
+            self._start = time.perf_counter()
+        return self
+
+    def __exit__(
+        self,
+        exc_type: type[BaseException] | None,
+        exc_val: BaseException | None,
+        traceback: object,
+    ) -> None:
         if self.disable_timer:
             return
-        self.start = datetime.now()
-
-
-    def __exit__(self, exc_type, exc_val, traceback):
-        if self.disable_timer:
-            return
-        self.end = datetime.now()
-        self.duration = self.end - self.start # timedelta
+        self.elapsed = time.perf_counter() - self._start
         if exc_type is None:
             process = psutil.Process(os.getpid())
-            print(f'{self.name} finished in {str(self.duration)} with memory usage {process.memory_info().rss / 1024**3} GB')
+            mem_gb = process.memory_info().rss / (1024**3)
+            print(
+                f"{self.name} finished in {self.elapsed:.6f}s"
+                f" with memory usage {mem_gb:.2f} GB",
+            )
         else:
-            print(f'{self.name} failed with {exc_type}')
-
-
+            print(f"{self.name} failed with {exc_type}")
