@@ -1,19 +1,20 @@
 // Copyright (c) Princeton University.
-// This source code is licensed under the BSD 3-Clause license found in the LICENSE file in the root directory of this source tree.
+// This source code is licensed under the BSD 3-Clause license found in the LICENSE file in the root
+// directory of this source tree.
 
 // Authors: Zeyu Ma
 
 #pragma once
-#include <cstdio>
-#include <vector>
-#include <set>
-#include <map>
-#include <queue>
 #include <algorithm>
 #include <cassert>
 #include <cmath>
+#include <cstdio>
 #include <cstring>
 #include <limits>
+#include <map>
+#include <queue>
+#include <set>
+#include <vector>
 
 typedef double T;
 typedef float sdfT;
@@ -53,7 +54,8 @@ inline Int3 makeInt3(int x, int y, int z) {
 }
 
 inline KeyCube cubeToKey(const Cube& c) {
-    return std::make_pair(c.m_coords[0], std::make_pair(c.m_coords[1], std::make_pair(c.m_coords[2], c.m_l)));
+    return std::make_pair(c.m_coords[0],
+                          std::make_pair(c.m_coords[1], std::make_pair(c.m_coords[2], c.m_l)));
 }
 
 inline void keyToCube(Cube& c, const KeyCube& key) {
@@ -120,46 +122,54 @@ inline int secondDigit(int j) { // NOLINT(readability-identifier-length)
 }
 
 namespace params {
-    int n_cams, memory_limit_mb, coarse_count, n_elements; // NOLINT(cppcoreguidelines-avoid-non-const-global-variables)
-    T *center, *cams; // NOLINT(cppcoreguidelines-avoid-non-const-global-variables)
-    T size, pixels_per_cube, occ_scale, min_dist; // NOLINT(cppcoreguidelines-avoid-non-const-global-variables)
-}
+int n_cams, memory_limit_mb, coarse_count,
+    n_elements;   // NOLINT(cppcoreguidelines-avoid-non-const-global-variables)
+T *center, *cams; // NOLINT(cppcoreguidelines-avoid-non-const-global-variables)
+T size, pixels_per_cube, occ_scale,
+    min_dist; // NOLINT(cppcoreguidelines-avoid-non-const-global-variables)
+} // namespace params
 
 void enumerateVertices(Vertex* v, const Node& n) {
     assert(isLeafNode(n));
     int s = gridNodeLevel(n), ss = 1 << s;
     for (int i = 0; i <= ss; i++)
-    for (int j = 0; j <= ss; j++) // NOLINT(readability-identifier-length)
-    for (int k = 0; k <= ss; k++) { // NOLINT(readability-identifier-length)
-        int vid = i + (ss + 1) * j + (ss + 1) * (ss + 1) * k;
-        for (int p = 0; p < 3; p++) v[vid].m_coords[p] = n.m_c.m_coords[p] * ss + (p == 0 ? i : (p == 1 ? j : k));
-        v[vid].m_l = n.m_c.m_l + s;
-        for (;;) {
-            if (v[vid].m_l == 0) break;
-            bool flag = true;
-            for (int p = 0; p < 3; p++)
-                if ((v[vid].m_coords[p] & 1) != 0) {
-                    flag = false;
-                    break;
+        for (int j = 0; j <= ss; j++)       // NOLINT(readability-identifier-length)
+            for (int k = 0; k <= ss; k++) { // NOLINT(readability-identifier-length)
+                int vid = i + (ss + 1) * j + (ss + 1) * (ss + 1) * k;
+                for (int p = 0; p < 3; p++)
+                    v[vid].m_coords[p] = n.m_c.m_coords[p] * ss + (p == 0 ? i : (p == 1 ? j : k));
+                v[vid].m_l = n.m_c.m_l + s;
+                for (;;) {
+                    if (v[vid].m_l == 0)
+                        break;
+                    bool flag = true;
+                    for (int p = 0; p < 3; p++)
+                        if ((v[vid].m_coords[p] & 1) != 0) {
+                            flag = false;
+                            break;
+                        }
+                    if (!flag)
+                        break;
+                    for (int p = 0; p < 3; p++)
+                        v[vid].m_coords[p] >>= 1;
+                    v[vid].m_l--;
                 }
-            if (!flag) break;
-            for (int p = 0; p < 3; p++) v[vid].m_coords[p] >>= 1;
-            v[vid].m_l--;
-        }
-    }
+            }
 }
 
-void computeCoords(T* coords, int* icoords, int L) { // NOLINT(readability-identifier-length)
+void computeCoords(T* coords, int* icoords, int level) {
     for (int j = 0; j < 3; j++) // NOLINT(readability-identifier-length)
-        coords[j] = params::center[j] - params::size / 2 + params::size * icoords[j] / (1 << L);
+        coords[j] = params::center[j] - params::size / 2 + params::size * icoords[j] / (1 << level);
 }
 
 void computeCenter(T* coords, const Cube& v) {
     for (int j = 0; j < 3; j++) // NOLINT(readability-identifier-length)
-        coords[j] = params::center[j] - params::size / 2 + params::size * (v.m_coords[j] + 0.5) / (1 << v.m_l);
+        coords[j] = params::center[j] - params::size / 2 +
+                    params::size * (v.m_coords[j] + 0.5) / (1 << v.m_l);
 }
 
-void projectedCoords(const Cube& c, int k, T* icoords, T* r) { // NOLINT(readability-identifier-length)
+void projectedCoords(const Cube& c, int k, T* icoords,
+                     T* r) { // NOLINT(readability-identifier-length)
     using namespace params;
     T pw[3], pc[3];
     T* current_cam = cams + k * (12 + 9 + 2);
@@ -242,7 +252,8 @@ void partialExpandOctree(std::vector<Node>& nodes, int index, int instance) {
     }
 }
 
-Cube search(Node* nodes, int* coords, int L, bool include_exterior = false) { // NOLINT(readability-identifier-length)
+Cube search(Node* nodes, int* coords, int L,
+            bool include_exterior = false) { // NOLINT(readability-identifier-length)
     assert(L > 0);
     Cube res;
     for (int i = 0; i < 3; i++)
@@ -253,7 +264,8 @@ Cube search(Node* nodes, int* coords, int L, bool include_exterior = false) { //
     Node current = nodes[0];
     int current_id = 0;
     for (int l = 0; l < L - 1; l++) { // NOLINT(readability-identifier-length)
-        if (isLeafNode(current)) break;
+        if (isLeafNode(current))
+            break;
         for (int i = 0; i < 3; i++)
             if ((coords[i] & ((1 << (L - current.m_c.m_l - 1)) - 1)) == 0) {
                 markBoundary(res);
@@ -261,7 +273,8 @@ Cube search(Node* nodes, int* coords, int L, bool include_exterior = false) { //
             }
         int nxt = 0;
         for (int p = 0; p < 3; p++)
-            if (2 * current.m_c.m_coords[p] + 1 <= (coords[p] >> (L - current.m_c.m_l - 1))) nxt += (1 << p);
+            if (2 * current.m_c.m_coords[p] + 1 <= (coords[p] >> (L - current.m_c.m_l - 1)))
+                nxt += (1 << p);
         current_id = current.m_nxts[nxt];
         if (current_id == -1) {
             if (!include_exterior) {
@@ -292,7 +305,8 @@ Cube search(Node* nodes, int* coords, int L, bool include_exterior = false) { //
             return res;
         }
     res.m_l = current.m_c.m_l + gl;
-    for (int p = 0; p < 3; p++) res.m_coords[p] = coords[p] >> (L - res.m_l);
+    for (int p = 0; p < 3; p++)
+        res.m_coords[p] = coords[p] >> (L - res.m_l);
     return res;
 }
 
@@ -302,14 +316,16 @@ int divideToCube(std::vector<Node>& nodes, const Cube& c) {
     for (;;) {
         assert(!isLeafNode(current));
         bool flag = true;
-        for (int p = 0; p < 3; p++) flag &= (current.m_c.m_coords[p] == c.m_coords[p]);
+        for (int p = 0; p < 3; p++)
+            flag &= (current.m_c.m_coords[p] == c.m_coords[p]);
         if (flag && current.m_c.m_l == c.m_l) {
             markLeafNode(nodes[current_id]);
             return current_id;
         }
         int nxt = 0;
         for (int p = 0; p < 3; p++)
-            if (2 * current.m_c.m_coords[p] < (c.m_coords[p] >> (c.m_l - current.m_c.m_l - 1))) nxt += (1 << p);
+            if (2 * current.m_c.m_coords[p] < (c.m_coords[p] >> (c.m_l - current.m_c.m_l - 1)))
+                nxt += (1 << p);
         partialExpandOctree(nodes, current_id, 1 << nxt);
         current = nodes[current_id];
         current_id = current.m_nxts[nxt];
@@ -317,59 +333,66 @@ int divideToCube(std::vector<Node>& nodes, const Cube& c) {
     }
 }
 
-void findEdges(const Node& n, std::map<KeyCube, int>& vertices, sdfT* sdf, std::vector<std::vector<KeyEdge>>& bipolar_edges) {
+void findEdges(const Node& n, std::map<KeyCube, int>& vertices, sdfT* sdf,
+               std::vector<std::vector<KeyEdge>>& bipolar_edges) {
     int s = gridNodeLevel(n), ss = 1 << s;
-    Vertex v[cubex(ss + 1)]; // NOLINT(cppcoreguidelines-avoid-c-arrays)
+    Vertex v[cubex(ss + 1)];    // NOLINT(cppcoreguidelines-avoid-c-arrays)
     sdfT* sdf_v[cubex(ss + 1)]; // NOLINT(cppcoreguidelines-avoid-c-arrays)
     enumerateVertices(v, n);
     for (int i = 0; i < cubex(ss + 1); i++) {
         sdf_v[i] = sdf + vertices[cubeToKey(v[i])] * params::n_elements;
     }
     for (int edir = 0; edir < 3; edir++)
-    for (int i = 0; i < ss; i++)
-    for (int j = 0; j <= ss; j++) // NOLINT(readability-identifier-length)
-    for (int k = 0; k <= ss; k++) { // NOLINT(readability-identifier-length)
-        int coords[3];
-        coords[edir] = i + 1;
-        coords[(edir + 1) % 3] = j;
-        coords[(edir + 2) % 3] = k;
-        int vid = coords[0] + coords[1] * (ss + 1) + coords[2] * (ss + 1) * (ss + 1);
-        sdfT* sdf1 = sdf_v[vid];
-        coords[edir]--;
-        vid = coords[0] + coords[1] * (ss + 1) + coords[2] * (ss + 1) * (ss + 1);
-        sdfT* sdf2 = sdf_v[vid];
-        sdfT sdf1_min = std::numeric_limits<sdfT>::infinity(), sdf2_min = std::numeric_limits<sdfT>::infinity();
-        for (int e = 0; e < params::n_elements; e++) { // NOLINT(readability-identifier-length)
-            sdf1_min = std::min(sdf1[e], sdf1_min);
-            sdf2_min = std::min(sdf2[e], sdf2_min);
-            if ((sdf1[e] >= 0) != (sdf2[e] >= 0)) {
-                Cube c0;
-                for (int p = 0; p < 3; p++)
-                    assign(c0.m_coords[p], n.m_c.m_coords[p], ss, coords[p]);
-                c0.m_l = n.m_c.m_l + s;
-                int dir = edir + 1;
-                if (sdf1[e] < 0) dir *= -1;
-                bipolar_edges[e].push_back(std::make_pair(dir, cubeToKey(c0)));
-            }
-        }
-        if ((sdf1_min >= 0) != (sdf2_min >= 0)) {
-            Cube c0;
-            for (int p = 0; p < 3; p++)
-                assign(c0.m_coords[p], n.m_c.m_coords[p], ss, coords[p]);
-            c0.m_l = n.m_c.m_l + s;
-            int dir = edir + 1;
-            if (sdf1_min < 0) dir *= -1;
-            bipolar_edges[params::n_elements].push_back(std::make_pair(dir, cubeToKey(c0)));
-        }
-    }
+        for (int i = 0; i < ss; i++)
+            for (int j = 0; j <= ss; j++)       // NOLINT(readability-identifier-length)
+                for (int k = 0; k <= ss; k++) { // NOLINT(readability-identifier-length)
+                    int coords[3];
+                    coords[edir] = i + 1;
+                    coords[(edir + 1) % 3] = j;
+                    coords[(edir + 2) % 3] = k;
+                    int vid = coords[0] + coords[1] * (ss + 1) + coords[2] * (ss + 1) * (ss + 1);
+                    sdfT* sdf1 = sdf_v[vid];
+                    coords[edir]--;
+                    vid = coords[0] + coords[1] * (ss + 1) + coords[2] * (ss + 1) * (ss + 1);
+                    sdfT* sdf2 = sdf_v[vid];
+                    sdfT sdf1_min = std::numeric_limits<sdfT>::infinity(),
+                         sdf2_min = std::numeric_limits<sdfT>::infinity();
+                    for (int e = 0; e < params::n_elements;
+                         e++) { // NOLINT(readability-identifier-length)
+                        sdf1_min = std::min(sdf1[e], sdf1_min);
+                        sdf2_min = std::min(sdf2[e], sdf2_min);
+                        if ((sdf1[e] >= 0) != (sdf2[e] >= 0)) {
+                            Cube c0;
+                            for (int p = 0; p < 3; p++)
+                                assign(c0.m_coords[p], n.m_c.m_coords[p], ss, coords[p]);
+                            c0.m_l = n.m_c.m_l + s;
+                            int dir = edir + 1;
+                            if (sdf1[e] < 0)
+                                dir *= -1;
+                            bipolar_edges[e].push_back(std::make_pair(dir, cubeToKey(c0)));
+                        }
+                    }
+                    if ((sdf1_min >= 0) != (sdf2_min >= 0)) {
+                        Cube c0;
+                        for (int p = 0; p < 3; p++)
+                            assign(c0.m_coords[p], n.m_c.m_coords[p], ss, coords[p]);
+                        c0.m_l = n.m_c.m_l + s;
+                        int dir = edir + 1;
+                        if (sdf1_min < 0)
+                            dir *= -1;
+                        bipolar_edges[params::n_elements].push_back(
+                            std::make_pair(dir, cubeToKey(c0)));
+                    }
+                }
 }
 
 int computeBoundary(const Cube& c, const Cube& bound) {
     int b[3][2];
     for (int i = 0; i < 3; i++)
-    for (int p = 0; p < 2; p++) {
-        b[i][p] = static_cast<int>((c.m_coords[i] + p) == ((bound.m_coords[i] + p) << (c.m_l - bound.m_l)));
-    }
+        for (int p = 0; p < 2; p++) {
+            b[i][p] = static_cast<int>((c.m_coords[i] + p) ==
+                                       ((bound.m_coords[i] + p) << (c.m_l - bound.m_l)));
+        }
     int instance = 0;
     for (int i = 0; i < 8; i++) {
         for (int j = 0; j < 3; j++) // NOLINT(readability-identifier-length)
@@ -382,9 +405,9 @@ int computeBoundary(const Cube& c, const Cube& bound) {
 }
 
 inline T det(T matrix[3][3]) {
-    return matrix[0][0] * (matrix[1][1] * matrix[2][2] - matrix[1][2] * matrix[2][1])
-         - matrix[0][1] * (matrix[1][0] * matrix[2][2] - matrix[1][2] * matrix[2][0])
-         + matrix[0][2] * (matrix[1][0] * matrix[2][1] - matrix[1][1] * matrix[2][0]);
+    return matrix[0][0] * (matrix[1][1] * matrix[2][2] - matrix[1][2] * matrix[2][1]) -
+           matrix[0][1] * (matrix[1][0] * matrix[2][2] - matrix[1][2] * matrix[2][0]) +
+           matrix[0][2] * (matrix[1][0] * matrix[2][1] - matrix[1][1] * matrix[2][0]);
 }
 
 bool triSegIntersect(T* t1, T* t2, T* t3, T* s1, T* s2) {
@@ -402,7 +425,8 @@ bool triSegIntersect(T* t1, T* t2, T* t3, T* s1, T* s2) {
         m[2][i] = t3[i] - s2[i];
     }
     T det2 = det(m);
-    if (!((det1 > 0 && det2 < 0) || (det1 < 0 && det2 > 0))) return false;
+    if (!((det1 > 0 && det2 < 0) || (det1 < 0 && det2 > 0)))
+        return false;
 
     for (int i = 0; i < 3; i++) {
         m[0][i] = t1[i] - s1[i];
@@ -415,12 +439,14 @@ bool triSegIntersect(T* t1, T* t2, T* t3, T* s1, T* s2) {
         m[1][i] = t3[i] - s1[i];
     }
     det2 = det(m);
-    if (!((det1 > 0 && det2 > 0) || (det1 < 0 && det2 < 0))) return false;
+    if (!((det1 > 0 && det2 > 0) || (det1 < 0 && det2 < 0)))
+        return false;
     for (int i = 0; i < 3; i++) {
         m[0][i] = t3[i] - s1[i];
         m[1][i] = t1[i] - s1[i];
     }
     det1 = det(m);
-    if (!((det1 >= 0 && det2 > 0) || (det1 <= 0 && det2 < 0))) return false;
+    if (!((det1 >= 0 && det2 > 0) || (det1 <= 0 && det2 < 0)))
+        return false;
     return true;
 }
