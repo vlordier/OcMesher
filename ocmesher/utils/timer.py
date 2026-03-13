@@ -27,7 +27,7 @@ class Timer:
             return
         self.start = datetime.now(tz=timezone.utc)
 
-    def __exit__(self, exc_type, exc_val, traceback):
+    def __exit__(self, exc_type, _exc_val, _traceback):
         """Print elapsed time and memory on success, or the exception type on failure."""
         if self.disable_timer:
             return

@@ -114,3 +114,10 @@ python-version = "3.10"
 unresolved-attribute = "ignore"
 # Third-party packages may not be resolvable without a venv; warn, don't fail
 unresolved-import = "warn"
+
+# ---------------------------------------------------------------------------
+# Vulture – dead code detection
+# ---------------------------------------------------------------------------
+[tool.vulture]
+paths = ["ocmesher", "demo.py"]
+min_confidence = 80
