@@ -3,7 +3,7 @@
 // LICENSE file in the root directory of this source tree.
 
 // Comprehensive unit tests for ocmesher C++ core functionality.
-// Build: g++ -std=c++11 -O2 -o test_core test_core.cpp
+// Build: g++ -std=c++11 -O2 -o test_core test_core.cpp -lm
 // Run:   ./test_core
 
 #include <iostream>
