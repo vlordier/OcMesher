@@ -4,12 +4,26 @@
 # Authors: Zeyu Ma
 
 from pathlib import Path
+
 import gin
 import numpy as np
 import trimesh
 from tqdm import tqdm
 
-from .utils.interface import AC, POINTER, AsDouble, AsFloat, AsInt, AsBool, c_bool, c_double, c_float, c_int32, load_cdll, register_func
+from .utils.interface import (
+    AC,
+    POINTER,
+    AsBool,
+    AsDouble,
+    AsFloat,
+    AsInt,
+    c_bool,
+    c_double,
+    c_float,
+    c_int32,
+    load_cdll,
+    register_func,
+)
 from .utils.timer import Timer
 
 @gin.configurable
