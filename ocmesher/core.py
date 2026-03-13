@@ -102,18 +102,12 @@ class OcMesher:
 
         self._dll = CoreDLL()
 
-        # Pre-bind SDF evaluator with bounds info for this instance.
-        if enclosed:
-            self._eval_sdfs = partial(
-                evaluate_sdfs,
-                sdf_dtype=self._sdf_np_float,
-                bounds_min=self._bounds.mins,
-                bounds_max=self._bounds.maxs,
-            )
-        else:
-            self._eval_sdfs = partial(
-                evaluate_sdfs, sdf_dtype=self._sdf_np_float,
-            )
+        self._eval_sdfs = partial(
+            evaluate_sdfs,
+            sdf_dtype=self._sdf_np_float,
+            bounds_min=self._bounds.mins if enclosed else None,
+            bounds_max=self._bounds.maxs if enclosed else None,
+        )
 
     # ------------------------------------------------------------------
     # Public API

@@ -45,17 +45,17 @@ def evaluate_sdfs(
     for start in range(0, n, SDF_BATCH_SIZE):
         batch = positions[start : start + SDF_BATCH_SIZE]
 
-        out_bound: NDArray | None = None
+        out_of_bounds: NDArray | None = None
         if clamp:
-            out_bound = np.any(batch <= bounds_min, axis=1) | np.any(
+            out_of_bounds = np.any(batch <= bounds_min, axis=1) | np.any(
                 batch >= bounds_max, axis=1,
             )
 
         batch_sdfs: list[NDArray] = []
         for kernel in kernels:
             sdf = kernel(batch)
-            if out_bound is not None:
-                sdf[out_bound] = 1
+            if out_of_bounds is not None:
+                sdf[out_of_bounds] = 1
             batch_sdfs.append(sdf)
 
         results.append(np.stack(batch_sdfs, axis=-1).astype(sdf_dtype))

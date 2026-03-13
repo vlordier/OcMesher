@@ -11,6 +11,7 @@ from dataclasses import dataclass
 import numpy as np
 from numpy.typing import NDArray
 
+# 12 (3×4 inv_pose) + 9 (3×3 K) + 1 (H) + 1 (W) = 23 values per camera
 CAMERA_DATA_STRIDE = 23
 SDF_BATCH_SIZE = 10_000_000
 

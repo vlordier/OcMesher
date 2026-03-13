@@ -5,6 +5,7 @@
 
 from __future__ import annotations
 
+import logging
 from collections.abc import Callable
 from typing import Any
 
@@ -15,6 +16,8 @@ from tqdm import tqdm
 
 from .dll import CoreDLL
 from .utils.interface import AC, POINTER, as_bool, as_int
+
+logger = logging.getLogger(__name__)
 
 
 def bisect_cube_vertices(
@@ -198,8 +201,8 @@ def construct_element_mesh(
     dll.get_in_view_tag(element_idx, as_bool(in_view_tag))
 
     mesh = trimesh.Trimesh(vertices=vertices, faces=faces, process=False)
-    print(
-        f"element {element_idx} has vertices #{mesh.vertices.shape[0]}"
-        f" faces #{mesh.faces.shape[0]}",
+    logger.info(
+        "element %d has vertices #%d faces #%d",
+        element_idx, mesh.vertices.shape[0], mesh.faces.shape[0],
     )
     return mesh, in_view_tag
