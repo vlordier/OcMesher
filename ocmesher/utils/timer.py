@@ -12,6 +12,14 @@ import psutil
 
 
 class Timer:
+    """Context manager that measures wall-clock duration and reports memory usage.
+
+    Usage::
+
+        with Timer("my step"):
+            do_work()
+        # prints: [my step] finished in 0:00:01.234 with memory usage 0.5 GB
+    """
 
     def __init__(self, desc: str, disable_timer: bool = False) -> None:
         self.disable_timer = disable_timer
