@@ -1,0 +1,38 @@
+name: Validate
+
+on:
+  pull_request:
+  push:
+    branches:
+      - main
+
+jobs:
+  smoke-tests-and-benchmarks:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Install Python dependencies
+        run: python -m pip install --upgrade pip && python -m pip install -r requirements-dev.txt
+
+      - name: Build OcMesher
+        run: bash install.sh
+
+      - name: Run smoke tests
+        run: pytest tests/test_smoke.py -q
+
+      - name: Run smoke benchmarks
+        run: python benchmarks/run_benchmarks.py --repeats 1 --output benchmarks/results/ci.json
+
+      - name: Upload benchmark artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: ocmesher-benchmarks
+          path: benchmarks/results/ci.json

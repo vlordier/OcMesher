@@ -54,3 +54,25 @@ python demo.py
 ```
 
 This example uses one camera and the Perlin Noise from the Python library `vnoise` and outputs the resulting mesh in `results/demo.obj`.
+
+## Validation
+
+Install the validation dependencies:
+
+```
+pip install -r requirements-dev.txt
+```
+
+Run the smoke tests:
+
+```
+pytest tests/test_smoke.py -q
+```
+
+Run the benchmark harness:
+
+```
+python benchmarks/run_benchmarks.py --repeats 3 --output benchmarks/results/local.json
+```
+
+The benchmark script writes JSON output with runtime and mesh-size summaries for both the baseline smoke case and the structure-guided case.
