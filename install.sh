@@ -19,7 +19,7 @@ else
         fi
     else
         echo "Unsupported OS"
-        exit -1
+        exit 1
     fi
 fi
 
