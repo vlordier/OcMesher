@@ -3,13 +3,20 @@
 
 # Authors: Zeyu Ma
 
+"""Demo script that meshes a Perlin noise terrain with a single camera view.
+
+Outputs the resulting mesh to ``results/demo.obj``.
+"""
+
 import os
-import sys
+
 import numpy as np
+import vnoise
+
 from ocmesher import OcMesher
 
-import vnoise
 noise = vnoise.Noise()
+
 
 def f(XYZ):
     scale = 2
@@ -18,21 +25,26 @@ def f(XYZ):
     return XYZ[:, 2] - h
 
 
-cam_poses = [np.array([
-    [1, 0, 0, 0],
-    [0, 0, 1, 0],
-    [0, -1, 0, 3],
-    [0, 0, 0, 1],
-])]
-Ks = [np.array([
-    [2000, 0, 640],
-    [0, 2000, 360],
-    [0, 0, 1]
-])]
-Hs = [720]
-Ws = [1280]
+def main():
+    cam_poses = [np.array([
+        [1, 0, 0, 0],
+        [0, 0, 1, 0],
+        [0, -1, 0, 3],
+        [0, 0, 0, 1],
+    ])]
+    Ks = [np.array([
+        [2000, 0, 640],
+        [0, 2000, 360],
+        [0, 0, 1]
+    ])]
+    Hs = [720]
+    Ws = [1280]
 
-mesher = OcMesher((cam_poses, Ks, Hs, Ws), pixels_per_cube=16)
-meshes, in_view_tags = mesher([f])
-os.makedirs("results", exist_ok=True)
-meshes[0].export("results/demo.obj")
+    mesher = OcMesher((cam_poses, Ks, Hs, Ws), pixels_per_cube=16)
+    meshes, in_view_tags = mesher([f])
+    os.makedirs("results", exist_ok=True)
+    meshes[0].export("results/demo.obj")
+
+
+if __name__ == "__main__":
+    main()
