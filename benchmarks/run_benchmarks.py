@@ -44,6 +44,17 @@ def sphere_sdf(xyz):
     return np.linalg.norm(xyz, axis=1) - 0.75
 
 
+def positive_int(value: str) -> int:
+    """Argparse type that ensures a positive integer (>= 1)."""
+    try:
+        ivalue = int(value)
+    except ValueError:
+        raise argparse.ArgumentTypeError(f"invalid int value: {value!r}")
+    if ivalue < 1:
+        raise argparse.ArgumentTypeError("repeats must be an integer >= 1")
+    return ivalue
+
+
 def make_mesher(edge_fine_factor):
     return OcMesher(
         make_cameras(),
@@ -89,7 +100,7 @@ def run_case(name, repeats, structure_mesh=None, edge_fine_factor=2):
 
 def main():
     parser = argparse.ArgumentParser(description="Run OcMesher smoke benchmarks.")
-    parser.add_argument("--repeats", type=int, default=3)
+    parser.add_argument("--repeats", type=positive_int, default=3)
     parser.add_argument("--output", type=Path, default=Path("benchmarks/results/latest.json"))
     args = parser.parse_args()
 
