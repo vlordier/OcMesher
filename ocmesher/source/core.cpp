@@ -841,20 +841,44 @@ extern "C" {
         }
     }
 
-    // todo consider more than corners when a vetex cube has complex side face
+    // Consider edge crossings on vertex cube faces for better vertex placement
     void finalize_verts(int e, sdfT *sdf_l, sdfT *sdf_r, T *verts) {
         using namespace final;
         vector<computed_vertex> &becv = bipolar_edges_computed_vertices[e];
+        // Cube edge table: pairs of corner indices connected by edges
+        static const int cube_edges[12][2] = {
+            {0,1}, {2,3}, {4,5}, {6,7},  // along axis 0
+            {0,2}, {1,3}, {4,6}, {5,7},  // along axis 1
+            {0,4}, {1,5}, {2,6}, {3,7},  // along axis 2
+        };
         for (int i = 0; i < becv.size(); i++) {
             T v[3]={0};
             int w=0;
+            T mid = (becv[i].l + becv[i].r) / 2;
+            // First pass: bipolar corners (where surface crosses between inner and outer boundary)
             for (int j = 0; j < 8; j++)
                 if ((sdf_l[i * 8 + j] >= 0) != (sdf_r[i * 8 + j] >= 0)) {
                     w++;
                     for (int k = 0; k < 3; k++) {
-                        v[k] += becv[i].c[k] + (((j>>k)&1)*2-1) * (becv[i].l + becv[i].r) / 2;
+                        v[k] += becv[i].c[k] + (((j>>k)&1)*2-1) * mid;
                     }
                 }
+            // Second pass: edge crossings on cube faces
+            // When two adjacent corners have opposite SDF signs at the outer boundary,
+            // interpolate to find the crossing point on that edge
+            for (int ei = 0; ei < 12; ei++) {
+                int j1 = cube_edges[ei][0], j2 = cube_edges[ei][1];
+                sdfT s1 = sdf_r[i * 8 + j1], s2 = sdf_r[i * 8 + j2];
+                if ((s1 >= 0) != (s2 >= 0)) {
+                    T t = (T)s1 / ((T)s1 - (T)s2);
+                    w++;
+                    for (int k = 0; k < 3; k++) {
+                        T p1 = becv[i].c[k] + (((j1>>k)&1)*2-1) * mid;
+                        T p2 = becv[i].c[k] + (((j2>>k)&1)*2-1) * mid;
+                        v[k] += p1 * (1 - t) + p2 * t;
+                    }
+                }
+            }
             if (w == 0) {
                 for (int k = 0; k < 3; k++) verts[i * 3 + k] = becv[i].c[k];
             }

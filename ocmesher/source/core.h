@@ -87,7 +87,7 @@ void enumerate_vertices(vertex *v, node n) {
             if (v[vid].L == 0) break;
             bool flag = 1;
             for (int p = 0; p < 3; p++)
-                if (v[vid].coords[p]&1 != 0) {
+                if ((v[vid].coords[p]&1) != 0) {
                     flag = 0;
                     break;
                 }
@@ -206,7 +206,7 @@ cube search(node *nodes, int *coords, int L, bool include_exterior=0) {
     for (int l = 0; l < L - 1; l++) {
         if (leaf_node(current)) break;
         for (int i = 0; i < 3; i++)
-            if (coords[i] & ((1<<(L-current.c.L-1))-1) == 0) {
+            if ((coords[i] & ((1<<(L-current.c.L-1))-1)) == 0) {
                 mark_boundary(res);
                 return res;
             }
@@ -239,7 +239,7 @@ cube search(node *nodes, int *coords, int L, bool include_exterior=0) {
         return res;
     }
     for (int i = 0; i < 3; i++)
-        if (coords[i] & ((1<<(L-current.c.L-gl))-1) == 0) {
+        if ((coords[i] & ((1<<(L-current.c.L-gl))-1)) == 0) {
             mark_boundary(res);
             return res;
         }
