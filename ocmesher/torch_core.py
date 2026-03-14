@@ -727,7 +727,8 @@ class TorchOcMesher:
         dx_range = torch.arange(-rl, rl + 1, dtype=torch.long, device=self.device)
         dy_range = torch.arange(-rl, rl + 1, dtype=torch.long, device=self.device)
         grid_dx, grid_dy = torch.meshgrid(dx_range, dy_range, indexing="ij")
-        self._relax_dx = grid_dx.reshape(-1)  # ((2*rl+1)^2,)
+        # Shape: (num_neighbors,) where num_neighbors = (2*rl+1)**2
+        self._relax_dx = grid_dx.reshape(-1)
         self._relax_dy = grid_dy.reshape(-1)
 
         # Ensure MC tables are cached for this device
