@@ -416,21 +416,25 @@ class TestSDFCaching:
         assert r_corner_sdf.shape[2] == len(kernels)
 
     def test_refine_without_cache_returns_none_when_no_iters(self, single_cam_mesher, sphere_kernel):
-        """When no corner_sdf is provided and no iterations run, result is None."""
+        """When no corner_sdf is provided and max_iters=0, result is None."""
         kernels = [sphere_kernel]
         coords, levels = single_cam_mesher._build_coarse_octree()
         mask, _ = single_cam_mesher._find_surface_cubes(kernels, coords, levels)
         s_coords = coords[mask]
         s_levels = levels[mask]
-        # Pass corner_sdf=None (backward-compatible default)
+        if len(s_coords) == 0:
+            pytest.skip("no surface cubes found")
+        # Force zero refinement iterations with corner_sdf=None
         r_coords, r_levels, r_corner_sdf = single_cam_mesher._refine_surface_octree(
             kernels,
             s_coords,
             s_levels,
+            max_iters=0,
         )
-        # r_corner_sdf is None only if no refinement happened;
-        # otherwise the loop sets it from _find_surface_cubes.
-        assert len(r_coords) > 0
+        assert r_corner_sdf is None
+        # Coords/levels are returned unchanged
+        assert len(r_coords) == len(s_coords)
+        assert len(r_levels) == len(s_levels)
 
     def test_cached_sdf_produces_same_mesh(self, single_cam_mesher, sphere_kernel):
         """End-to-end mesh with SDF caching must match mesh without it."""

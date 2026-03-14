@@ -722,6 +722,8 @@ def _micro_pipeline_breakdown(cameras, bounds, n_runs: int = 3):
             "total": [],
         }
 
+        import torch
+
         for _ in range(n_runs):
             t_total = time.perf_counter()
 
@@ -755,8 +757,6 @@ def _micro_pipeline_breakdown(cameras, bounds, n_runs: int = 3):
             vis_l = s_levels[vis_mask]
             occ_c = s_coords[~vis_mask]
             occ_l = s_levels[~vis_mask]
-            import torch
-
             all_c = torch.cat([vis_c, occ_c])
             all_l = torch.cat([vis_l, occ_l])
             all_sdf = torch.cat([s_corner_sdf[vis_mask], s_corner_sdf[~vis_mask]]) if s_corner_sdf is not None else None
