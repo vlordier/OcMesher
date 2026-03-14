@@ -8,7 +8,6 @@ import numpy as np
 import pytest
 
 from ocmesher.core import (
-    _SDF_BATCH_SIZE,
     CAMERA_DATA_STRIDE,
     OcMesher,
     _validate_bounds,
@@ -391,12 +390,18 @@ class TestKernelCallerAllocation:
     @patch("ocmesher.core.load_cdll")
     @patch("ocmesher.core.register_func")
     def test_kernel_caller_large_batch_concatenates(
-        self, _mock_register, mock_load, sample_cameras, sample_bounds, sphere_kernel
+        self, _mock_register, mock_load, sample_cameras, sample_bounds, sphere_kernel, monkeypatch
     ):
-        """kernel_caller must correctly concatenate batches > _SDF_BATCH_SIZE."""
+        """kernel_caller must correctly concatenate batches > _SDF_BATCH_SIZE.
+
+        Monkeypatches _SDF_BATCH_SIZE to a small value so the test exercises
+        multi-batch logic without allocating millions of points.
+        """
+        monkeypatch.setattr("ocmesher.core._SDF_BATCH_SIZE", 8)
         mock_load.return_value = MagicMock()
         mesher = OcMesher(sample_cameras, sample_bounds)
-        n = _SDF_BATCH_SIZE + 5
+        # 13 points forces two batches: [0:8] and [8:13]
+        n = 13
         pts = np.random.default_rng(0).standard_normal((n, 3)).astype(np.float64)
         result = mesher.kernel_caller([sphere_kernel], pts)
         assert result.shape == (n, 1)
