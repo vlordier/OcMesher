@@ -810,7 +810,7 @@ class TorchOcMesher:
         pos_h_t = pos_h.T.unsqueeze(0).expand(self.n_cameras, -1, -1)
         cam_coords = torch.bmm(self.cam_inv_poses, pos_h_t).permute(0, 2, 1)
 
-        r = cam_coords.norm(dim=2).clamp_(min=self.min_dist)  # (C, N) in-place clamp
+        r = cam_coords.norm(dim=2).clamp(min=self.min_dist)  # (C, N)
         ang = self._pix_ang_ppc.unsqueeze(1)  # (C, 1) pre-computed
         proj = cube_sizes.unsqueeze(0) / r / ang  # (C, N)
         return proj.max(dim=0).values  # (N,)
@@ -1159,12 +1159,16 @@ class TorchOcMesher:
         # Encode (x, y, z) triples into a single int64 hash per vertex.
         # The components are bounded by the scene extent x 1e8 which fits in
         # int64 when multiplied by large primes.
-        hash_vals = quantized[:, 0] * 1000000007 + quantized[:, 1] * 1000000009 + quantized[:, 2]
+        hash_vals = quantized[:, 0] * 1000000007 + quantized[:, 1] * 1000000009 + quantized[:, 2] * 1000000021
         _, inverse = torch.unique(hash_vals, return_inverse=True)
-        # Build compact vertex array: pick one representative per unique hash.
+        # Build compact vertex array: pick the first representative per unique
+        # hash.  Writing indices in reverse order ensures the smallest (first)
+        # index wins for each unique bucket.
         n_unique = int(inverse.max().item()) + 1
+        n_verts = len(inverse)
         rep_idx = torch.zeros(n_unique, dtype=torch.long, device=device)
-        rep_idx[inverse] = torch.arange(len(inverse), device=device)
+        rev_arange = torch.arange(n_verts - 1, -1, -1, device=device)
+        rep_idx.scatter_(0, inverse[rev_arange], rev_arange)
         dedup_verts = verts_flat[rep_idx].cpu().double().numpy()
         dedup_faces = inverse.reshape(-1, 3).cpu().numpy().astype(np.int32)
         return dedup_verts, dedup_faces

@@ -420,13 +420,16 @@ def _micro_vertex_dedup(cameras, bounds, n_runs: int = 5):
         for _ in range(n_runs):
             t0 = time.perf_counter()
             q = (verts_dup * 1e8).round().long()
-            hv = q[:, 0] * 1000000007 + q[:, 1] * 1000000009 + q[:, 2]
+            hv = q[:, 0] * 1000000007 + q[:, 1] * 1000000009 + q[:, 2] * 1000000021
             torch.unique(hv, return_inverse=True)
             times_torch.append(time.perf_counter() - t0)
         results["torch_hash_mean_s"] = statistics.mean(times_torch)
 
-        if results["numpy_unique_mean_s"] > 0:
-            results["speedup"] = round(results["numpy_unique_mean_s"] / max(results["torch_hash_mean_s"], 1e-9), 1)
+        min_reliable = 1e-6  # below this, timings are noise
+        np_time = results["numpy_unique_mean_s"]
+        th_time = results["torch_hash_mean_s"]
+        if np_time > min_reliable and th_time > min_reliable:
+            results["speedup"] = round(np_time / th_time, 1)
     except Exception as exc:  # noqa: BLE001
         results["error"] = str(exc)
     return results
@@ -460,8 +463,9 @@ def _micro_coord_computation(_cameras, _bounds, n_runs: int = 5):
         results["ldexp_mean_s"] = statistics.mean(times_ldexp)
         results["n_cubes"] = n_cubes
 
-        if results["pow2_mean_s"] > 0:
-            results["speedup"] = round(results["pow2_mean_s"] / max(results["ldexp_mean_s"], 1e-9), 1)
+        min_reliable = 1e-6
+        if results["pow2_mean_s"] > min_reliable and results["ldexp_mean_s"] > min_reliable:
+            results["speedup"] = round(results["pow2_mean_s"] / results["ldexp_mean_s"], 1)
     except Exception as exc:  # noqa: BLE001
         results["error"] = str(exc)
     return results
