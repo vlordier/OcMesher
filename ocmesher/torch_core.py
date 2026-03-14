@@ -37,6 +37,12 @@ from .utils.timer import Timer
 
 logger = logging.getLogger(__name__)
 
+
+def _mps_available() -> bool:
+    """Return True if MPS (Apple Silicon GPU) backend is available."""
+    return hasattr(torch.backends, "mps") and torch.backends.mps.is_available()
+
+
 # Epsilon for safe division in marching-cubes interpolation.
 _DENOM_EPS = 1e-12
 
@@ -643,7 +649,7 @@ class TorchOcMesher:
             self.device = torch.device(device)
         elif torch.cuda.is_available():
             self.device = torch.device("cuda")
-        elif hasattr(torch.backends, "mps") and torch.backends.mps.is_available():
+        elif _mps_available():
             self.device = torch.device("mps")
         else:
             self.device = torch.device("cpu")

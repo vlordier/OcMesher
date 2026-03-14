@@ -95,6 +95,16 @@ def _make_bounds():
     return (-10, 10, -10, 10, -2, 2)
 
 
+def _mps_available() -> bool:
+    """Return True if MPS (Apple Silicon GPU) backend is available."""
+    try:
+        import torch
+
+        return hasattr(torch.backends, "mps") and torch.backends.mps.is_available()
+    except ImportError:
+        return False
+
+
 def _system_info():
     """Collect system information for the benchmark report."""
     info = {
@@ -110,7 +120,7 @@ def _system_info():
         info["cuda_available"] = torch.cuda.is_available()
         if torch.cuda.is_available():
             info["cuda_device"] = torch.cuda.get_device_name(0)
-        info["mps_available"] = hasattr(torch.backends, "mps") and torch.backends.mps.is_available()
+        info["mps_available"] = _mps_available()
     except ImportError:
         info["pytorch_version"] = "NOT INSTALLED"
     return info
@@ -319,7 +329,7 @@ def _micro_projection(cameras, bounds, n_cubes: int = 100_000, n_runs: int = 5):
                 times_gpu.append(time.perf_counter() - t0)
             results["torch_gpu_mean_s"] = statistics.mean(times_gpu)
 
-        if hasattr(torch.backends, "mps") and torch.backends.mps.is_available():
+        if _mps_available():
             mesher_mps = TorchOcMesher(cameras, bounds, device="mps")
             coords_m = coords.to(mesher_mps.device)
             levels_m = levels.to(mesher_mps.device)
@@ -543,7 +553,7 @@ def main():
                 )
                 _print_result(r_gpu)
                 results[f"torch_gpu_{sdf_name}"] = r_gpu
-            if hasattr(torch.backends, "mps") and torch.backends.mps.is_available():
+            if _mps_available():
                 _print_section(f"End-to-end: PyTorch MPS ({sdf_name})")
                 r_mps = _bench_torch(
                     cameras, bounds, pixels_per_cube, sdf_name, n_runs=args.runs, warmup=args.warmup, device="mps"
