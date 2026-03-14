@@ -1305,7 +1305,10 @@ class TorchOcMesher:
         # 3. Refine surface cubes ------------------------------------------
         with Timer("torch refine surface"):
             s_coords, s_levels, s_corner_sdf = self._refine_surface_octree(
-                kernels, s_coords, s_levels, corner_sdf=s_corner_sdf,
+                kernels,
+                s_coords,
+                s_levels,
+                corner_sdf=s_corner_sdf,
             )
             logger.info("refined surface cubes: %d", len(s_coords))
 

@@ -366,8 +366,10 @@ class TestExp2Scale:
         # Manual reference using 2**level
         for i in range(len(coords)):
             scale = single_cam_mesher.size / (2.0 ** levels[i].item())
-            expected = single_cam_mesher.center.cpu().numpy() - single_cam_mesher.size / 2 + scale * (
-                coords[i].cpu().numpy().astype(np.float64) + 0.5
+            expected = (
+                single_cam_mesher.center.cpu().numpy()
+                - single_cam_mesher.size / 2
+                + scale * (coords[i].cpu().numpy().astype(np.float64) + 0.5)
             )
             np.testing.assert_allclose(centers[i].cpu().numpy(), expected, atol=1e-10)
 
@@ -403,7 +405,10 @@ class TestSDFCaching:
         s_levels = levels[mask]
         s_corner_sdf = corner_sdf[mask]
         r_coords, r_levels, r_corner_sdf = single_cam_mesher._refine_surface_octree(
-            kernels, s_coords, s_levels, corner_sdf=s_corner_sdf,
+            kernels,
+            s_coords,
+            s_levels,
+            corner_sdf=s_corner_sdf,
         )
         assert r_corner_sdf is not None
         assert r_corner_sdf.shape[0] == len(r_coords)
@@ -419,7 +424,9 @@ class TestSDFCaching:
         s_levels = levels[mask]
         # Pass corner_sdf=None (backward-compatible default)
         r_coords, r_levels, r_corner_sdf = single_cam_mesher._refine_surface_octree(
-            kernels, s_coords, s_levels,
+            kernels,
+            s_coords,
+            s_levels,
         )
         # r_corner_sdf is None only if no refinement happened;
         # otherwise the loop sets it from _find_surface_cubes.
@@ -438,7 +445,9 @@ class TestSDFCaching:
         s_coords = coords[mask]
         s_levels = levels[mask]
         r_coords, r_levels, _r_sdf = single_cam_mesher._refine_surface_octree(
-            [sphere_kernel], s_coords, s_levels,
+            [sphere_kernel],
+            s_coords,
+            s_levels,
         )
         positions = single_cam_mesher._cube_centers(r_coords, r_levels)
         vis_mask = single_cam_mesher._visibility_filter(positions)
@@ -446,7 +455,11 @@ class TestSDFCaching:
         all_l = torch.cat([r_levels[vis_mask], r_levels[~vis_mask]])
         n_vis = int(vis_mask.sum().item())
         mesh_no_cache, _ = single_cam_mesher._construct_element_mesh(
-            [sphere_kernel], all_c, all_l, n_vis, corner_sdf=None,
+            [sphere_kernel],
+            all_c,
+            all_l,
+            n_vis,
+            corner_sdf=None,
         )
         v_no_cache = mesh_no_cache.vertices
         f_no_cache = mesh_no_cache.faces

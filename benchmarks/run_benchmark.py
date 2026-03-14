@@ -738,7 +738,10 @@ def _micro_pipeline_breakdown(cameras, bounds, n_runs: int = 3):
 
             t0 = time.perf_counter()
             s_coords, s_levels, s_corner_sdf = mesher._refine_surface_octree(
-                [kernel], s_coords, s_levels, corner_sdf=s_corner_sdf,
+                [kernel],
+                s_coords,
+                s_levels,
+                corner_sdf=s_corner_sdf,
             )
             step_times["refine_surface"].append(time.perf_counter() - t0)
 
@@ -759,7 +762,12 @@ def _micro_pipeline_breakdown(cameras, bounds, n_runs: int = 3):
             all_sdf = torch.cat([s_corner_sdf[vis_mask], s_corner_sdf[~vis_mask]]) if s_corner_sdf is not None else None
             n_vis = int(vis_mask.sum().item())
             mesher._construct_element_mesh(
-                [kernel], all_c, all_l, n_vis, corner_sdf=all_sdf, element_idx=0,
+                [kernel],
+                all_c,
+                all_l,
+                n_vis,
+                corner_sdf=all_sdf,
+                element_idx=0,
             )
             step_times["construct_mesh"].append(time.perf_counter() - t0)
             step_times["total"].append(time.perf_counter() - t_total)
