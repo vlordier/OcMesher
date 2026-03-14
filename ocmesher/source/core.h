@@ -10,10 +10,13 @@
 #include <cmath>
 #include <cstdio>
 #include <cstring>
+#include <functional>
 #include <limits>
 #include <map>
 #include <queue>
 #include <set>
+#include <unordered_map>
+#include <unordered_set>
 #include <vector>
 
 using T = double;
@@ -31,6 +34,28 @@ using Vertex = Cube;
 using Int3 = std::pair<int, std::pair<int, int>>;
 using KeyCube = std::pair<int, std::pair<int, std::pair<int, int>>>;
 using KeyEdge = std::pair<int, KeyCube>;
+
+// Hash functor for KeyCube used by unordered containers.
+struct KeyCubeHash {
+    auto operator()(const KeyCube& k) const noexcept -> std::size_t {
+        // Combine four ints via bit-mixing.
+        std::size_t h = std::hash<int>{}(k.first);
+        h ^= std::hash<int>{}(k.second.first) + 0x9e3779b9 + (h << 6) + (h >> 2);
+        h ^= std::hash<int>{}(k.second.second.first) + 0x9e3779b9 + (h << 6) + (h >> 2);
+        h ^= std::hash<int>{}(k.second.second.second) + 0x9e3779b9 + (h << 6) + (h >> 2);
+        return h;
+    }
+};
+
+// Hash functor for std::pair<int, KeyCube> (bipolar edge keys).
+struct IntKeyCubeHash {
+    auto operator()(const std::pair<int, KeyCube>& k) const noexcept -> std::size_t {
+        KeyCubeHash kch;
+        std::size_t h = std::hash<int>{}(k.first);
+        h ^= kch(k.second) + 0x9e3779b9 + (h << 6) + (h >> 2);
+        return h;
+    }
+};
 
 struct Node {
     Cube m_c;
@@ -128,6 +153,18 @@ int n_cams, memory_limit_mb, coarse_count,
 T *center, *cams; // NOLINT(cppcoreguidelines-avoid-non-const-global-variables)
 T size, pixels_per_cube, occ_scale,
     min_dist; // NOLINT(cppcoreguidelines-avoid-non-const-global-variables)
+// Pre-computed pixel angular threshold per camera (cached to avoid atan per call).
+std::vector<T> cam_pix_ang_ppc; // NOLINT(cppcoreguidelines-avoid-non-const-global-variables)
+
+inline void precompute_cam_pix_ang() {
+    cam_pix_ang_ppc.resize(static_cast<std::size_t>(n_cams));
+    for (int k = 0; k < n_cams; k++) {
+        T* current_cam = cams + static_cast<ptrdiff_t>(k) * (12 + 9 + 2);
+        T w = current_cam[22];
+        T pix_ang = std::atan(w / 2 / current_cam[12]) * 2 / w;
+        cam_pix_ang_ppc[static_cast<std::size_t>(k)] = pix_ang * pixels_per_cube;
+    }
+}
 } // namespace params
 
 void enumerateVertices(Vertex* v, const Node& n) {
@@ -200,13 +237,9 @@ void projectedCoords(                         // NOLINT(readability-identifier-l
 auto projectedSize(const Cube& c, int k)
     -> T { // NOLINT(readability-identifier-length, modernize-use-trailing-return-type)
     using namespace params;
-    T* current_cam = cams + static_cast<ptrdiff_t>(k) * (12 + 9 + 2);
     T r; // NOLINT(readability-identifier-length)
     projectedCoords(c, k, nullptr, &r);
-    T w = current_cam[22]; // NOLINT(readability-identifier-length)
-    T pix_ang = std::atan(w / 2 / current_cam[12]) * 2 / w;
-    T ang = pix_ang * pixels_per_cube;
-    return size / (1 << c.m_l) / r / ang;
+    return size / (1 << c.m_l) / r / cam_pix_ang_ppc[static_cast<std::size_t>(k)];
 }
 
 auto projectedSize(const Cube& c) -> T { // NOLINT(modernize-use-trailing-return-type)
@@ -338,7 +371,7 @@ auto divideToCube(std::vector<Node>& nodes,
     }
 }
 
-void findEdges(const Node& n, std::map<KeyCube, int>& vertices, sdfT* sdf,
+void findEdges(const Node& n, std::unordered_map<KeyCube, int, KeyCubeHash>& vertices, sdfT* sdf,
                std::vector<std::vector<KeyEdge>>& bipolar_edges) {
     int s = gridNodeLevel(n), ss = 1 << s;
     Vertex v[cubex(ss + 1)]; // NOLINT(cppcoreguidelines-avoid-c-arrays, modernize-avoid-c-arrays)

@@ -659,9 +659,7 @@ class TorchOcMesher:
 
         # Pack camera data as batched tensors for bmm projection -------------
         # Vectorised: build numpy arrays first, transfer once to device.
-        inv_poses_np = np.stack([np.linalg.inv(cam_poses[i])[:3, :4] for i in range(self.n_cameras)]).astype(
-            np.float64
-        )
+        inv_poses_np = np.stack([np.linalg.inv(cam_poses[i])[:3, :4] for i in range(self.n_cameras)]).astype(np.float64)
         intrinsics_np = np.stack([np.asarray(Ks[i], dtype=np.float64) for i in range(self.n_cameras)])
         self.cam_heights: list[int] = [int(h) for h in Hs]
         self.cam_widths: list[int] = [int(w) for w in Ws]
@@ -711,6 +709,9 @@ class TorchOcMesher:
 
         # Pre-compute bounds as numpy for fast out-of-bounds masking --------
         self._bounds_np = np.array(bounds, dtype=np.float64)
+        # Pre-compute min/max vectors for vectorised bounds check
+        self._bounds_min_np = np.array([bounds[0], bounds[2], bounds[4]], dtype=np.float64)
+        self._bounds_max_np = np.array([bounds[1], bounds[3], bounds[5]], dtype=np.float64)
 
         # Pre-allocate reusable octree child offsets -------------------------
         self._child_offsets = torch.tensor(
@@ -842,9 +843,11 @@ class TorchOcMesher:
 
         xyz_np = positions.cpu().double().numpy()
         step = 2_000_000  # chunk size tuned for cache locality
-        bounds_np = self._bounds_np
         enclosed = self.enclosed
         _use_pinned = self.device.type == "cuda"
+        # Column-indexed bounds for fast out-of-bounds masking
+        b_min = self._bounds_min_np
+        b_max = self._bounds_max_np
 
         if n_kernels == 1:
             # --- Fast path for the common single-kernel case ---
@@ -854,12 +857,12 @@ class TorchOcMesher:
                 sdf = kernel(chunk_np)
                 if enclosed:
                     out_bound = (
-                        (chunk_np[:, 0] <= bounds_np[0])
-                        | (chunk_np[:, 0] >= bounds_np[1])
-                        | (chunk_np[:, 1] <= bounds_np[2])
-                        | (chunk_np[:, 1] >= bounds_np[3])
-                        | (chunk_np[:, 2] <= bounds_np[4])
-                        | (chunk_np[:, 2] >= bounds_np[5])
+                        (chunk_np[:, 0] <= b_min[0])
+                        | (chunk_np[:, 0] >= b_max[0])
+                        | (chunk_np[:, 1] <= b_min[1])
+                        | (chunk_np[:, 1] >= b_max[1])
+                        | (chunk_np[:, 2] <= b_min[2])
+                        | (chunk_np[:, 2] >= b_max[2])
                     )
                     sdf[out_bound] = 1
                 return sdf.astype(np.float32).reshape(-1, 1)
@@ -868,12 +871,12 @@ class TorchOcMesher:
             def _eval_chunk(chunk_np):
                 if enclosed:
                     out_bound = (
-                        (chunk_np[:, 0] <= bounds_np[0])
-                        | (chunk_np[:, 0] >= bounds_np[1])
-                        | (chunk_np[:, 1] <= bounds_np[2])
-                        | (chunk_np[:, 1] >= bounds_np[3])
-                        | (chunk_np[:, 2] <= bounds_np[4])
-                        | (chunk_np[:, 2] >= bounds_np[5])
+                        (chunk_np[:, 0] <= b_min[0])
+                        | (chunk_np[:, 0] >= b_max[0])
+                        | (chunk_np[:, 1] <= b_min[1])
+                        | (chunk_np[:, 1] >= b_max[1])
+                        | (chunk_np[:, 2] <= b_min[2])
+                        | (chunk_np[:, 2] >= b_max[2])
                     )
                 cols = []
                 for kernel in kernels:
@@ -1054,8 +1057,7 @@ class TorchOcMesher:
 
         if not self.simplify_occluded:
             # Simple case: visible if in any camera view
-            visible = in_view_all.any(dim=0)
-            return visible
+            return in_view_all.any(dim=0)
 
         # Depth-buffered occlusion culling per camera
         factor = 10.0
