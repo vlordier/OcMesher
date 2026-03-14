@@ -29,3 +29,8 @@ env/
 # Project-specific
 lib/
 results/
+
+# Test / coverage artifacts
+.pytest_cache/
+htmlcov/
+.coverage

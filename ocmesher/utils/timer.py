@@ -49,9 +49,11 @@ class Timer:
         self.end = datetime.now(tz=timezone.utc)
         self.duration = self.end - self.start  # timedelta
         if exc_type is None:
-            process = psutil.Process(os.getpid())
-            print(
-                f"{self.name} finished in {self.duration!s} with memory usage {process.memory_info().rss / 1024**3} GB"
-            )
+            try:
+                process = psutil.Process(os.getpid())
+                mem_gb = process.memory_info().rss / 1024**3
+                print(f"{self.name} finished in {self.duration!s} with memory usage {mem_gb:.2f} GB")
+            except (psutil.NoSuchProcess, psutil.AccessDenied):
+                print(f"{self.name} finished in {self.duration!s}")
         else:
-            print(f"{self.name} failed with {exc_type}")
+            print(f"{self.name} failed with {exc_type.__name__}: {_exc_val}")

@@ -29,25 +29,33 @@ __all__ = [
 ]
 
 
+def _checked_ptr(x: Any, ctype) -> Any:
+    """Convert a numpy array to a ctypes pointer, validating the input type."""
+    if not isinstance(x, np.ndarray):
+        msg = f"Expected a numpy array, got {type(x).__name__}"
+        raise TypeError(msg)
+    return x.ctypes.data_as(POINTER(ctype))
+
+
 # note: size of x should not exceed maximum
 def AsInt(x: np.ndarray) -> "POINTER(c_int32)":
     """Cast *x* to a ``c_int32`` pointer."""
-    return x.ctypes.data_as(POINTER(c_int32))
+    return _checked_ptr(x, c_int32)
 
 
 def AsDouble(x: np.ndarray) -> "POINTER(c_double)":
     """Cast *x* to a ``c_double`` pointer."""
-    return x.ctypes.data_as(POINTER(c_double))
+    return _checked_ptr(x, c_double)
 
 
 def AsFloat(x: np.ndarray) -> "POINTER(c_float)":
     """Cast *x* to a ``c_float`` pointer."""
-    return x.ctypes.data_as(POINTER(c_float))
+    return _checked_ptr(x, c_float)
 
 
 def AsBool(x: np.ndarray) -> "POINTER(c_bool)":
     """Cast *x* to a ``c_bool`` pointer."""
-    return x.ctypes.data_as(POINTER(c_bool))
+    return _checked_ptr(x, c_bool)
 
 
 def register_func(
@@ -58,12 +66,24 @@ def register_func(
         argtypes = []
     if caller_name is None:
         caller_name = name
-    setattr(me, caller_name, getattr(dll, name))
-    func = getattr(me, caller_name)
+    try:
+        func = getattr(dll, name)
+    except AttributeError:
+        msg = f"Function '{name}' not found in shared library"
+        raise AttributeError(msg) from None
     func.argtypes = argtypes
     func.restype = restype
+    setattr(me, caller_name, func)
 
 
 def load_cdll(path: str) -> CDLL:
     """Load a shared library from *path* relative to ``sys.path``."""
-    return CDLL(Path(sys.path[-1]) / path, mode=RTLD_LOCAL)
+    lib_path = Path(sys.path[-1]) / path
+    if not lib_path.exists():
+        msg = f"Shared library not found at {lib_path}. Run install.sh to build."
+        raise FileNotFoundError(msg)
+    try:
+        return CDLL(str(lib_path), mode=RTLD_LOCAL)
+    except OSError as e:
+        msg = f"Failed to load shared library at {lib_path}: {e}"
+        raise OSError(msg) from e
