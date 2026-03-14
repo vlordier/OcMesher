@@ -103,6 +103,7 @@ ignore = [
     "PLC0415",  # conditional imports (benchmarks need try/except for optional backends)
     "C901",     # complex functions (benchmark main)
     "PLR0912",  # too-many-branches (benchmark main)
+    "PLR0913",  # too-many-arguments (benchmark functions mirror mesher API)
 ]
 # benchmark __init__
 "benchmarks/__init__.py" = [

@@ -1,25 +1,29 @@
 # Copyright (c) Princeton University.
 # This source code is licensed under the BSD 3-Clause license found in the LICENSE file in the root directory of this source tree.
 
-"""Benchmark: original Python + C++ backend vs. PyTorch backend.
+"""Comprehensive benchmark: original Python + C++ backend vs. PyTorch backend.
 
 Run from the repository root::
 
     python -m benchmarks.run_benchmark          # quick (small grid)
     python -m benchmarks.run_benchmark --full   # full comparison
+    python -m benchmarks.run_benchmark --profile # sub-operation profiling
 """
 
 from __future__ import annotations
 
 import argparse
 import json
+import platform
+import statistics
 import time
 from pathlib import Path
 
 import numpy as np
+import psutil
 
 # ---------------------------------------------------------------------------
-# Perlin-noise SDF used for both backends
+# SDF kernels at varying complexity levels
 # ---------------------------------------------------------------------------
 try:
     import vnoise
@@ -27,7 +31,7 @@ try:
     _noise = vnoise.Noise()
 
     def sdf_terrain(xyz: np.ndarray) -> np.ndarray:
-        """Signed-distance function for a Perlin-noise height field."""
+        """Perlin-noise height field (medium complexity)."""
         scale = 2
         h = _noise.noise2(xyz[:, 0] / scale, xyz[:, 1] / scale, grid_mode=False, octaves=4)
         return xyz[:, 2] - h
@@ -39,35 +43,51 @@ except ImportError:
         return xyz[:, 2].copy()
 
 
+def sdf_sphere(xyz: np.ndarray) -> np.ndarray:
+    """Simple sphere SDF (low complexity)."""
+    return np.linalg.norm(xyz, axis=1) - 5.0
+
+
+def sdf_gyroid(xyz: np.ndarray) -> np.ndarray:
+    """Gyroid implicit surface (high complexity, trigonometric)."""
+    x, y, z = xyz[:, 0], xyz[:, 1], xyz[:, 2]
+    return np.sin(x) * np.cos(y) + np.sin(y) * np.cos(z) + np.sin(z) * np.cos(x)
+
+
+_SDF_KERNELS = {
+    "sphere": sdf_sphere,
+    "terrain": sdf_terrain,
+    "gyroid": sdf_gyroid,
+}
+
+
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
-
-
-def _make_cameras():
-    cam_poses = [
-        np.array(
+def _make_cameras(n_cameras: int = 1):
+    """Create *n_cameras* cameras arranged around the scene."""
+    cam_poses = []
+    ks = []
+    hs = []
+    ws = []
+    for i in range(n_cameras):
+        angle = 2 * np.pi * i / max(n_cameras, 1)
+        c, s = np.cos(angle), np.sin(angle)
+        pose = np.array(
             [
-                [1, 0, 0, 0],
-                [0, 0, 1, 0],
-                [0, -1, 0, 3],
+                [c, 0, s, 0],
+                [0, 1, 0, 0],
+                [-s, 0, c, 3],
                 [0, 0, 0, 1],
             ],
             dtype=np.float64,
         )
-    ]
-    ks = [
-        np.array(
-            [
-                [2000, 0, 640],
-                [0, 2000, 360],
-                [0, 0, 1],
-            ],
-            dtype=np.float64,
+        cam_poses.append(pose)
+        ks.append(
+            np.array([[2000, 0, 640], [0, 2000, 360], [0, 0, 1]], dtype=np.float64),
         )
-    ]
-    hs = [720]
-    ws = [1280]
+        hs.append(720)
+        ws.append(1280)
     return (cam_poses, ks, hs, ws)
 
 
@@ -75,42 +95,101 @@ def _make_bounds():
     return (-10, 10, -10, 10, -2, 2)
 
 
-# ---------------------------------------------------------------------------
-# Benchmark runners
-# ---------------------------------------------------------------------------
+def _system_info():
+    """Collect system information for the benchmark report."""
+    info = {
+        "platform": platform.platform(),
+        "cpu": platform.processor() or "unknown",
+        "cpu_count": psutil.cpu_count(logical=True),
+        "ram_gb": round(psutil.virtual_memory().total / 1e9, 1),
+    }
+    try:
+        import torch
+
+        info["pytorch_version"] = torch.__version__
+        info["cuda_available"] = torch.cuda.is_available()
+        if torch.cuda.is_available():
+            info["cuda_device"] = torch.cuda.get_device_name(0)
+    except ImportError:
+        info["pytorch_version"] = "NOT INSTALLED"
+    return info
 
 
-def _bench_original(cameras, bounds, pixels_per_cube: int, n_runs: int = 1):
+def _stats(times: list[float]) -> dict[str, float]:
+    """Compute summary statistics for a list of timings."""
+    if not times:
+        return {}
+    result = {
+        "mean_s": statistics.mean(times),
+        "median_s": statistics.median(times),
+        "min_s": min(times),
+        "max_s": max(times),
+    }
+    if len(times) > 1:
+        result["std_s"] = statistics.stdev(times)
+        result["p95_s"] = sorted(times)[int(len(times) * 0.95)]
+    return result
+
+
+# ---------------------------------------------------------------------------
+# End-to-end benchmark runners
+# ---------------------------------------------------------------------------
+def _bench_original(
+    cameras,
+    bounds,
+    pixels_per_cube: int,
+    sdf_name: str,
+    n_runs: int = 1,
+    warmup: int = 0,
+):
     """Benchmark the original Python + C++ OcMesher."""
     try:
         from ocmesher.core import OcMesher
     except Exception as exc:  # noqa: BLE001
         return {"error": f"Could not load original OcMesher: {exc}"}
 
-    times: list[float] = []
-    mesh_info: dict[str, object] = {}
-    for i in range(n_runs):
-        t0 = time.perf_counter()
-        mesher = OcMesher(cameras, bounds, pixels_per_cube=pixels_per_cube)
-        meshes, _tags = mesher([sdf_terrain])
-        elapsed = time.perf_counter() - t0
-        times.append(elapsed)
-        if i == 0:
-            mesh_info = {
-                "vertices": int(meshes[0].vertices.shape[0]),
-                "faces": int(meshes[0].faces.shape[0]),
-            }
+    kernel = _SDF_KERNELS[sdf_name]
+    try:
+        # Warmup
+        for _ in range(warmup):
+            mesher = OcMesher(cameras, bounds, pixels_per_cube=pixels_per_cube)
+            mesher([kernel])
+
+        times: list[float] = []
+        mesh_info: dict[str, object] = {}
+        for i in range(n_runs):
+            t0 = time.perf_counter()
+            mesher = OcMesher(cameras, bounds, pixels_per_cube=pixels_per_cube)
+            meshes, _tags = mesher([kernel])
+            elapsed = time.perf_counter() - t0
+            times.append(elapsed)
+            if i == 0:
+                mesh_info = {
+                    "vertices": int(meshes[0].vertices.shape[0]),
+                    "faces": int(meshes[0].faces.shape[0]),
+                }
+    except Exception as exc:  # noqa: BLE001
+        return {"error": f"C++ backend not available: {exc}"}
 
     return {
         "backend": "python_cpp",
+        "sdf": sdf_name,
         "times_s": times,
-        "mean_s": float(np.mean(times)),
-        "std_s": float(np.std(times)),
+        **_stats(times),
         **mesh_info,
     }
 
 
-def _bench_torch(cameras, bounds, pixels_per_cube: int, n_runs: int = 1, device: str | None = None):
+def _bench_torch(
+    cameras,
+    bounds,
+    pixels_per_cube: int,
+    sdf_name: str,
+    n_runs: int = 1,
+    warmup: int = 0,
+    device: str | None = None,
+    n_sdf_workers: int = 4,
+):
     """Benchmark the PyTorch TorchOcMesher."""
     try:
         import torch  # noqa: F401
@@ -119,12 +198,30 @@ def _bench_torch(cameras, bounds, pixels_per_cube: int, n_runs: int = 1, device:
     except Exception as exc:  # noqa: BLE001
         return {"error": f"Could not load TorchOcMesher: {exc}"}
 
+    kernel = _SDF_KERNELS[sdf_name]
+    # Warmup
+    for _ in range(warmup):
+        mesher = TorchOcMesher(
+            cameras,
+            bounds,
+            pixels_per_cube=pixels_per_cube,
+            device=device,
+            n_sdf_workers=n_sdf_workers,
+        )
+        mesher([kernel])
+
     times: list[float] = []
     mesh_info: dict[str, object] = {}
     for i in range(n_runs):
         t0 = time.perf_counter()
-        mesher = TorchOcMesher(cameras, bounds, pixels_per_cube=pixels_per_cube, device=device)
-        meshes, _tags = mesher([sdf_terrain])
+        mesher = TorchOcMesher(
+            cameras,
+            bounds,
+            pixels_per_cube=pixels_per_cube,
+            device=device,
+            n_sdf_workers=n_sdf_workers,
+        )
+        meshes, _tags = mesher([kernel])
         elapsed = time.perf_counter() - t0
         times.append(elapsed)
         if i == 0:
@@ -135,9 +232,9 @@ def _bench_torch(cameras, bounds, pixels_per_cube: int, n_runs: int = 1, device:
 
     return {
         "backend": f"pytorch_{device or 'auto'}",
+        "sdf": sdf_name,
         "times_s": times,
-        "mean_s": float(np.mean(times)),
-        "std_s": float(np.std(times)),
+        **_stats(times),
         **mesh_info,
     }
 
@@ -145,13 +242,9 @@ def _bench_torch(cameras, bounds, pixels_per_cube: int, n_runs: int = 1, device:
 # ---------------------------------------------------------------------------
 # Sub-operation micro-benchmarks
 # ---------------------------------------------------------------------------
-
-
-def _micro_sdf_eval(cameras, bounds, n_points: int = 500_000, n_runs: int = 3):
-    """Compare SDF evaluation throughput (numpy vs torch tensors)."""
+def _micro_sdf_eval(cameras, bounds, n_points: int = 500_000, n_runs: int = 5):
+    """Compare SDF evaluation throughput (numpy vs torch+threading)."""
     results: dict[str, object] = {"n_points": n_points}
-
-    # Random query points
     rng = np.random.default_rng(42)
     pts = rng.uniform(
         [bounds[0], bounds[2], bounds[4]],
@@ -159,39 +252,30 @@ def _micro_sdf_eval(cameras, bounds, n_points: int = 500_000, n_runs: int = 3):
         size=(n_points, 3),
     )
 
-    # Numpy path
-    times_np: list[float] = []
-    for _ in range(n_runs):
-        t0 = time.perf_counter()
-        _ = sdf_terrain(pts.copy())
-        times_np.append(time.perf_counter() - t0)
-    results["numpy_mean_s"] = float(np.mean(times_np))
+    for sdf_name, kernel in _SDF_KERNELS.items():
+        # NumPy direct
+        times_np: list[float] = []
+        for _ in range(n_runs):
+            t0 = time.perf_counter()
+            _ = kernel(pts.copy())
+            times_np.append(time.perf_counter() - t0)
+        results[f"numpy_{sdf_name}_mean_s"] = statistics.mean(times_np)
 
-    # Torch path (CPU)
+    # Torch threaded eval
     try:
         import torch
 
         from ocmesher.torch_core import TorchOcMesher
 
-        mesher = TorchOcMesher(cameras, bounds, device="cpu")
-        pts_t = torch.from_numpy(pts).to(dtype=torch.float64, device=mesher.device)
-        times_torch: list[float] = []
-        for _ in range(n_runs):
-            t0 = time.perf_counter()
-            _ = mesher._evaluate_sdf([sdf_terrain], pts_t)
-            times_torch.append(time.perf_counter() - t0)
-        results["torch_cpu_mean_s"] = float(np.mean(times_torch))
-
-        if torch.cuda.is_available():
-            mesher_gpu = TorchOcMesher(cameras, bounds, device="cuda")
-            pts_g = pts_t.to(mesher_gpu.device)
-            times_gpu: list[float] = []
+        for workers in [1, 2, 4]:
+            mesher = TorchOcMesher(cameras, bounds, device="cpu", n_sdf_workers=workers)
+            pts_t = torch.from_numpy(pts).to(dtype=torch.float64, device=mesher.device)
+            times_torch: list[float] = []
             for _ in range(n_runs):
                 t0 = time.perf_counter()
-                _ = mesher_gpu._evaluate_sdf([sdf_terrain], pts_g)
-                torch.cuda.synchronize()
-                times_gpu.append(time.perf_counter() - t0)
-            results["torch_gpu_mean_s"] = float(np.mean(times_gpu))
+                _ = mesher._evaluate_sdf([sdf_terrain], pts_t)
+                times_torch.append(time.perf_counter() - t0)
+            results[f"torch_cpu_{workers}w_mean_s"] = statistics.mean(times_torch)
     except Exception as exc:  # noqa: BLE001
         results["torch_error"] = str(exc)
 
@@ -199,7 +283,7 @@ def _micro_sdf_eval(cameras, bounds, n_points: int = 500_000, n_runs: int = 3):
 
 
 def _micro_projection(cameras, bounds, n_cubes: int = 100_000, n_runs: int = 5):
-    """Compare camera-projection throughput."""
+    """Compare camera-projection throughput (batched vs per-camera)."""
     results: dict[str, object] = {"n_cubes": n_cubes}
 
     try:
@@ -218,7 +302,8 @@ def _micro_projection(cameras, bounds, n_cubes: int = 100_000, n_runs: int = 5):
             t0 = time.perf_counter()
             _ = mesher._projected_sizes(positions, levels)
             times.append(time.perf_counter() - t0)
-        results["torch_cpu_mean_s"] = float(np.mean(times))
+        results["torch_cpu_mean_s"] = statistics.mean(times)
+        results["n_cameras"] = mesher.n_cameras
 
         if torch.cuda.is_available():
             mesher_gpu = TorchOcMesher(cameras, bounds, device="cuda")
@@ -231,125 +316,282 @@ def _micro_projection(cameras, bounds, n_cubes: int = 100_000, n_runs: int = 5):
                 _ = mesher_gpu._projected_sizes(positions_g, levels_g)
                 torch.cuda.synchronize()
                 times_gpu.append(time.perf_counter() - t0)
-            results["torch_gpu_mean_s"] = float(np.mean(times_gpu))
+            results["torch_gpu_mean_s"] = statistics.mean(times_gpu)
     except Exception as exc:  # noqa: BLE001
         results["error"] = str(exc)
 
     return results
 
 
+def _micro_marching_cubes(cameras, bounds, n_runs: int = 3):
+    """Benchmark marching cubes in isolation."""
+    results: dict[str, object] = {}
+    try:
+        from ocmesher.torch_core import TorchOcMesher
+
+        mesher = TorchOcMesher(cameras, bounds, device="cpu")
+        # Build a small octree and get corner SDF values
+        coords, levels = mesher._build_coarse_octree()
+        mask, _ = mesher._find_surface_cubes([sdf_terrain], coords, levels)
+        s_coords = coords[mask]
+        s_levels = levels[mask]
+        corners = mesher._cube_corner_positions(s_coords, s_levels)
+        flat = corners.reshape(-1, 3)
+        sdf_all = mesher._evaluate_sdf([sdf_terrain], flat)
+        sdf_min = sdf_all.min(dim=-1).values.reshape(len(s_coords), 8)
+
+        results["n_surface_cubes"] = len(s_coords)
+        times: list[float] = []
+        for _ in range(n_runs):
+            t0 = time.perf_counter()
+            v, f = mesher._marching_cubes(corners, sdf_min)
+            times.append(time.perf_counter() - t0)
+        results["torch_cpu_mean_s"] = statistics.mean(times)
+        results["output_vertices"] = int(v.shape[0])
+        results["output_faces"] = int(f.shape[0])
+    except Exception as exc:  # noqa: BLE001
+        results["error"] = str(exc)
+    return results
+
+
+def _micro_octree(cameras, bounds, n_runs: int = 3):
+    """Benchmark octree construction in isolation."""
+    results: dict[str, object] = {}
+    try:
+        from ocmesher.torch_core import TorchOcMesher
+
+        mesher = TorchOcMesher(cameras, bounds, device="cpu")
+        times: list[float] = []
+        for _ in range(n_runs):
+            t0 = time.perf_counter()
+            coords, _levels = mesher._build_coarse_octree()
+            times.append(time.perf_counter() - t0)
+        results["torch_cpu_mean_s"] = statistics.mean(times)
+        results["n_cubes"] = len(coords)
+    except Exception as exc:  # noqa: BLE001
+        results["error"] = str(exc)
+    return results
+
+
+def _micro_visibility(cameras, bounds, n_runs: int = 3):
+    """Benchmark visibility filter in isolation."""
+    results: dict[str, object] = {}
+    try:
+        import torch
+
+        from ocmesher.torch_core import TorchOcMesher
+
+        mesher = TorchOcMesher(cameras, bounds, device="cpu")
+        rng = np.random.default_rng(42)
+        n_pts = 50_000
+        positions = torch.from_numpy(
+            rng.uniform(
+                [bounds[0], bounds[2], bounds[4]],
+                [bounds[1], bounds[3], bounds[5]],
+                size=(n_pts, 3),
+            ),
+        ).to(dtype=torch.float64, device=mesher.device)
+        results["n_points"] = n_pts
+
+        times: list[float] = []
+        for _ in range(n_runs):
+            t0 = time.perf_counter()
+            _ = mesher._visibility_filter(positions)
+            times.append(time.perf_counter() - t0)
+        results["torch_cpu_mean_s"] = statistics.mean(times)
+    except Exception as exc:  # noqa: BLE001
+        results["error"] = str(exc)
+    return results
+
+
+def _scaling_cameras(bounds, max_cameras: int = 8, n_runs: int = 1):
+    """Measure how performance scales with number of cameras."""
+    results: list[dict[str, object]] = []
+    try:
+        from ocmesher.torch_core import TorchOcMesher
+
+        for nc in [1, 2, 4, max_cameras]:
+            cameras = _make_cameras(nc)
+            times: list[float] = []
+            for _ in range(n_runs):
+                t0 = time.perf_counter()
+                mesher = TorchOcMesher(cameras, bounds, pixels_per_cube=16, device="cpu")
+                mesher([sdf_terrain])
+                times.append(time.perf_counter() - t0)
+            results.append(
+                {
+                    "n_cameras": nc,
+                    **_stats(times),
+                }
+            )
+    except Exception as exc:  # noqa: BLE001
+        results.append({"error": str(exc)})
+    return results
+
+
+def _memory_usage(cameras, bounds):
+    """Measure peak memory usage during meshing."""
+    results: dict[str, object] = {}
+    try:
+        import tracemalloc
+
+        from ocmesher.torch_core import TorchOcMesher
+
+        tracemalloc.start()
+        mesher = TorchOcMesher(cameras, bounds, pixels_per_cube=16, device="cpu")
+        mesher([sdf_terrain])
+        current, peak = tracemalloc.get_traced_memory()
+        tracemalloc.stop()
+        results["torch_current_mb"] = round(current / 1e6, 1)
+        results["torch_peak_mb"] = round(peak / 1e6, 1)
+    except Exception as exc:  # noqa: BLE001
+        results["error"] = str(exc)
+    return results
+
+
+# ---------------------------------------------------------------------------
+# Printing helpers
+# ---------------------------------------------------------------------------
+def _print_section(title: str):
+    print()
+    print("-" * 70)
+    print(title)
+    print("-" * 70)
+
+
+def _print_result(result: dict):
+    if "error" in result:
+        print(f"  SKIPPED: {result['error']}")
+        return
+    for k, v in result.items():
+        if k == "times_s":
+            continue
+        if isinstance(v, float):
+            print(f"  {k:24s}: {v:.4f}")
+        else:
+            print(f"  {k:24s}: {v}")
+
+
 # ---------------------------------------------------------------------------
 # Main
 # ---------------------------------------------------------------------------
-
-
 def main():
     """Run benchmarks and print results."""
     parser = argparse.ArgumentParser(description="OcMesher benchmark: Python+C++ vs PyTorch")
     parser.add_argument("--full", action="store_true", help="Run full benchmark (slower, higher resolution)")
-    parser.add_argument("--runs", type=int, default=1, help="Number of end-to-end runs")
+    parser.add_argument("--profile", action="store_true", help="Run sub-operation micro-benchmarks")
+    parser.add_argument("--runs", type=int, default=3, help="Number of end-to-end runs (default 3)")
+    parser.add_argument("--warmup", type=int, default=1, help="Number of warmup runs (default 1)")
+    parser.add_argument("--sdf", type=str, default=None, help="SDF to benchmark (sphere/terrain/gyroid or 'all')")
     parser.add_argument("--output", type=str, default=None, help="Save results as JSON")
     args = parser.parse_args()
 
     pixels_per_cube = 8 if args.full else 16
-    cameras = _make_cameras()
+    cameras = _make_cameras(1)
     bounds = _make_bounds()
+    sdf_names = list(_SDF_KERNELS.keys()) if args.sdf == "all" else [args.sdf or "terrain"]
 
     print("=" * 70)
-    print("OcMesher Benchmark: Python + C++ vs PyTorch")
+    print("OcMesher Comprehensive Benchmark")
     print("=" * 70)
 
-    try:
-        import torch
+    sys_info = _system_info()
+    for k, v in sys_info.items():
+        print(f"  {k:20s}: {v}")
+    print(f"  pixels_per_cube   : {pixels_per_cube}")
+    print(f"  runs              : {args.runs}")
+    print(f"  warmup            : {args.warmup}")
+    print(f"  SDFs              : {sdf_names}")
 
-        print(f"PyTorch version : {torch.__version__}")
-        print(f"CUDA available  : {torch.cuda.is_available()}")
-        if torch.cuda.is_available():
-            print(f"CUDA device     : {torch.cuda.get_device_name(0)}")
-    except ImportError:
-        print("PyTorch: NOT INSTALLED")
-
-    print(f"pixels_per_cube : {pixels_per_cube}")
-    print(f"runs            : {args.runs}")
-    print()
-
-    results: dict[str, object] = {}
+    results: dict[str, object] = {"system": sys_info}
 
     # End-to-end benchmarks ------------------------------------------------
-    print("-" * 70)
-    print("End-to-end: Original Python + C++")
-    print("-" * 70)
-    r_orig = _bench_original(cameras, bounds, pixels_per_cube, n_runs=args.runs)
-    if "error" in r_orig:
-        print(f"  SKIPPED: {r_orig['error']}")
-    else:
-        print(f"  Mean time : {r_orig['mean_s']:.3f} s  (std {r_orig['std_s']:.3f})")
-        print(f"  Vertices  : {r_orig.get('vertices', '?')}")
-        print(f"  Faces     : {r_orig.get('faces', '?')}")
-    results["original"] = r_orig
-    print()
+    for sdf_name in sdf_names:
+        _print_section(f"End-to-end: Python + C++ ({sdf_name})")
+        r_orig = _bench_original(cameras, bounds, pixels_per_cube, sdf_name, n_runs=args.runs, warmup=args.warmup)
+        _print_result(r_orig)
+        results[f"original_{sdf_name}"] = r_orig
 
-    print("-" * 70)
-    print("End-to-end: PyTorch (CPU)")
-    print("-" * 70)
-    r_torch_cpu = _bench_torch(cameras, bounds, pixels_per_cube, n_runs=args.runs, device="cpu")
-    if "error" in r_torch_cpu:
-        print(f"  SKIPPED: {r_torch_cpu['error']}")
-    else:
-        print(f"  Mean time : {r_torch_cpu['mean_s']:.3f} s  (std {r_torch_cpu['std_s']:.3f})")
-        print(f"  Vertices  : {r_torch_cpu.get('vertices', '?')}")
-        print(f"  Faces     : {r_torch_cpu.get('faces', '?')}")
-    results["torch_cpu"] = r_torch_cpu
-    print()
+        _print_section(f"End-to-end: PyTorch CPU ({sdf_name})")
+        r_torch = _bench_torch(
+            cameras, bounds, pixels_per_cube, sdf_name, n_runs=args.runs, warmup=args.warmup, device="cpu"
+        )
+        _print_result(r_torch)
+        results[f"torch_cpu_{sdf_name}"] = r_torch
 
-    try:
-        import torch
+        try:
+            import torch
 
-        if torch.cuda.is_available():
-            print("-" * 70)
-            print("End-to-end: PyTorch (CUDA)")
-            print("-" * 70)
-            r_torch_gpu = _bench_torch(cameras, bounds, pixels_per_cube, n_runs=args.runs, device="cuda")
-            if "error" in r_torch_gpu:
-                print(f"  SKIPPED: {r_torch_gpu['error']}")
-            else:
-                print(f"  Mean time : {r_torch_gpu['mean_s']:.3f} s  (std {r_torch_gpu['std_s']:.3f})")
-                print(f"  Vertices  : {r_torch_gpu.get('vertices', '?')}")
-                print(f"  Faces     : {r_torch_gpu.get('faces', '?')}")
-            results["torch_gpu"] = r_torch_gpu
-            print()
-    except ImportError:
-        pass
+            if torch.cuda.is_available():
+                _print_section(f"End-to-end: PyTorch CUDA ({sdf_name})")
+                r_gpu = _bench_torch(
+                    cameras, bounds, pixels_per_cube, sdf_name, n_runs=args.runs, warmup=args.warmup, device="cuda"
+                )
+                _print_result(r_gpu)
+                results[f"torch_gpu_{sdf_name}"] = r_gpu
+        except ImportError:
+            pass
 
-    # Micro-benchmarks -----------------------------------------------------
-    print("-" * 70)
-    print("Micro-benchmark: SDF evaluation")
-    print("-" * 70)
-    r_sdf = _micro_sdf_eval(cameras, bounds)
-    for k, v in r_sdf.items():
-        print(f"  {k}: {v}")
-    results["micro_sdf"] = r_sdf
-    print()
+    # Micro-benchmarks (only with --profile) --------------------------------
+    if args.profile:
+        _print_section("Micro-benchmark: SDF evaluation (threaded)")
+        r_sdf = _micro_sdf_eval(cameras, bounds)
+        _print_result(r_sdf)
+        results["micro_sdf"] = r_sdf
 
-    print("-" * 70)
-    print("Micro-benchmark: Camera projection")
-    print("-" * 70)
-    r_proj = _micro_projection(cameras, bounds)
-    for k, v in r_proj.items():
-        print(f"  {k}: {v}")
-    results["micro_projection"] = r_proj
-    print()
+        _print_section("Micro-benchmark: Camera projection (batched)")
+        r_proj = _micro_projection(cameras, bounds)
+        _print_result(r_proj)
+        results["micro_projection"] = r_proj
+
+        _print_section("Micro-benchmark: Marching cubes")
+        r_mc = _micro_marching_cubes(cameras, bounds)
+        _print_result(r_mc)
+        results["micro_marching_cubes"] = r_mc
+
+        _print_section("Micro-benchmark: Octree construction")
+        r_oct = _micro_octree(cameras, bounds)
+        _print_result(r_oct)
+        results["micro_octree"] = r_oct
+
+        _print_section("Micro-benchmark: Visibility filter")
+        r_vis = _micro_visibility(cameras, bounds)
+        _print_result(r_vis)
+        results["micro_visibility"] = r_vis
+
+        _print_section("Scaling: Multi-camera performance")
+        r_scale = _scaling_cameras(bounds)
+        for entry in r_scale:
+            _print_result(entry)
+        results["scaling_cameras"] = r_scale
+
+        _print_section("Memory usage")
+        r_mem = _memory_usage(cameras, bounds)
+        _print_result(r_mem)
+        results["memory"] = r_mem
 
     # Speedup summary ------------------------------------------------------
+    print()
     print("=" * 70)
     print("SUMMARY")
     print("=" * 70)
-    if "error" not in r_orig and "error" not in r_torch_cpu:
-        speedup = r_orig["mean_s"] / max(r_torch_cpu["mean_s"], 1e-6)
-        print(f"  PyTorch CPU vs Original: {speedup:.2f}x {'faster' if speedup > 1 else 'slower'}")
-    if "torch_gpu" in results and "error" not in results["torch_gpu"] and "error" not in r_orig:
-        speedup_gpu = r_orig["mean_s"] / max(results["torch_gpu"]["mean_s"], 1e-6)
-        print(f"  PyTorch GPU vs Original: {speedup_gpu:.2f}x {'faster' if speedup_gpu > 1 else 'slower'}")
+    for sdf_name in sdf_names:
+        r_orig = results.get(f"original_{sdf_name}", {})
+        r_torch = results.get(f"torch_cpu_{sdf_name}", {})
+        r_gpu = results.get(f"torch_gpu_{sdf_name}", {})
+
+        if "error" not in r_orig and "error" not in r_torch:
+            sp = r_orig["mean_s"] / max(r_torch["mean_s"], 1e-6)
+            tag = "faster" if sp > 1 else "slower"
+            print(
+                f"  [{sdf_name}] PyTorch CPU  vs C++: {sp:.2f}x {tag}  ({r_torch['mean_s']:.3f}s vs {r_orig['mean_s']:.3f}s)"
+            )
+        if r_gpu and "error" not in r_gpu and "error" not in r_orig:
+            sp_g = r_orig["mean_s"] / max(r_gpu["mean_s"], 1e-6)
+            tag_g = "faster" if sp_g > 1 else "slower"
+            print(
+                f"  [{sdf_name}] PyTorch CUDA vs C++: {sp_g:.2f}x {tag_g}  ({r_gpu['mean_s']:.3f}s vs {r_orig['mean_s']:.3f}s)"
+            )
     print()
 
     if args.output:
