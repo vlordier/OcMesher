@@ -850,11 +850,8 @@ class TorchOcMesher:
         Returns:
             ``(N, 3)`` float tensor (dtype matches ``self._fdtype``) world positions.
         """
-        # Use ldexp instead of 2**level - avoids pow for integer exponents.
-        scale = self.size / torch.ldexp(
-            torch.ones_like(levels, dtype=self._fdtype),
-            levels,
-        ).unsqueeze(1)
+        # exp2 computes 2^level directly - avoids temporary ones_like tensor.
+        scale = (self.size / torch.exp2(levels.to(self._fdtype))).unsqueeze(1)
         return self.center.unsqueeze(0) - self.size / 2 + scale * (coords.to(dtype=self._fdtype) + 0.5)
 
     @torch.no_grad()
@@ -865,10 +862,7 @@ class TorchOcMesher:
             ``(N, 8, 3)`` float tensor (dtype matches ``self._fdtype``).
         """
         corner_coords = coords.unsqueeze(1) + self._corner_offsets.unsqueeze(0)
-        scale = self.size / torch.ldexp(
-            torch.ones_like(levels, dtype=self._fdtype),
-            levels,
-        ).unsqueeze(1).unsqueeze(2)
+        scale = (self.size / torch.exp2(levels.to(self._fdtype))).unsqueeze(1).unsqueeze(2)
         return self.center.unsqueeze(0).unsqueeze(0) - self.size / 2 + scale * corner_coords.to(dtype=self._fdtype)
 
     # ------------------------------------------------------------------
@@ -887,10 +881,7 @@ class TorchOcMesher:
         """
         # Build homogeneous coords in-place via functional concat (avoids alloc)
         pos_h = torch.nn.functional.pad(positions, (0, 1), value=1.0)  # (N, 4)
-        cube_sizes = self.size / torch.ldexp(
-            torch.ones_like(levels, dtype=self._fdtype),
-            levels,
-        )  # (N,)
+        cube_sizes = self.size / torch.exp2(levels.to(self._fdtype))  # (N,)
 
         # Batched transform: (C, 3, 4) @ (4, N) -> (C, 3, N) -> (C, N, 3)
         pos_h_t = pos_h.T.unsqueeze(0).expand(self.n_cameras, -1, -1)
@@ -1062,11 +1053,29 @@ class TorchOcMesher:
         kernels: list,
         coords: torch.Tensor,
         levels: torch.Tensor,
+        corner_sdf: torch.Tensor | None = None,
         max_iters: int = 3,
-    ) -> tuple[torch.Tensor, torch.Tensor]:
+    ) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor | None]:
         """Iteratively subdivide surface cubes that project large on screen.
 
         Uses a conservative budget to avoid over-refinement.
+
+        Args:
+            kernels: SDF kernel list.
+            coords: ``(N, 3)`` int64 octree coordinates.
+            levels: ``(N,)`` int64 octree levels.
+            corner_sdf: ``(N, 8, K)`` float32 cached SDF values at cube
+                corners from a prior :meth:`_find_surface_cubes` call.  When
+                provided, the cached values are carried through the refinement
+                loop so that the caller can reuse them for mesh construction
+                without a redundant SDF evaluation.
+            max_iters: maximum refinement iterations.
+
+        Returns:
+            ``(coords, levels, corner_sdf)`` where *corner_sdf* is the
+            ``(N, 8, K)`` float32 tensor from the last
+            :meth:`_find_surface_cubes` evaluation (or the input
+            *corner_sdf* when no refinement iterations executed).
         """
         target_cubes = self.coarse_count * 4
 
@@ -1098,10 +1107,11 @@ class TorchOcMesher:
             new_coords = torch.cat([coords[keep_mask], child_c.reshape(-1, 3)])
             new_levels = torch.cat([levels[keep_mask], child_l.reshape(-1)])
 
-            mask, _ = self._find_surface_cubes(kernels, new_coords, new_levels)
+            mask, corner_sdf_new = self._find_surface_cubes(kernels, new_coords, new_levels)
             coords = new_coords[mask]
             levels = new_levels[mask]
-        return coords, levels
+            corner_sdf = corner_sdf_new[mask]
+        return coords, levels, corner_sdf
 
     # ------------------------------------------------------------------
     # Visibility filter (batched projection)
@@ -1286,14 +1296,20 @@ class TorchOcMesher:
 
         # 2. Detect surface cubes ------------------------------------------
         with Timer("torch find surface"):
-            surface_mask, _corner_sdf = self._find_surface_cubes(kernels, coords, levels)
+            surface_mask, corner_sdf = self._find_surface_cubes(kernels, coords, levels)
             s_coords = coords[surface_mask]
             s_levels = levels[surface_mask]
+            s_corner_sdf = corner_sdf[surface_mask]
             logger.info("surface cubes: %d", len(s_coords))
 
         # 3. Refine surface cubes ------------------------------------------
         with Timer("torch refine surface"):
-            s_coords, s_levels = self._refine_surface_octree(kernels, s_coords, s_levels)
+            s_coords, s_levels, s_corner_sdf = self._refine_surface_octree(
+                kernels,
+                s_coords,
+                s_levels,
+                corner_sdf=s_corner_sdf,
+            )
             logger.info("refined surface cubes: %d", len(s_coords))
 
         # 4. Visibility filter ---------------------------------------------
@@ -1314,12 +1330,19 @@ class TorchOcMesher:
             all_levels = torch.cat([vis_levels, occ_levels])
             n_visible = len(vis_coords)
 
+            # Reorder cached SDF to match the visible-then-occluded layout.
+            all_corner_sdf: torch.Tensor | None = None
+            if s_corner_sdf is not None:
+                all_corner_sdf = torch.cat([s_corner_sdf[vis_mask], s_corner_sdf[~vis_mask]])
+
             for e in range(n_elements):
                 mesh, ivt = self._construct_element_mesh(
                     kernels[e : e + 1],
                     all_coords,
                     all_levels,
                     n_visible,
+                    corner_sdf=all_corner_sdf,
+                    element_idx=e,
                 )
                 meshes.append(mesh)
                 in_view_tags.append(ivt)
@@ -1339,8 +1362,16 @@ class TorchOcMesher:
         coords: torch.Tensor,
         levels: torch.Tensor,
         n_visible: int,
+        corner_sdf: torch.Tensor | None = None,
+        element_idx: int = 0,
     ) -> tuple[trimesh.Trimesh, np.ndarray]:
-        """Build a mesh for one SDF element using marching cubes."""
+        """Build a mesh for one SDF element using marching cubes.
+
+        When *corner_sdf* is provided (``(N, 8, K)`` float32 tensor cached from
+        :meth:`_find_surface_cubes`), the expensive SDF re-evaluation is
+        skipped entirely: the cached values for kernel *element_idx* are used
+        directly, giving a significant speed-up for the mesh-construction step.
+        """
         n = len(coords)
         if n == 0:
             return trimesh.Trimesh(), np.zeros(0, dtype=bool)
@@ -1357,9 +1388,14 @@ class TorchOcMesher:
             c_levels = levels[start:end]
 
             chunk_corners = self._cube_corner_positions(c_coords, c_levels)
-            flat = chunk_corners.reshape(-1, 3)
-            sdf_all = self._evaluate_sdf(kernels, flat)
-            sdf_min = sdf_all.min(dim=-1).values.reshape(end - start, 8)
+
+            if corner_sdf is not None:
+                # Reuse cached SDF — no redundant kernel evaluation needed.
+                sdf_min = corner_sdf[start:end, :, element_idx]
+            else:
+                flat = chunk_corners.reshape(-1, 3)
+                sdf_all = self._evaluate_sdf(kernels, flat)
+                sdf_min = sdf_all.min(dim=-1).values.reshape(end - start, 8)
 
             v, f = self._marching_cubes(chunk_corners, sdf_min)
             if v.shape[0] > 0:

@@ -361,7 +361,7 @@ class TestOcMesherInit:
         cam = mesher.cameras
         np.testing.assert_allclose(cam[:12], expected_inv_pose, atol=1e-10)
         np.testing.assert_allclose(cam[12:21], expected_k, atol=1e-10)
-        assert cam[21] == pytest.approx(720.0)   # H
+        assert cam[21] == pytest.approx(720.0)  # H
         assert cam[22] == pytest.approx(1280.0)  # W
 
     @patch("ocmesher.core.load_cdll")

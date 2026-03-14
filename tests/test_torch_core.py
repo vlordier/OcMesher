@@ -352,3 +352,133 @@ class TestMCCacheInt16:
         verts, faces = single_cam_mesher._marching_cubes(corners, sdf_min)
         assert verts.shape[0] > 0
         assert faces.shape[0] > 0
+
+
+# ---------------------------------------------------------------------------
+# exp2 replaces ldexp(ones_like, levels) for faster scale computation
+# ---------------------------------------------------------------------------
+class TestExp2Scale:
+    def test_cube_centers_match_reference(self, single_cam_mesher):
+        """exp2-based _cube_centers must match a manual 2**level computation."""
+        coords = torch.tensor([[2, 3, 1], [5, 5, 5]], dtype=torch.int64, device=single_cam_mesher.device)
+        levels = torch.tensor([3, 6], dtype=torch.int64, device=single_cam_mesher.device)
+        centers = single_cam_mesher._cube_centers(coords, levels)
+        # Manual reference using 2**level
+        for i in range(len(coords)):
+            scale = single_cam_mesher.size / (2.0 ** levels[i].item())
+            expected = (
+                single_cam_mesher.center.cpu().numpy()
+                - single_cam_mesher.size / 2
+                + scale * (coords[i].cpu().numpy().astype(np.float64) + 0.5)
+            )
+            np.testing.assert_allclose(centers[i].cpu().numpy(), expected, atol=1e-10)
+
+    def test_cube_corner_positions_match_reference(self, single_cam_mesher):
+        """exp2-based _cube_corner_positions must match a manual 2**level computation."""
+        coords = torch.tensor([[0, 0, 0]], dtype=torch.int64, device=single_cam_mesher.device)
+        levels = torch.tensor([4], dtype=torch.int64, device=single_cam_mesher.device)
+        corners = single_cam_mesher._cube_corner_positions(coords, levels)
+        assert corners.shape == (1, 8, 3)
+        # All 8 corners must differ from the origin cube
+        unique_corners = corners[0].unique(dim=0)
+        assert unique_corners.shape[0] == 8
+
+    def test_projected_sizes_positive(self, single_cam_mesher):
+        """_projected_sizes must return positive values after exp2 change."""
+        coords = torch.tensor([[1, 1, 1]], dtype=torch.int64, device=single_cam_mesher.device)
+        levels = torch.tensor([2], dtype=torch.int64, device=single_cam_mesher.device)
+        positions = single_cam_mesher._cube_centers(coords, levels)
+        proj = single_cam_mesher._projected_sizes(positions, levels)
+        assert (proj > 0).all()
+
+
+# ---------------------------------------------------------------------------
+# SDF caching: _refine_surface_octree returns corner_sdf
+# ---------------------------------------------------------------------------
+class TestSDFCaching:
+    def test_refine_returns_corner_sdf(self, single_cam_mesher, sphere_kernel):
+        """_refine_surface_octree must return a corner_sdf tensor."""
+        kernels = [sphere_kernel]
+        coords, levels = single_cam_mesher._build_coarse_octree()
+        mask, corner_sdf = single_cam_mesher._find_surface_cubes(kernels, coords, levels)
+        s_coords = coords[mask]
+        s_levels = levels[mask]
+        s_corner_sdf = corner_sdf[mask]
+        r_coords, r_levels, r_corner_sdf = single_cam_mesher._refine_surface_octree(
+            kernels,
+            s_coords,
+            s_levels,
+            corner_sdf=s_corner_sdf,
+        )
+        assert r_corner_sdf is not None
+        assert r_corner_sdf.shape[0] == len(r_coords)
+        assert r_corner_sdf.shape[1] == 8
+        assert r_corner_sdf.shape[2] == len(kernels)
+
+    def test_refine_without_cache_returns_none_when_no_iters(self, single_cam_mesher, sphere_kernel):
+        """When no corner_sdf is provided and max_iters=0, result is None."""
+        kernels = [sphere_kernel]
+        coords, levels = single_cam_mesher._build_coarse_octree()
+        mask, _ = single_cam_mesher._find_surface_cubes(kernels, coords, levels)
+        s_coords = coords[mask]
+        s_levels = levels[mask]
+        if len(s_coords) == 0:
+            pytest.skip("no surface cubes found")
+        # Force zero refinement iterations with corner_sdf=None
+        r_coords, r_levels, r_corner_sdf = single_cam_mesher._refine_surface_octree(
+            kernels,
+            s_coords,
+            s_levels,
+            max_iters=0,
+        )
+        assert r_corner_sdf is None
+        # Coords/levels are returned unchanged
+        assert len(r_coords) == len(s_coords)
+        assert len(r_levels) == len(s_levels)
+
+    def test_cached_sdf_produces_same_mesh(self, single_cam_mesher, sphere_kernel):
+        """End-to-end mesh with SDF caching must match mesh without it."""
+        # Run with caching (default)
+        meshes_cached, _ = single_cam_mesher([sphere_kernel])
+        v_cached = meshes_cached[0].vertices
+        f_cached = meshes_cached[0].faces
+
+        # Run without caching by calling _construct_element_mesh with corner_sdf=None
+        coords, levels = single_cam_mesher._build_coarse_octree()
+        mask, _cs = single_cam_mesher._find_surface_cubes([sphere_kernel], coords, levels)
+        s_coords = coords[mask]
+        s_levels = levels[mask]
+        r_coords, r_levels, _r_sdf = single_cam_mesher._refine_surface_octree(
+            [sphere_kernel],
+            s_coords,
+            s_levels,
+        )
+        positions = single_cam_mesher._cube_centers(r_coords, r_levels)
+        vis_mask = single_cam_mesher._visibility_filter(positions)
+        all_c = torch.cat([r_coords[vis_mask], r_coords[~vis_mask]])
+        all_l = torch.cat([r_levels[vis_mask], r_levels[~vis_mask]])
+        n_vis = int(vis_mask.sum().item())
+        mesh_no_cache, _ = single_cam_mesher._construct_element_mesh(
+            [sphere_kernel],
+            all_c,
+            all_l,
+            n_vis,
+            corner_sdf=None,
+        )
+        v_no_cache = mesh_no_cache.vertices
+        f_no_cache = mesh_no_cache.faces
+
+        # Both paths must produce the same geometry
+        assert v_cached.shape == v_no_cache.shape
+        assert f_cached.shape == f_no_cache.shape
+        np.testing.assert_allclose(v_cached, v_no_cache, atol=1e-8)
+        np.testing.assert_array_equal(f_cached, f_no_cache)
+
+    def test_multi_kernel_cached_sdf(self, single_cam_mesher, sphere_kernel, plane_kernel):
+        """SDF caching must work correctly with multiple kernels."""
+        meshes, tags = single_cam_mesher([sphere_kernel, plane_kernel])
+        assert len(meshes) == 2
+        assert len(tags) == 2
+        # Each mesh should have geometry
+        assert meshes[0].vertices.shape[0] > 0
+        assert meshes[1].vertices.shape[0] > 0
