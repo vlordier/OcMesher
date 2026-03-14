@@ -1,3 +1,13 @@
 __pycache__
 lib
 results
+tests/cpp/test_macros
+tests/cpp/test_data_structures
+tests/cpp/test_int_log
+tests/cpp/test_determinant
+tests/cpp/test_tri_seg_intersect
+tests/cpp/test_coordinates
+tests/cpp/test_projection
+tests/cpp/test_octree
+tests/cpp/test_find_edges
+tests/cpp/test_integration
