@@ -63,7 +63,6 @@ ignore = [
 # demo.py – standalone script, not a package
 "demo.py" = [
     "INP001",   # implicit namespace package
-    "T201",     # print statements OK in demo
 ]
 # root __init__.py – intentional top-level package
 "__init__.py" = [
@@ -77,30 +76,26 @@ ignore = [
     "FBT002",   # boolean default positional args (API backwards-compat)
     "PLR0913",  # too-many-arguments (ctypes register_func calls)
     "PLR0915",  # too-many-statements (__call__ orchestrates meshing)
-    "T201",     # print statements for progress output
 ]
 # interface.py – ctypes helper with many function params
 "ocmesher/utils/interface.py" = [
     "PLR0913",  # too-many-arguments (register_func has 6 params for ctypes binding)
 ]
-# timer utility – prints timing info
+# timer utility – logs timing info
 "ocmesher/utils/timer.py" = [
     "FBT001",   # boolean-typed positional arg (API backwards-compat)
     "FBT002",   # boolean default positional arg (API backwards-compat)
-    "T201",     # print statements for timer output
 ]
 # PyTorch mesher – complex scientific code with GPU tensor ops
 "ocmesher/torch_core.py" = [
     "PLR0913",  # too-many-arguments (constructor mirrors original API)
     "PLR0915",  # too-many-statements (__call__ orchestrates meshing)
-    "T201",     # print statements for progress output
     "C901",     # complex methods (meshing is inherently complex)
     "FBT002",   # boolean default positional args (API backwards-compat)
 ]
 # benchmark script – standalone runner
 "benchmarks/run_benchmark.py" = [
     "INP001",   # implicit namespace package
-    "T201",     # print statements for benchmark output
     "SLF001",   # private member access (benchmarking internal methods)
     "S101",     # assert usage
     "PLR0915",  # too-many-statements (benchmark main)

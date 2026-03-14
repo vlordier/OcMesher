@@ -5,6 +5,7 @@
 
 """Octree-based hierarchical 3D mesher driven by signed-distance functions."""
 
+import logging
 from pathlib import Path
 
 import gin
@@ -27,6 +28,8 @@ from .utils.interface import (
     register_func,
 )
 from .utils.timer import Timer
+
+logger = logging.getLogger(__name__)
 
 CAMERA_DATA_STRIDE = 23
 
@@ -324,6 +327,7 @@ class OcMesher:
                 self.memory_limit_mb,
                 n_elements,
             )
+        logger.info("coarse blocks: %d", n_blocks)
         # start considering sdf
         with Timer("coarse step part2"), tqdm(total=n_blocks) as pbar:
             while True:
@@ -339,6 +343,7 @@ class OcMesher:
                     n = self.fine_iteration(self.sdf_AF(sdf))
         with Timer("filter visible blocks"):
             n_vis_block = self.vis_filter(self.simplify_occluded, self.visible_relax_iter)
+        logger.info("visible blocks: %d", n_vis_block)
 
         with Timer("fine step"), tqdm(total=n_vis_block) as pbar:
             nv = np.zeros(1, dtype=np.int32)
@@ -368,7 +373,12 @@ class OcMesher:
                 mesh, in_view_tag = self._construct_element_mesh(e, kernels[e : e + 1], nv[e])
                 meshes.append(mesh)
                 in_view_tags.append(in_view_tag)
-                print(f"element {e} has vertices #{mesh.vertices.shape[0]} faces #{mesh.faces.shape[0]}")
+                logger.info(
+                    "element %d: %d vertices, %d faces",
+                    e,
+                    mesh.vertices.shape[0],
+                    mesh.faces.shape[0],
+                )
         return meshes, in_view_tags
 
     def _construct_element_mesh(self, e, k_e, num_verts):

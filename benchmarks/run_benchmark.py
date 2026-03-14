@@ -14,13 +14,17 @@ from __future__ import annotations
 
 import argparse
 import json
+import logging
 import platform
 import statistics
+import sys
 import time
 from pathlib import Path
 
 import numpy as np
 import psutil
+
+logger = logging.getLogger(__name__)
 
 # ---------------------------------------------------------------------------
 # SDF kernels at varying complexity levels
@@ -934,33 +938,33 @@ def _bench_compile(cameras, bounds, sdf_name: str = "terrain", n_runs: int = 3, 
 
 
 # ---------------------------------------------------------------------------
-# Printing helpers
+# Logging helpers
 # ---------------------------------------------------------------------------
 def _print_section(title: str):
-    print()
-    print("-" * 70)
-    print(title)
-    print("-" * 70)
+    logger.info("")
+    logger.info("%s", "-" * 70)
+    logger.info("%s", title)
+    logger.info("%s", "-" * 70)
 
 
 def _print_result(result: dict):
     if "error" in result:
-        print(f"  SKIPPED: {result['error']}")
+        logger.info("  SKIPPED: %s", result["error"])
         return
     for k, v in result.items():
         if k == "times_s":
             continue
         if isinstance(v, float):
-            print(f"  {k:24s}: {v:.4f}")
+            logger.info("  %-24s: %.4f", k, v)
         else:
-            print(f"  {k:24s}: {v}")
+            logger.info("  %-24s: %s", k, v)
 
 
 # ---------------------------------------------------------------------------
 # Main
 # ---------------------------------------------------------------------------
 def main():
-    """Run benchmarks and print results."""
+    """Run benchmarks and log results."""
     parser = argparse.ArgumentParser(description="OcMesher benchmark: Python+C++ vs PyTorch")
     parser.add_argument("--full", action="store_true", help="Run full benchmark (slower, higher resolution)")
     parser.add_argument("--profile", action="store_true", help="Run sub-operation micro-benchmarks")
@@ -984,7 +988,24 @@ def main():
         action="store_true",
         help="Run torch.compile impact benchmark (requires --profile)",
     )
+    parser.add_argument(
+        "--verbose",
+        action="store_true",
+        help="Enable DEBUG-level logging (includes per-step mesher output)",
+    )
     args = parser.parse_args()
+
+    # Configure logging: verbose mode shows DEBUG + timestamps; default shows INFO only.
+    # Use stream=sys.stdout to preserve prior CLI behaviour (print() used stdout).
+    if args.verbose:
+        logging.basicConfig(
+            level=logging.DEBUG,
+            format="%(asctime)s %(levelname)-8s %(name)s: %(message)s",
+            datefmt="%H:%M:%S",
+            stream=sys.stdout,
+        )
+    else:
+        logging.basicConfig(level=logging.INFO, format="%(message)s", stream=sys.stdout)
 
     pixels_per_cube = 8 if args.full else 16
     cameras = _make_cameras(1)
@@ -1010,18 +1031,18 @@ def main():
     else:
         bench_devices = [d.strip() for d in args.device.split(",")]
 
-    print("=" * 70)
-    print("OcMesher Comprehensive Benchmark")
-    print("=" * 70)
+    logger.info("%s", "=" * 70)
+    logger.info("OcMesher Comprehensive Benchmark")
+    logger.info("%s", "=" * 70)
 
     sys_info = _system_info()
     for k, v in sys_info.items():
-        print(f"  {k:24s}: {v}")
-    print(f"  pixels_per_cube         : {pixels_per_cube}")
-    print(f"  runs                    : {args.runs}")
-    print(f"  warmup                  : {args.warmup}")
-    print(f"  SDFs                    : {sdf_names}")
-    print(f"  devices                 : {bench_devices}")
+        logger.info("  %-24s: %s", k, v)
+    logger.info("  %-24s: %s", "pixels_per_cube", pixels_per_cube)
+    logger.info("  %-24s: %s", "runs", args.runs)
+    logger.info("  %-24s: %s", "warmup", args.warmup)
+    logger.info("  %-24s: %s", "SDFs", sdf_names)
+    logger.info("  %-24s: %s", "devices", bench_devices)
 
     results: dict[str, object] = {"system": sys_info}
 
@@ -1135,10 +1156,10 @@ def main():
             results["bench_compile"] = r_comp
 
     # Speedup summary ------------------------------------------------------
-    print()
-    print("=" * 70)
-    print("SUMMARY")
-    print("=" * 70)
+    logger.info("")
+    logger.info("%s", "=" * 70)
+    logger.info("SUMMARY")
+    logger.info("%s", "=" * 70)
     for sdf_name in sdf_names:
         r_orig = results.get(f"original_{sdf_name}", {})
         r_torch_cpu = results.get(f"torch_cpu_{sdf_name}", {})
@@ -1148,42 +1169,67 @@ def main():
         if r_orig and "error" not in r_orig and r_torch_cpu and "error" not in r_torch_cpu:
             sp = r_orig["mean_s"] / max(r_torch_cpu["mean_s"], 1e-6)
             tag = "faster" if sp > 1 else "slower"
-            print(
-                f"  [{sdf_name}] PyTorch CPU  vs C++: {sp:.2f}x {tag}  ({r_torch_cpu['mean_s']:.3f}s vs {r_orig['mean_s']:.3f}s)"
+            logger.info(
+                "  [%s] PyTorch CPU  vs C++: %.2fx %s  (%.3fs vs %.3fs)",
+                sdf_name,
+                sp,
+                tag,
+                r_torch_cpu["mean_s"],
+                r_orig["mean_s"],
             )
         if r_gpu and "error" not in r_gpu and r_orig and "error" not in r_orig:
             sp_g = r_orig["mean_s"] / max(r_gpu["mean_s"], 1e-6)
             tag_g = "faster" if sp_g > 1 else "slower"
-            print(
-                f"  [{sdf_name}] PyTorch CUDA vs C++: {sp_g:.2f}x {tag_g}  ({r_gpu['mean_s']:.3f}s vs {r_orig['mean_s']:.3f}s)"
+            logger.info(
+                "  [%s] PyTorch CUDA vs C++: %.2fx %s  (%.3fs vs %.3fs)",
+                sdf_name,
+                sp_g,
+                tag_g,
+                r_gpu["mean_s"],
+                r_orig["mean_s"],
             )
         if r_mps and "error" not in r_mps and r_orig and "error" not in r_orig:
             sp_m = r_orig["mean_s"] / max(r_mps["mean_s"], 1e-6)
             tag_m = "faster" if sp_m > 1 else "slower"
-            print(
-                f"  [{sdf_name}] PyTorch MPS  vs C++: {sp_m:.2f}x {tag_m}  ({r_mps['mean_s']:.3f}s vs {r_orig['mean_s']:.3f}s)"
+            logger.info(
+                "  [%s] PyTorch MPS  vs C++: %.2fx %s  (%.3fs vs %.3fs)",
+                sdf_name,
+                sp_m,
+                tag_m,
+                r_mps["mean_s"],
+                r_orig["mean_s"],
             )
 
         # Cross-device speedup (if multiple GPU devices available)
         if r_gpu and r_torch_cpu and "error" not in r_gpu and "error" not in r_torch_cpu:
             sp_gc = r_torch_cpu["mean_s"] / max(r_gpu["mean_s"], 1e-6)
             tag_gc = "faster" if sp_gc > 1 else "slower"
-            print(
-                f"  [{sdf_name}] PyTorch CUDA vs CPU: {sp_gc:.2f}x {tag_gc}  ({r_gpu['mean_s']:.3f}s vs {r_torch_cpu['mean_s']:.3f}s)"
+            logger.info(
+                "  [%s] PyTorch CUDA vs CPU: %.2fx %s  (%.3fs vs %.3fs)",
+                sdf_name,
+                sp_gc,
+                tag_gc,
+                r_gpu["mean_s"],
+                r_torch_cpu["mean_s"],
             )
         if r_mps and r_torch_cpu and "error" not in r_mps and "error" not in r_torch_cpu:
             sp_mc = r_torch_cpu["mean_s"] / max(r_mps["mean_s"], 1e-6)
             tag_mc = "faster" if sp_mc > 1 else "slower"
-            print(
-                f"  [{sdf_name}] PyTorch MPS  vs CPU: {sp_mc:.2f}x {tag_mc}  ({r_mps['mean_s']:.3f}s vs {r_torch_cpu['mean_s']:.3f}s)"
+            logger.info(
+                "  [%s] PyTorch MPS  vs CPU: %.2fx %s  (%.3fs vs %.3fs)",
+                sdf_name,
+                sp_mc,
+                tag_mc,
+                r_mps["mean_s"],
+                r_torch_cpu["mean_s"],
             )
-    print()
+    logger.info("")
 
     if args.output:
         outpath = Path(args.output)
         outpath.parent.mkdir(parents=True, exist_ok=True)
         outpath.write_text(json.dumps(results, indent=2, default=str))
-        print(f"Results saved to {outpath}")
+        logger.info("Results saved to %s", outpath)
 
 
 if __name__ == "__main__":
