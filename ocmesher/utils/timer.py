@@ -12,6 +12,7 @@ from typing import Self
 
 import psutil
 
+__all__ = ["Timer"]
 
 class Timer:
     """Context manager that measures wall-clock duration and reports memory usage.

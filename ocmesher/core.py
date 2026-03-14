@@ -30,6 +30,10 @@ from .utils.timer import Timer
 
 CAMERA_DATA_STRIDE = 23
 
+# Maximum number of SDF query points evaluated in a single vectorised batch.
+# Keeping this below ~10M avoids exhausting RAM on large octrees.
+_SDF_BATCH_SIZE = 10_000_000
+
 
 def _validate_cameras(cameras):
     """Validate and normalise camera tuple, returning (cam_poses, Ks, Hs, Ws).
@@ -88,6 +92,25 @@ def _validate_bounds(bounds):
             msg = f"bounds {name}_min ({bounds[axis * 2]}) must be less than {name}_max ({bounds[axis * 2 + 1]})"
             raise ValueError(msg)
     return bounds
+
+
+def _validate_kernels(kernels):
+    """Validate that *kernels* is a non-empty sequence of callables.
+
+    Args:
+        kernels: Sequence of SDF kernel functions.
+
+    Raises:
+        ValueError: If kernels is empty or not a list/tuple.
+        TypeError: If any element is not callable.
+    """
+    if not isinstance(kernels, (list, tuple)) or len(kernels) == 0:
+        msg = "kernels must be a non-empty list/tuple of callable SDF functions"
+        raise ValueError(msg)
+    for i, k in enumerate(kernels):
+        if not callable(k):
+            msg = f"kernels[{i}] must be callable, got {type(k).__name__}"
+            raise TypeError(msg)
 
 
 @gin.configurable
@@ -238,10 +261,9 @@ class OcMesher:
         n_XYZ = len(XYZ_all)
         if n_XYZ == 0:
             return np.zeros((0, len(kernels)), dtype=self.sdf_np_float_type)
-        step = 10000000
         sdfs = []
-        for i in range(0, n_XYZ, step):
-            XYZ = XYZ_all[i : i + step]
+        for i in range(0, n_XYZ, _SDF_BATCH_SIZE):
+            XYZ = XYZ_all[i : i + _SDF_BATCH_SIZE]
             sdfs_i = []
             out_bound = np.zeros(len(XYZ), dtype=bool)
             if self.enclosed:
@@ -258,9 +280,7 @@ class OcMesher:
 
     def __call__(self, kernels):
         """Run the full coarse-to-fine meshing pipeline and return meshes."""
-        if not isinstance(kernels, (list, tuple)) or len(kernels) == 0:
-            msg = "kernels must be a non-empty list/tuple of callable SDF functions"
-            raise ValueError(msg)
+        _validate_kernels(kernels)
         n_elements = len(kernels)
         # octree only considering cameras, not sdf
         with Timer("coarse step part1"):
