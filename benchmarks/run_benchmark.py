@@ -1078,21 +1078,33 @@ def main():
             tag = "faster" if sp > 1 else "slower"
             logger.info(
                 "  [%s] PyTorch CPU  vs C++: %.2fx %s  (%.3fs vs %.3fs)",
-                sdf_name, sp, tag, r_torch_cpu["mean_s"], r_orig["mean_s"],
+                sdf_name,
+                sp,
+                tag,
+                r_torch_cpu["mean_s"],
+                r_orig["mean_s"],
             )
         if r_gpu and "error" not in r_gpu and r_orig and "error" not in r_orig:
             sp_g = r_orig["mean_s"] / max(r_gpu["mean_s"], 1e-6)
             tag_g = "faster" if sp_g > 1 else "slower"
             logger.info(
                 "  [%s] PyTorch CUDA vs C++: %.2fx %s  (%.3fs vs %.3fs)",
-                sdf_name, sp_g, tag_g, r_gpu["mean_s"], r_orig["mean_s"],
+                sdf_name,
+                sp_g,
+                tag_g,
+                r_gpu["mean_s"],
+                r_orig["mean_s"],
             )
         if r_mps and "error" not in r_mps and r_orig and "error" not in r_orig:
             sp_m = r_orig["mean_s"] / max(r_mps["mean_s"], 1e-6)
             tag_m = "faster" if sp_m > 1 else "slower"
             logger.info(
                 "  [%s] PyTorch MPS  vs C++: %.2fx %s  (%.3fs vs %.3fs)",
-                sdf_name, sp_m, tag_m, r_mps["mean_s"], r_orig["mean_s"],
+                sdf_name,
+                sp_m,
+                tag_m,
+                r_mps["mean_s"],
+                r_orig["mean_s"],
             )
 
         # Cross-device speedup (if multiple GPU devices available)
@@ -1101,14 +1113,22 @@ def main():
             tag_gc = "faster" if sp_gc > 1 else "slower"
             logger.info(
                 "  [%s] PyTorch CUDA vs CPU: %.2fx %s  (%.3fs vs %.3fs)",
-                sdf_name, sp_gc, tag_gc, r_gpu["mean_s"], r_torch_cpu["mean_s"],
+                sdf_name,
+                sp_gc,
+                tag_gc,
+                r_gpu["mean_s"],
+                r_torch_cpu["mean_s"],
             )
         if r_mps and r_torch_cpu and "error" not in r_mps and "error" not in r_torch_cpu:
             sp_mc = r_torch_cpu["mean_s"] / max(r_mps["mean_s"], 1e-6)
             tag_mc = "faster" if sp_mc > 1 else "slower"
             logger.info(
                 "  [%s] PyTorch MPS  vs CPU: %.2fx %s  (%.3fs vs %.3fs)",
-                sdf_name, sp_mc, tag_mc, r_mps["mean_s"], r_torch_cpu["mean_s"],
+                sdf_name,
+                sp_mc,
+                tag_mc,
+                r_mps["mean_s"],
+                r_torch_cpu["mean_s"],
             )
     logger.info("")
 

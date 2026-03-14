@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import logging
 import time
 from unittest.mock import patch
 
@@ -38,18 +39,16 @@ class _FakeProcess:
 
 class TestTimerBasic:
     @patch("ocmesher.utils.timer.psutil.Process", _FakeProcess)
-    def test_timer_prints_duration(self, capsys):
-        with Timer("test op"):
+    def test_timer_prints_duration(self, caplog):
+        with caplog.at_level(logging.INFO, logger="ocmesher.utils.timer"), Timer("test op"):
             time.sleep(0.01)
-        captured = capsys.readouterr()
-        assert "[test op] finished in" in captured.out
-        assert "GB" in captured.out
+        assert "[test op] finished in" in caplog.text
+        assert "GB" in caplog.text
 
-    def test_timer_disabled(self, capsys):
-        with Timer("disabled", disable_timer=True):
+    def test_timer_disabled(self, caplog):
+        with caplog.at_level(logging.INFO, logger="ocmesher.utils.timer"), Timer("disabled", disable_timer=True):
             time.sleep(0.01)
-        captured = capsys.readouterr()
-        assert captured.out == ""
+        assert caplog.text == ""
 
     @patch("ocmesher.utils.timer.psutil.Process", _FakeProcess)
     def test_timer_records_duration(self):
@@ -67,12 +66,11 @@ class TestTimerBasic:
             assert isinstance(t, Timer)
 
     @patch("ocmesher.utils.timer.psutil.Process", _FakeProcess)
-    def test_timer_output_contains_elapsed_time(self, capsys):
-        with Timer("elapsed test"):
+    def test_timer_output_contains_elapsed_time(self, caplog):
+        with caplog.at_level(logging.INFO, logger="ocmesher.utils.timer"), Timer("elapsed test"):
             pass
-        captured = capsys.readouterr()
         # Output must include a timedelta-style string, e.g. "0:00:00.000123"
-        assert "0:00:0" in captured.out
+        assert "0:00:0" in caplog.text
 
 
 class TestTimerName:
@@ -86,12 +84,15 @@ class TestTimerName:
 
 
 class TestTimerExceptionHandling:
-    def test_prints_failure_on_exception(self, capsys):
-        with pytest.raises(ValueError, match="test error"), Timer("failing op"):
+    def test_prints_failure_on_exception(self, caplog):
+        with (
+            caplog.at_level(logging.WARNING, logger="ocmesher.utils.timer"),
+            pytest.raises(ValueError, match="test error"),
+            Timer("failing op"),
+        ):
             raise ValueError("test error")  # noqa: EM101, TRY003
-        captured = capsys.readouterr()
-        assert "[failing op] failed with" in captured.out
-        assert "ValueError" in captured.out
+        assert "[failing op] failed with" in caplog.text
+        assert "ValueError" in caplog.text
 
     def test_does_not_suppress_exception(self):
         with pytest.raises(RuntimeError), Timer("error test"):
@@ -104,31 +105,36 @@ class TestTimerExceptionHandling:
 
 class TestTimerMemoryReporting:
     @patch("ocmesher.utils.timer.psutil.Process", _FakeProcess)
-    def test_memory_output_format(self, capsys):
-        with Timer("mem test"):
+    def test_memory_output_format(self, caplog):
+        with caplog.at_level(logging.INFO, logger="ocmesher.utils.timer"), Timer("mem test"):
             pass
-        captured = capsys.readouterr()
-        assert "0.50 GB" in captured.out
+        assert "0.50 GB" in caplog.text
 
-    def test_handles_psutil_no_such_process(self, capsys):
+    def test_handles_psutil_no_such_process(self, caplog):
         def _raise(_pid):
             raise psutil.NoSuchProcess(_pid)
 
-        with patch("ocmesher.utils.timer.psutil.Process", side_effect=_raise), Timer("psutil error test"):
+        with (
+            caplog.at_level(logging.INFO, logger="ocmesher.utils.timer"),
+            patch("ocmesher.utils.timer.psutil.Process", side_effect=_raise),
+            Timer("psutil error test"),
+        ):
             pass
-        captured = capsys.readouterr()
-        assert "[psutil error test] finished in" in captured.out
-        assert "GB" not in captured.out
+        assert "[psutil error test] finished in" in caplog.text
+        assert "GB" not in caplog.text
 
-    def test_handles_psutil_access_denied(self, capsys):
+    def test_handles_psutil_access_denied(self, caplog):
         def _raise(_pid):
             raise psutil.AccessDenied(_pid)
 
-        with patch("ocmesher.utils.timer.psutil.Process", side_effect=_raise), Timer("access denied test"):
+        with (
+            caplog.at_level(logging.INFO, logger="ocmesher.utils.timer"),
+            patch("ocmesher.utils.timer.psutil.Process", side_effect=_raise),
+            Timer("access denied test"),
+        ):
             pass
-        captured = capsys.readouterr()
-        assert "[access denied test] finished in" in captured.out
-        assert "GB" not in captured.out
+        assert "[access denied test] finished in" in caplog.text
+        assert "GB" not in caplog.text
 
 
 # ---------------------------------------------------------------------------
