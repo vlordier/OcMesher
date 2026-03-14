@@ -658,18 +658,15 @@ class TorchOcMesher:
         self.n_cameras = len(cam_poses)
 
         # Pack camera data as batched tensors for bmm projection -------------
-        inv_poses = []
-        intrinsics = []
-        self.cam_heights: list[int] = []
-        self.cam_widths: list[int] = []
-        for i in range(self.n_cameras):
-            inv_pose_np = np.linalg.inv(cam_poses[i])[:3, :4].astype(np.float64)
-            inv_poses.append(torch.from_numpy(inv_pose_np))
-            intrinsics.append(torch.from_numpy(Ks[i].astype(np.float64)))
-            self.cam_heights.append(int(Hs[i]))
-            self.cam_widths.append(int(Ws[i]))
-        self.cam_inv_poses = torch.stack(inv_poses).to(self.device)  # (C, 3, 4)
-        self.cam_intrinsics = torch.stack(intrinsics).to(self.device)  # (C, 3, 3)
+        # Vectorised: build numpy arrays first, transfer once to device.
+        inv_poses_np = np.stack([np.linalg.inv(cam_poses[i])[:3, :4] for i in range(self.n_cameras)]).astype(
+            np.float64
+        )
+        intrinsics_np = np.stack([np.asarray(Ks[i], dtype=np.float64) for i in range(self.n_cameras)])
+        self.cam_heights: list[int] = [int(h) for h in Hs]
+        self.cam_widths: list[int] = [int(w) for w in Ws]
+        self.cam_inv_poses = torch.from_numpy(inv_poses_np).to(self.device)  # (C, 3, 4)
+        self.cam_intrinsics = torch.from_numpy(intrinsics_np).to(self.device)  # (C, 3, 3)
 
         # Scene bounds -------------------------------------------------------
         self.bounds = bounds
@@ -692,12 +689,10 @@ class TorchOcMesher:
         self.coarse_count = coarse_count
         self.n_sdf_workers = max(1, n_sdf_workers)
 
-        # Pre-compute per-camera pixel angular size --------------------------
-        self._pix_ang = torch.empty(self.n_cameras, dtype=torch.float64, device=self.device)
-        for k in range(self.n_cameras):
-            fx = float(self.cam_intrinsics[k][0, 0].item())
-            w = self.cam_widths[k]
-            self._pix_ang[k] = float(np.arctan(w / 2 / fx) * 2 / w)
+        # Pre-compute per-camera pixel angular size (vectorised) --------------
+        fx_all = self.cam_intrinsics[:, 0, 0]  # (C,)
+        w_all = torch.tensor(self.cam_widths, dtype=torch.float64, device=self.device)
+        self._pix_ang = torch.atan(w_all / 2 / fx_all) * 2 / w_all  # (C,)
 
         # Pre-compute projection angular threshold for _projected_sizes.
         # This avoids recomputing the product every call.
@@ -725,6 +720,14 @@ class TorchOcMesher:
         )
         self._corner_offsets = torch.tensor(_CORNER_OFFSETS, dtype=torch.int64, device=self.device)
         self._edge_vertices = torch.tensor(_EDGE_VERTICES, dtype=torch.long, device=self.device)
+
+        # Pre-compute visibility relaxation neighbor offsets ------------------
+        rl = self.visible_relax_iter
+        dx_range = torch.arange(-rl, rl + 1, dtype=torch.long, device=self.device)
+        dy_range = torch.arange(-rl, rl + 1, dtype=torch.long, device=self.device)
+        grid_dx, grid_dy = torch.meshgrid(dx_range, dy_range, indexing="ij")
+        self._relax_dx = grid_dx.reshape(-1)  # ((2*rl+1)^2,)
+        self._relax_dy = grid_dy.reshape(-1)
 
         # Ensure MC tables are cached for this device
         self._ensure_mc_cache()
@@ -841,6 +844,7 @@ class TorchOcMesher:
         step = 2_000_000  # chunk size tuned for cache locality
         bounds_np = self._bounds_np
         enclosed = self.enclosed
+        _use_pinned = self.device.type == "cuda"
 
         if n_kernels == 1:
             # --- Fast path for the common single-kernel case ---
@@ -887,9 +891,12 @@ class TorchOcMesher:
         else:
             parts = [_eval_chunk(c) for c in chunks]
 
-        if len(parts) == 1:
-            return torch.from_numpy(parts[0]).to(self.device)
-        return torch.from_numpy(np.concatenate(parts, axis=0)).to(self.device)
+        result_np = parts[0] if len(parts) == 1 else np.concatenate(parts, axis=0)
+        # Use pinned memory for CUDA transfers to overlap copy with compute
+        if _use_pinned:
+            result_t = torch.from_numpy(result_np).pin_memory()
+            return result_t.to(self.device, non_blocking=True)
+        return torch.from_numpy(result_np).to(self.device)
 
     # ------------------------------------------------------------------
     # Octree construction
@@ -1019,14 +1026,14 @@ class TorchOcMesher:
         """Classify positions as visible / occluded via depth buffering.
 
         Uses pre-computed K @ inv_pose projection matrix and batched operations.
+        Camera loop and neighbour relaxation are fully vectorised.
 
         Returns:
             ``(N,)`` bool tensor - *True* for visible.
         """
         n = positions.shape[0]
         visible = torch.zeros(n, dtype=torch.bool, device=self.device)
-        ones = torch.ones(n, 1, dtype=torch.float64, device=self.device)
-        pos_h = torch.cat([positions, ones], dim=1)  # (N, 4)
+        pos_h = torch.nn.functional.pad(positions, (0, 1), value=1.0)  # (N, 4)
 
         # Batched projection: (C, 3, 4) @ (4, N) -> (C, 3, N) -> (C, N, 3)
         img_all = torch.bmm(
@@ -1034,35 +1041,48 @@ class TorchOcMesher:
             pos_h.T.unsqueeze(0).expand(self.n_cameras, -1, -1),
         ).permute(0, 2, 1)  # (C, N, 3)
 
+        # Vectorised across all cameras: extract depth and pixel coords
+        depth_all = img_all[:, :, 2]  # (C, N)
+        depth_safe = depth_all + 1e-10
+        px_all = img_all[:, :, 0] / depth_safe  # (C, N)
+        py_all = img_all[:, :, 1] / depth_safe  # (C, N)
+
+        # Per-camera bounds as tensors (C,) for vectorised in-view check
+        h_all = self._cam_heights_t.unsqueeze(1)  # (C, 1)
+        w_all = self._cam_widths_t.unsqueeze(1)  # (C, 1)
+        in_view_all = (depth_all > 0) & (px_all >= 0) & (px_all < w_all) & (py_all >= 0) & (py_all < h_all)
+
+        if not self.simplify_occluded:
+            # Simple case: visible if in any camera view
+            visible = in_view_all.any(dim=0)
+            return visible
+
+        # Depth-buffered occlusion culling per camera
         factor = 10.0
         for k in range(self.n_cameras):
-            img = img_all[k]  # (N, 3) - already projected
-            depth = img[:, 2]
-            px = img[:, 0] / (depth + 1e-10)
-            py = img[:, 1] / (depth + 1e-10)
+            in_view = in_view_all[k]
+            depth = depth_all[k]
+            px = px_all[k]
+            py = py_all[k]
             h, w = self.cam_heights[k], self.cam_widths[k]
-            in_view = (depth > 0) & (px >= 0) & (px < w) & (py >= 0) & (py < h)
+            hb = max(1, int(h / factor))
+            wb = max(1, int(w / factor))
+            bx = (px / factor).long().clamp(0, wb - 1)
+            by = (py / factor).long().clamp(0, hb - 1)
+            depth_buf = torch.full((wb * hb,), float("inf"), dtype=torch.float64, device=self.device)
+            valid = in_view & (depth > 0)
+            if valid.any():
+                idx = bx[valid] * hb + by[valid]
+                depth_buf.scatter_reduce_(0, idx, depth[valid], reduce="amin")
 
-            if self.simplify_occluded:
-                hb = max(1, int(h / factor))
-                wb = max(1, int(w / factor))
-                bx = (px / factor).long().clamp(0, wb - 1)
-                by = (py / factor).long().clamp(0, hb - 1)
-                depth_buf = torch.full((wb * hb,), float("inf"), dtype=torch.float64, device=self.device)
-                valid = in_view & (depth > 0)
-                if valid.any():
-                    idx = bx[valid] * hb + by[valid]
-                    depth_buf.scatter_reduce_(0, idx, depth[valid], reduce="amin")
-                rl = self.visible_relax_iter
-                for dx in range(-rl, rl + 1):
-                    for dy in range(-rl, rl + 1):
-                        nbx = (bx + dx).clamp(0, wb - 1)
-                        nby = (by + dy).clamp(0, hb - 1)
-                        nb_idx = nbx * hb + nby
-                        near_front = depth <= depth_buf[nb_idx]
-                        visible |= in_view & near_front
-            else:
-                visible |= in_view
+            # Vectorised neighbour relaxation using pre-computed offsets
+            # _relax_dx, _relax_dy: ((2*rl+1)^2,) offset grids
+            nbx = (bx.unsqueeze(1) + self._relax_dx.unsqueeze(0)).clamp(0, wb - 1)  # (N, R)
+            nby = (by.unsqueeze(1) + self._relax_dy.unsqueeze(0)).clamp(0, hb - 1)  # (N, R)
+            nb_idx = nbx * hb + nby  # (N, R)
+            nb_depths = depth_buf[nb_idx]  # (N, R)
+            near_front = (depth.unsqueeze(1) <= nb_depths).any(dim=1)  # (N,)
+            visible |= in_view & near_front
         return visible
 
     # ------------------------------------------------------------------
@@ -1126,30 +1146,22 @@ class TorchOcMesher:
         # Lookup per-cube triangle lists
         tri_entries = tri_table_t[a_cfg]
 
-        # --- Extract triangles (vectorised over triangle slots) ---
+        # --- Extract triangles (fully vectorised gather) ---
+        # Reshape tri_entries into (A, max_tris, 3) for batch gather.
         max_tris_per_cube = max_tri_entries // 3
-        all_face_verts: list[torch.Tensor] = []
-
-        for ti in range(max_tris_per_cube):
-            base = ti * 3
-            if base + 2 >= max_tri_entries:
-                break
-            e0 = tri_entries[:, base]
-            e1 = tri_entries[:, base + 1]
-            e2 = tri_entries[:, base + 2]
-            valid = e0 >= 0
-            if not valid.any():
-                break
-            vi = torch.where(valid)[0]
-            v0 = edge_positions[vi, e0[vi].long()]
-            v1 = edge_positions[vi, e1[vi].long()]
-            v2 = edge_positions[vi, e2[vi].long()]
-            all_face_verts.append(torch.stack([v0, v1, v2], dim=1))
-
-        if not all_face_verts:
+        tri_edge_ids = tri_entries[:, : max_tris_per_cube * 3].reshape(-1, max_tris_per_cube, 3)  # (A, T, 3)
+        # A triangle slot is valid when its first edge index >= 0
+        tri_valid = tri_edge_ids[:, :, 0] >= 0  # (A, T)
+        # Flatten valid triangles
+        valid_cube_idx, valid_tri_idx = torch.where(tri_valid)
+        if valid_cube_idx.numel() == 0:
             return np.zeros((0, 3), dtype=np.float64), np.zeros((0, 3), dtype=np.int32)
-
-        tri_verts = torch.cat(all_face_verts, dim=0)
+        edge_ids = tri_edge_ids[valid_cube_idx, valid_tri_idx]  # (F, 3)
+        # Gather edge positions for each triangle vertex
+        v0 = edge_positions[valid_cube_idx, edge_ids[:, 0].long()]  # (F, 3)
+        v1 = edge_positions[valid_cube_idx, edge_ids[:, 1].long()]  # (F, 3)
+        v2 = edge_positions[valid_cube_idx, edge_ids[:, 2].long()]  # (F, 3)
+        tri_verts = torch.stack([v0, v1, v2], dim=1)  # (F, 3, 3)
         verts_flat = tri_verts.reshape(-1, 3)
 
         # --- Vertex deduplication via quantised coordinate hashing ---
@@ -1275,13 +1287,12 @@ class TorchOcMesher:
         verts_np = np.concatenate(all_verts, axis=0)
         faces_np = np.concatenate(all_faces, axis=0)
 
-        # In-view tag
+        # In-view tag: compute bounding box on device, transfer only 2x3 floats
         in_view = np.ones(verts_np.shape[0], dtype=bool)
         if n_visible < n and n_visible > 0:
             vis_pos = self._cube_centers(coords[:n_visible], levels[:n_visible])
-            vis_pos_np = vis_pos.cpu().numpy()
-            vis_min = vis_pos_np.min(axis=0)
-            vis_max = vis_pos_np.max(axis=0)
+            vis_min = vis_pos.min(dim=0).values.cpu().numpy()
+            vis_max = vis_pos.max(dim=0).values.cpu().numpy()
             margin = self.size * 0.05
             in_view = np.all(verts_np >= vis_min - margin, axis=1) & np.all(
                 verts_np <= vis_max + margin,
