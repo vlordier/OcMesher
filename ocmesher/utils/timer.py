@@ -25,6 +25,8 @@ class Timer:
         # prints: [my step] finished in 0:00:01.234 with memory usage 0.5 GB
     """
 
+    __slots__ = ("disable_timer", "duration", "end", "name", "start")
+
     def __init__(self, desc: str, disable_timer: bool = False) -> None:
         """Create a timer labelled *desc*."""
         self.disable_timer = disable_timer

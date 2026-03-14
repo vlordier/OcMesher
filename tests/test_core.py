@@ -356,3 +356,52 @@ class TestOcMesherReprAndContextManager:
         mock_load.return_value = MagicMock()
         with pytest.raises(RuntimeError), OcMesher(sample_cameras, sample_bounds):
             raise RuntimeError("boom")  # noqa: EM101
+
+
+# ---------------------------------------------------------------------------
+# Refactoring: np.empty for pre-allocated output buffers (commit 2)
+# ---------------------------------------------------------------------------
+class TestKernelCallerAllocation:
+    """Verify that kernel_caller still produces correct results after the
+    np.zeros -> np.empty change for write-before-read output buffers."""
+
+    @patch("ocmesher.core.load_cdll")
+    @patch("ocmesher.core.register_func")
+    def test_kernel_caller_single_kernel(self, _mock_register, mock_load, sample_cameras, sample_bounds, sphere_kernel):
+        """kernel_caller must return correct shape and dtype for one kernel."""
+        mock_load.return_value = MagicMock()
+        mesher = OcMesher(sample_cameras, sample_bounds)
+        pts = np.array([[0.0, 0.0, 0.0], [2.0, 0.0, 0.0]], dtype=np.float64)
+        result = mesher.kernel_caller([sphere_kernel], pts)
+        assert result.shape == (2, 1)
+        assert result.dtype == np.float32
+
+    @patch("ocmesher.core.load_cdll")
+    @patch("ocmesher.core.register_func")
+    def test_kernel_caller_empty_input(self, _mock_register, mock_load, sample_cameras, sample_bounds, sphere_kernel):
+        """kernel_caller with zero points must return empty float32 array."""
+        mock_load.return_value = MagicMock()
+        mesher = OcMesher(sample_cameras, sample_bounds)
+        pts = np.zeros((0, 3), dtype=np.float64)
+        result = mesher.kernel_caller([sphere_kernel], pts)
+        assert result.shape == (0, 1)
+        assert result.dtype == np.float32
+
+    @patch("ocmesher.core.load_cdll")
+    @patch("ocmesher.core.register_func")
+    def test_kernel_caller_large_batch_concatenates(
+        self, _mock_register, mock_load, sample_cameras, sample_bounds, sphere_kernel, monkeypatch
+    ):
+        """kernel_caller must correctly concatenate batches > _SDF_BATCH_SIZE.
+
+        Monkeypatches _SDF_BATCH_SIZE to a small value so the test exercises
+        multi-batch logic without allocating millions of points.
+        """
+        monkeypatch.setattr("ocmesher.core._SDF_BATCH_SIZE", 8)
+        mock_load.return_value = MagicMock()
+        mesher = OcMesher(sample_cameras, sample_bounds)
+        # 13 points forces two batches: [0:8] and [8:13]
+        n = 13
+        pts = np.random.default_rng(0).standard_normal((n, 3)).astype(np.float64)
+        result = mesher.kernel_caller([sphere_kernel], pts)
+        assert result.shape == (n, 1)
