@@ -121,3 +121,29 @@ class TestTimerMemoryReporting:
         captured = capsys.readouterr()
         assert "[access denied test] finished in" in captured.out
         assert "GB" not in captured.out
+
+
+# ---------------------------------------------------------------------------
+# Refactoring: __slots__ on Timer (commit 4)
+# ---------------------------------------------------------------------------
+class TestTimerSlots:
+    def test_has_slots(self):
+        """Timer must define __slots__ to reduce per-instance memory overhead."""
+        assert hasattr(Timer, "__slots__")
+
+    def test_no_instance_dict(self):
+        """__slots__ prevents a per-instance __dict__ being created."""
+        t = Timer("slot test")
+        assert not hasattr(t, "__dict__")
+
+    def test_slots_contain_expected_attrs(self):
+        """All runtime attributes must be declared in __slots__."""
+        expected = {"name", "start", "end", "duration", "disable_timer"}
+        assert expected.issubset(set(Timer.__slots__))
+
+    def test_cannot_set_arbitrary_attribute(self):
+        """Setting an undeclared attribute must raise AttributeError."""
+        t = Timer("slot guard")
+        with pytest.raises(AttributeError):
+            t.unexpected_attr = 42  # type: ignore[attr-defined]
+

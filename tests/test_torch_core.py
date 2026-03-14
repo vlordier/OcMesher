@@ -258,3 +258,96 @@ class TestUseCompile:
         meshes, tags = mesher([sphere_kernel])
         assert len(meshes) == 1
         assert meshes[0].vertices.shape[0] > 0
+
+
+# ---------------------------------------------------------------------------
+# Refactoring: cam_heights/cam_widths are tuples (commit 1)
+# ---------------------------------------------------------------------------
+class TestCamDimensionTypes:
+    def test_cam_heights_is_tuple(self, single_cam_mesher):
+        """cam_heights must be a tuple for immutability and lower overhead."""
+        assert isinstance(single_cam_mesher.cam_heights, tuple)
+
+    def test_cam_widths_is_tuple(self, single_cam_mesher):
+        """cam_widths must be a tuple for immutability and lower overhead."""
+        assert isinstance(single_cam_mesher.cam_widths, tuple)
+
+    def test_cam_heights_values_correct(self, single_cam_mesher):
+        """cam_heights must preserve the correct integer values."""
+        assert single_cam_mesher.cam_heights == (720,)
+
+    def test_cam_widths_values_correct(self, single_cam_mesher):
+        """cam_widths must preserve the correct integer values."""
+        assert single_cam_mesher.cam_widths == (1280,)
+
+    def test_multi_cam_heights_is_tuple(self, multi_cam_mesher):
+        """Multi-camera mesher cam_heights must also be a tuple."""
+        assert isinstance(multi_cam_mesher.cam_heights, tuple)
+        assert len(multi_cam_mesher.cam_heights) == 4
+
+
+# ---------------------------------------------------------------------------
+# Refactoring: pre-allocated depth buffer (commit 3)
+# ---------------------------------------------------------------------------
+class TestDepthBufPreallocation:
+    def test_depth_buf_exists(self, single_cam_mesher):
+        """Pre-allocated depth buffer attribute must be present after init."""
+        assert hasattr(single_cam_mesher, "_depth_buf")
+        assert isinstance(single_cam_mesher._depth_buf, torch.Tensor)
+
+    def test_depth_buf_dtype_matches_fdtype(self, single_cam_mesher):
+        """Depth buffer dtype must match the compute dtype."""
+        assert single_cam_mesher._depth_buf.dtype == single_cam_mesher._fdtype
+
+    def test_depth_buf_size_correct(self, single_cam_mesher):
+        """Depth buffer must hold at least the max reduced-resolution camera image."""
+        factor = 10.0
+        expected = max(
+            max(1, int(h / factor)) * max(1, int(w / factor))
+            for h, w in zip(single_cam_mesher.cam_heights, single_cam_mesher.cam_widths, strict=True)
+        )
+        assert single_cam_mesher._depth_buf.shape[0] == expected
+
+    def test_visibility_filter_with_preallocated_buf(self, single_cam_mesher):
+        """_visibility_filter must still produce correct shape with pre-allocated buf."""
+        positions = torch.zeros(8, 3, dtype=torch.float64, device=single_cam_mesher.device)
+        result = single_cam_mesher._visibility_filter(positions)
+        assert result.shape == (8,)
+        assert result.dtype == torch.bool
+
+
+# ---------------------------------------------------------------------------
+# Refactoring: int16 tri_table in MC cache (commit 5)
+# ---------------------------------------------------------------------------
+class TestMCCacheInt16:
+    def test_tri_table_dtype_is_int16(self, single_cam_mesher):
+        """tri_table in MC cache must use int16 to reduce memory bandwidth."""
+        cache = TorchOcMesher._mc_cache[single_cam_mesher.device]
+        assert cache["tri_table"].dtype == torch.int16
+
+    def test_tri_table_values_in_valid_range(self, single_cam_mesher):
+        """int16 tri_table values must be in [-1, 11] (sentinel=-1, edges 0-11)."""
+        cache = TorchOcMesher._mc_cache[single_cam_mesher.device]
+        tt = cache["tri_table"]
+        assert int(tt.min().item()) >= -1
+        assert int(tt.max().item()) <= 11
+
+    def test_mc_produces_correct_mesh_with_int16_table(self, single_cam_mesher):
+        """Marching cubes with int16 tri_table must still extract a sphere mesh."""
+        coords, levels = single_cam_mesher._build_coarse_octree()
+        mask, _ = single_cam_mesher._find_surface_cubes(
+            [lambda xyz: np.linalg.norm(xyz, axis=1) - 3.0],
+            coords,
+            levels,
+        )
+        s_coords = coords[mask]
+        s_levels = levels[mask]
+        if len(s_coords) == 0:
+            pytest.skip("No surface cubes found")
+        corners = single_cam_mesher._cube_corner_positions(s_coords, s_levels)
+        flat = corners.reshape(-1, 3)
+        sdf_all = single_cam_mesher._evaluate_sdf([lambda xyz: np.linalg.norm(xyz, axis=1) - 3.0], flat)
+        sdf_min = sdf_all.min(dim=-1).values.reshape(len(s_coords), 8)
+        verts, faces = single_cam_mesher._marching_cubes(corners, sdf_min)
+        assert verts.shape[0] > 0
+        assert faces.shape[0] > 0

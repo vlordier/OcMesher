@@ -343,14 +343,14 @@ class OcMesher:
                 n = self.final_iteration(AsInt(nv))
                 if n == 0:
                     break
-                positions = AC(np.zeros((n, 3), dtype=self.np_float_type))
+                positions = AC(np.empty((n, 3), dtype=self.np_float_type))
                 self.final_iteration2(self.AF(positions))
                 sdf = AC(self.kernel_caller(kernels, positions))
                 inc = self.final_iteration3(self.sdf_AF(sdf))
                 pbar.update(inc)
             n = self.final_iteration_occluded(AsInt(nv))
             if n != 0:
-                positions = AC(np.zeros((n, 3), dtype=self.np_float_type))
+                positions = AC(np.empty((n, 3), dtype=self.np_float_type))
                 self.final_iteration2(self.AF(positions))
                 sdf = AC(self.kernel_caller(kernels, positions))
                 self.final_iteration3_occluded(self.sdf_AF(sdf))
@@ -370,21 +370,23 @@ class OcMesher:
 
     def _construct_element_mesh(self, e, k_e, num_verts):
         """Construct mesh for a single SDF element via bisection refinement."""
-        centers = np.zeros((num_verts, 3), dtype=self.np_float_type)
+        # np.empty avoids zero-init since the C function fills these immediately.
+        centers = np.empty((num_verts, 3), dtype=self.np_float_type)
         self.get_verts_center(e, self.AF(centers))
         center_sdf = self.kernel_caller(k_e, centers)
-        cubes = AC(np.zeros((num_verts * 8, 3), dtype=self.np_float_type))
+        cubes = AC(np.empty((num_verts * 8, 3), dtype=self.np_float_type))
         self.update_verts(e, POINTER(self.sdf_float_type)(), POINTER(self.sdf_float_type)(), self.AF(cubes))
         center_sdf_ptr = self.sdf_AF(AC(center_sdf))
         for _ in tqdm(range(self.bisection_iters)):
             sdf = self.kernel_caller(k_e, cubes)
             self.update_verts(e, self.sdf_AF(AC(sdf)), center_sdf_ptr, self.AF(cubes))
-        cubes_r = AC(np.zeros((num_verts * 8, 3), dtype=self.np_float_type))
+        cubes_r = AC(np.empty((num_verts * 8, 3), dtype=self.np_float_type))
         self.get_lr_verts(e, self.AF(cubes), self.AF(cubes_r))
         sdf_l = self.kernel_caller(k_e, cubes)
         sdf_r = self.kernel_caller(k_e, cubes_r)
         del cubes, cubes_r, centers, center_sdf
-        vertices = np.zeros((num_verts, 3), dtype=self.np_float_type)
+        # np.empty is safe: finalize_verts writes every element before use.
+        vertices = np.empty((num_verts, 3), dtype=self.np_float_type)
         self.finalize_verts(e, self.sdf_AF(sdf_l), self.sdf_AF(sdf_r), self.AF(vertices))
         del sdf_l, sdf_r
 
@@ -399,13 +401,14 @@ class OcMesher:
         cnts = np.zeros(3, dtype=np.int32)
         self.construct_faces(e, self.AF(vertices), AsInt(cnts))
         nve, nvf, nf = cnts
-        edge_vertices_c = AC(np.zeros((nve, 3), dtype=self.np_float_type))
-        face_vertices_c = AC(np.zeros((nvf, 3), dtype=self.np_float_type))
+        # np.empty avoids zero-init: C functions fill all elements immediately.
+        edge_vertices_c = AC(np.empty((nve, 3), dtype=self.np_float_type))
+        face_vertices_c = AC(np.empty((nvf, 3), dtype=self.np_float_type))
         self.get_extra_verts_center(self.AF(edge_vertices_c), self.AF(face_vertices_c))
         ecenter_sdf = self.kernel_caller(k_e, edge_vertices_c)
         fcenter_sdf = self.kernel_caller(k_e, face_vertices_c)
-        edge_vertices_lr = AC(np.zeros((nve * 2, 3), dtype=self.np_float_type))
-        face_vertices_lr = AC(np.zeros((nvf * 4, 3), dtype=self.np_float_type))
+        edge_vertices_lr = AC(np.empty((nve * 2, 3), dtype=self.np_float_type))
+        face_vertices_lr = AC(np.empty((nvf * 4, 3), dtype=self.np_float_type))
         self.update_extra_verts(
             POINTER(self.sdf_float_type)(),
             POINTER(self.sdf_float_type)(),
@@ -426,8 +429,8 @@ class OcMesher:
                 self.AF(face_vertices_lr),
             )
         del edge_vertices_c, face_vertices_c, ecenter_sdf, fcenter_sdf
-        edge_vertices_r = AC(np.zeros((nve * 2, 3), dtype=self.np_float_type))
-        face_vertices_r = AC(np.zeros((nvf * 4, 3), dtype=self.np_float_type))
+        edge_vertices_r = AC(np.empty((nve * 2, 3), dtype=self.np_float_type))
+        face_vertices_r = AC(np.empty((nvf * 4, 3), dtype=self.np_float_type))
         self.get_lr_extra_verts(
             self.AF(edge_vertices_lr),
             self.AF(edge_vertices_r),
@@ -439,8 +442,8 @@ class OcMesher:
         fsdf_l = self.kernel_caller(k_e, face_vertices_lr)
         fsdf_r = self.kernel_caller(k_e, face_vertices_r)
         del edge_vertices_lr, edge_vertices_r, face_vertices_lr, face_vertices_r
-        edge_vertices = np.zeros((nve, 3), dtype=self.np_float_type)
-        face_vertices = np.zeros((nvf, 3), dtype=self.np_float_type)
+        edge_vertices = np.empty((nve, 3), dtype=self.np_float_type)
+        face_vertices = np.empty((nvf, 3), dtype=self.np_float_type)
         self.finalize_extra_verts(
             self.sdf_AF(esdf_l),
             self.sdf_AF(esdf_r),
@@ -450,7 +453,7 @@ class OcMesher:
             self.AF(face_vertices),
         )
         del esdf_l, esdf_r, fsdf_l, fsdf_r
-        faces = AC(np.zeros((nf, 3), dtype=np.int32))
+        faces = AC(np.empty((nf, 3), dtype=np.int32))
         self.get_faces(AsInt(faces))
         vertices = np.concatenate((vertices, edge_vertices, face_vertices))
         return vertices, faces

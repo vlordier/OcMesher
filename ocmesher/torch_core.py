@@ -704,8 +704,10 @@ class TorchOcMesher:
         # Cast to _fdtype: float32 on CUDA/MPS for speed, float64 on CPU.
         inv_poses_np = np.stack([np.linalg.inv(cam_poses[i])[:3, :4] for i in range(self.n_cameras)]).astype(np.float64)
         intrinsics_np = np.stack([np.asarray(Ks[i], dtype=np.float64) for i in range(self.n_cameras)])
-        self.cam_heights: list[int] = [int(h) for h in Hs]
-        self.cam_widths: list[int] = [int(w) for w in Ws]
+        # Tuples are immutable and have lower overhead than lists; camera
+        # dimensions never change after initialisation.
+        self.cam_heights: tuple[int, ...] = tuple(int(h) for h in Hs)
+        self.cam_widths: tuple[int, ...] = tuple(int(w) for w in Ws)
         self.cam_inv_poses = torch.from_numpy(inv_poses_np).to(dtype=self._fdtype, device=self.device)  # (C, 3, 4)
         self.cam_intrinsics = torch.from_numpy(intrinsics_np).to(dtype=self._fdtype, device=self.device)  # (C, 3, 3)
 
@@ -774,6 +776,17 @@ class TorchOcMesher:
         self._relax_dx = grid_dx.reshape(-1)
         self._relax_dy = grid_dy.reshape(-1)
 
+        # Pre-allocate visibility depth buffer --------------------------------
+        # The buffer is sized for the largest (reduced-resolution) depth image
+        # across all cameras, avoiding repeated torch.full() allocation inside
+        # the per-camera loop of _visibility_filter.  fill_() resets it cheaply.
+        factor = 10.0
+        self._vis_depth_buf_size: int = max(
+            max(1, int(h / factor)) * max(1, int(w / factor))
+            for h, w in zip(self.cam_heights, self.cam_widths, strict=True)
+        )
+        self._depth_buf = torch.empty(self._vis_depth_buf_size, dtype=self._fdtype, device=self.device)
+
         # Ensure MC tables are cached for this device
         self._ensure_mc_cache()
 
@@ -807,7 +820,9 @@ class TorchOcMesher:
             return
         edge_table_t = torch.tensor(_EDGE_TABLE, dtype=torch.int32, device=self.device)
         max_tri_entries = max(len(row) for row in _TRI_TABLE)
-        tri_table_np = np.full((256, max_tri_entries), -1, dtype=np.int32)
+        # int16 stores all entry values (range [-1, 11]) in half the memory of
+        # int32, reducing GPU memory bandwidth when the table is indexed.
+        tri_table_np = np.full((256, max_tri_entries), -1, dtype=np.int16)
         for i, row in enumerate(_TRI_TABLE):
             tri_table_np[i, : len(row)] = row
         tri_table_t = torch.from_numpy(tri_table_np).to(self.device)
@@ -1139,7 +1154,10 @@ class TorchOcMesher:
             wb = max(1, int(w / factor))
             bx = (px / factor).long().clamp(0, wb - 1)
             by = (py / factor).long().clamp(0, hb - 1)
-            depth_buf = torch.full((wb * hb,), float("inf"), dtype=self._fdtype, device=self.device)
+            # Reuse pre-allocated depth buffer: fill_ resets to inf in-place,
+            # avoiding a new torch.full allocation per camera iteration.
+            buf_size = wb * hb
+            depth_buf = self._depth_buf[:buf_size].fill_(float("inf"))
             valid = in_view & (depth > 0)
             if valid.any():
                 idx = bx[valid] * hb + by[valid]
