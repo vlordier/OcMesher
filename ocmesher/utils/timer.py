@@ -3,10 +3,12 @@
 
 # Authors: Zeyu Ma
 
-from datetime import datetime
+"""Simple wall-clock timer with memory reporting."""
+
 import os
+from datetime import datetime, timezone
 from types import TracebackType
-from typing import Optional, Type
+from typing import Self
 
 import psutil
 
@@ -22,24 +24,34 @@ class Timer:
     """
 
     def __init__(self, desc: str, disable_timer: bool = False) -> None:
+        """Create a timer labelled *desc*."""
         self.disable_timer = disable_timer
         if self.disable_timer:
             return
-        self.name = f'[{desc}]'
+        self.name = f"[{desc}]"
 
-    def __enter__(self) -> "Timer":
+    def __enter__(self) -> Self:
+        """Record the start time."""
         if self.disable_timer:
             return self
-        self.start = datetime.now()
+        self.start = datetime.now(tz=timezone.utc)
         return self
 
-    def __exit__(self, exc_type: Optional[Type[BaseException]], exc_val: Optional[BaseException], traceback: Optional[TracebackType]) -> None:
+    def __exit__(
+        self,
+        exc_type: type[BaseException] | None,
+        _exc_val: BaseException | None,
+        _traceback: TracebackType | None,
+    ) -> None:
+        """Print elapsed time and memory on success, or the exception type on failure."""
         if self.disable_timer:
             return
-        self.end = datetime.now()
-        self.duration = self.end - self.start # timedelta
+        self.end = datetime.now(tz=timezone.utc)
+        self.duration = self.end - self.start  # timedelta
         if exc_type is None:
             process = psutil.Process(os.getpid())
-            print(f'{self.name} finished in {str(self.duration)} with memory usage {process.memory_info().rss / 1024**3} GB')
+            print(
+                f"{self.name} finished in {self.duration!s} with memory usage {process.memory_info().rss / 1024**3} GB"
+            )
         else:
-            print(f'{self.name} failed with {exc_type}')
+            print(f"{self.name} failed with {exc_type}")

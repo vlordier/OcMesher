@@ -8,7 +8,7 @@
 Outputs the resulting mesh to ``results/demo.obj``.
 """
 
-import os
+from pathlib import Path
 
 import numpy as np
 import vnoise
@@ -19,6 +19,7 @@ noise = vnoise.Noise()
 
 
 def f(XYZ):
+    """Signed-distance function for a Perlin-noise height field."""
     scale = 2
     h = noise.noise2(XYZ[:, 0] / scale, XYZ[:, 1] / scale, grid_mode=False, octaves=4)
 
@@ -26,23 +27,33 @@ def f(XYZ):
 
 
 def main():
-    cam_poses = [np.array([
-        [1, 0, 0, 0],
-        [0, 0, 1, 0],
-        [0, -1, 0, 3],
-        [0, 0, 0, 1],
-    ])]
-    Ks = [np.array([
-        [2000, 0, 640],
-        [0, 2000, 360],
-        [0, 0, 1]
-    ])]
+    """Run the demo meshing pipeline."""
+    cam_poses = [
+        np.array(
+            [
+                [1, 0, 0, 0],
+                [0, 0, 1, 0],
+                [0, -1, 0, 3],
+                [0, 0, 0, 1],
+            ]
+        )
+    ]
+    Ks = [
+        np.array(
+            [
+                [2000, 0, 640],
+                [0, 2000, 360],
+                [0, 0, 1],
+            ]
+        )
+    ]
     Hs = [720]
     Ws = [1280]
 
-    mesher = OcMesher((cam_poses, Ks, Hs, Ws), pixels_per_cube=16)
-    meshes, in_view_tags = mesher([f])
-    os.makedirs("results", exist_ok=True)
+    bounds = (-10, 10, -10, 10, -2, 2)
+    mesher = OcMesher((cam_poses, Ks, Hs, Ws), bounds, pixels_per_cube=16)
+    meshes, _in_view_tags = mesher([f])
+    Path("results").mkdir(parents=True, exist_ok=True)
     meshes[0].export("results/demo.obj")
 
 

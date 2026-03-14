@@ -24,3 +24,119 @@ dev = [
 [build-system]
 requires = ["setuptools>=68"]
 build-backend = "setuptools.build_meta"
+
+# ---------------------------------------------------------------------------
+# Ruff – tight lint & format configuration (ignoring E501 line-length)
+# ---------------------------------------------------------------------------
+[tool.ruff]
+target-version = "py310"
+line-length = 120
+
+[tool.ruff.format]
+docstring-code-format = true
+
+[tool.ruff.lint]
+select = ["ALL"]
+ignore = [
+    # -- Line length (explicitly requested to ignore) -----------------------
+    "E501",
+
+    # -- Incompatible docstring rule pairs ----------------------------------
+    "D203",   # conflicts with D211 (no-blank-line-before-class)
+    "D213",   # conflicts with D212 (multi-line-summary-first-line)
+
+    # -- Type-annotation rules (handled by pyrefly / ty instead) ------------
+    "ANN",
+
+    # -- Formatter-managed rules (ruff format handles trailing commas) ------
+    "COM812",
+]
+
+[tool.ruff.lint.per-file-ignores]
+# demo.py – standalone script, not a package
+"demo.py" = [
+    "INP001",   # implicit namespace package
+    "T201",     # print statements OK in demo
+]
+# root __init__.py – intentional top-level package
+"__init__.py" = [
+    "INP001",   # implicit namespace package
+    "N999",     # module name matches project, intentional
+    "D104",     # package-level __init__.py files (some are intentionally empty)
+]
+# core.py – complex scientific code with many C-bindings
+"ocmesher/core.py" = [
+    "FBT002",   # boolean default positional args (API backwards-compat)
+    "PLR0913",  # too-many-arguments (ctypes register_func calls)
+    "PLR0915",  # too-many-statements (__call__ orchestrates meshing)
+    "T201",     # print statements for progress output
+]
+# interface.py – ctypes helper with many function params
+"ocmesher/utils/interface.py" = [
+    "PLR0913",  # too-many-arguments (register_func has 6 params for ctypes binding)
+]
+# timer utility – prints timing info
+"ocmesher/utils/timer.py" = [
+    "FBT001",   # boolean-typed positional arg (API backwards-compat)
+    "FBT002",   # boolean default positional arg (API backwards-compat)
+    "T201",     # print statements for timer output
+]
+
+[tool.ruff.lint.isort]
+known-first-party = ["ocmesher"]
+
+[tool.ruff.lint.flake8-boolean-trap]
+extend-allowed-calls = ["gin.configurable"]
+
+[tool.ruff.lint.pep8-naming]
+classmethod-decorators = ["gin.configurable"]
+# Allow uppercase in domain-specific variable names (matrices, coordinates)
+ignore-names = [
+    "AsInt",
+    "AsDouble",
+    "AsFloat",
+    "AsBool",
+    "AC",
+    "XYZ*",
+    "Ks",
+    "Hs",
+    "Ws",
+    "n_XYZ",
+]
+
+[tool.ruff.lint.pydocstyle]
+convention = "google"
+
+# ---------------------------------------------------------------------------
+# Pyrefly – type-checking configuration
+# ---------------------------------------------------------------------------
+[tool.pyrefly]
+project_includes = ["ocmesher", "demo.py"]
+project_excludes = ["ocmesher/source"]
+python_version = "3.10"
+search_path = ["."]
+
+[tool.pyrefly.errors]
+# Attributes set dynamically via setattr in register_func (ctypes binding)
+missing-attribute = false
+
+# ---------------------------------------------------------------------------
+# ty (Astral) – type-checking configuration
+# ---------------------------------------------------------------------------
+[tool.ty]
+
+[tool.ty.environment]
+python-version = "3.10"
+
+[tool.ty.rules]
+# Dynamic attributes set via setattr in register_func are unresolvable
+unresolved-attribute = "ignore"
+# Third-party packages may not be resolvable without a venv; warn, don't fail
+unresolved-import = "warn"
+
+# ---------------------------------------------------------------------------
+# Vulture – dead code detection
+# ---------------------------------------------------------------------------
+[tool.vulture]
+paths = ["ocmesher", "demo.py"]
+min_confidence = 80
