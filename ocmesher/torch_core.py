@@ -21,6 +21,10 @@ Key optimisations over the reference C++ backend:
 - Thread-pool parallel SDF evaluation chunks
 - In-place tensor operations to reduce memory allocations
 - Minimal CPU-GPU transfers (vertex dedup stays on GPU when possible)
+- **float32 on CUDA/MPS** - reduces memory bandwidth by 2x and exploits
+  Tensor Core throughput on Ampere/Ada/Hopper GPUs; MPS requires float32
+- **cuDNN auto-tuning** on CUDA (``torch.backends.cudnn.benchmark = True``)
+- **Optional ``torch.compile``** JIT compilation of hot-path methods
 """
 
 from __future__ import annotations
@@ -45,6 +49,9 @@ def _mps_available() -> bool:
 
 # Epsilon for safe division in marching-cubes interpolation.
 _DENOM_EPS = 1e-12
+
+# Whether torch.compile is available (PyTorch ≥ 2.0).
+_HAS_COMPILE = hasattr(torch, "compile")
 
 # ---------------------------------------------------------------------------
 # Marching-cubes lookup tables (classic Lorensen & Cline, 1987)
@@ -622,6 +629,10 @@ class TorchOcMesher:
     - Fused cube-configuration + edge interpolation
     - Thread-pool parallel SDF evaluation over point chunks
     - In-place tensor ops to minimise memory allocations
+    - **float32** arithmetic on CUDA/MPS (2-4x faster than float64 on GPU);
+      float64 retained on CPU for numerical precision
+    - cuDNN auto-tuning enabled automatically on CUDA
+    - Optional ``torch.compile`` JIT via ``use_compile=True``
     """
 
     # Pre-computed marching-cubes lookup tables (shared across all instances).
@@ -643,8 +654,29 @@ class TorchOcMesher:
         coarse_count=500000,
         device=None,
         n_sdf_workers=_MAX_SDF_WORKERS,
+        use_compile=False,
     ):
-        """Initialise the mesher with camera intrinsics and bounds."""
+        """Initialise the mesher with camera intrinsics and bounds.
+
+        Args:
+            cameras: ``(cam_poses, Ks, Hs, Ws)`` camera tuple.
+            bounds: flat 6-tuple ``(xmin, xmax, ymin, ymax, zmin, zmax)``.
+            pixels_per_cube: target projected cube size in pixels.
+            inv_scale: octree refinement threshold.
+            min_dist: minimum camera distance for projection.
+            memory_limit_mb: chunk memory budget for mesh construction.
+            bisection_iters: bisection iterations for surface refinement.
+            enclosed: enforce SDF=1 outside scene bounds.
+            simplify_occluded: depth-buffer occlusion culling.
+            visible_relax_iter: neighbour relaxation radius for visibility.
+            coarse_count: target coarse octree leaf count.
+            device: ``"cuda"``, ``"mps"``, ``"cpu"``, or ``None`` (auto).
+            n_sdf_workers: thread-pool size for SDF evaluation.
+            use_compile: if ``True`` and PyTorch ≥ 2.0, wrap hot-path methods
+                with :func:`torch.compile` for JIT optimisation.  Incurs a
+                one-time compilation cost on the first call; recommended when
+                the mesher is called many times (e.g., in a training loop).
+        """
         if device is not None:
             self.device = torch.device(device)
         elif torch.cuda.is_available():
@@ -654,21 +686,32 @@ class TorchOcMesher:
         else:
             self.device = torch.device("cpu")
 
+        # Select compute dtype -----------------------------------------------
+        # float32 is ~4x faster than float64 on CUDA (Tensor Cores) and is the
+        # only floating-point dtype supported by MPS.  CPU keeps float64 for
+        # numerical precision in downstream processing.
+        self._fdtype: torch.dtype = torch.float64 if self.device.type == "cpu" else torch.float32
+
+        # Enable cuDNN auto-tuning for CUDA devices --------------------------
+        if self.device.type == "cuda":
+            torch.backends.cudnn.benchmark = True
+
         cam_poses, Ks, Hs, Ws = cameras
         self.n_cameras = len(cam_poses)
 
         # Pack camera data as batched tensors for bmm projection -------------
         # Vectorised: build numpy arrays first, transfer once to device.
+        # Cast to _fdtype: float32 on CUDA/MPS for speed, float64 on CPU.
         inv_poses_np = np.stack([np.linalg.inv(cam_poses[i])[:3, :4] for i in range(self.n_cameras)]).astype(np.float64)
         intrinsics_np = np.stack([np.asarray(Ks[i], dtype=np.float64) for i in range(self.n_cameras)])
         self.cam_heights: list[int] = [int(h) for h in Hs]
         self.cam_widths: list[int] = [int(w) for w in Ws]
-        self.cam_inv_poses = torch.from_numpy(inv_poses_np).to(self.device)  # (C, 3, 4)
-        self.cam_intrinsics = torch.from_numpy(intrinsics_np).to(self.device)  # (C, 3, 3)
+        self.cam_inv_poses = torch.from_numpy(inv_poses_np).to(dtype=self._fdtype, device=self.device)  # (C, 3, 4)
+        self.cam_intrinsics = torch.from_numpy(intrinsics_np).to(dtype=self._fdtype, device=self.device)  # (C, 3, 3)
 
         # Scene bounds -------------------------------------------------------
         self.bounds = bounds
-        bt = torch.tensor(bounds, dtype=torch.float64, device=self.device)
+        bt = torch.tensor(bounds, dtype=self._fdtype, device=self.device)
         self.bounds_min = bt[0::2]  # (3,)
         self.bounds_max = bt[1::2]  # (3,)
         self.center = (self.bounds_min + self.bounds_max) / 2
@@ -688,8 +731,8 @@ class TorchOcMesher:
         self.n_sdf_workers = max(1, n_sdf_workers)
 
         # Pre-compute per-camera pixel angular size (vectorised) --------------
-        fx_all = self.cam_intrinsics[:, 0, 0]  # (C,)
-        w_all = torch.tensor(self.cam_widths, dtype=torch.float64, device=self.device)
+        fx_all = self.cam_intrinsics[:, 0, 0]  # (C,) in _fdtype
+        w_all = torch.tensor(self.cam_widths, dtype=self._fdtype, device=self.device)
         self._pix_ang = torch.atan(w_all / 2 / fx_all) * 2 / w_all  # (C,)
 
         # Pre-compute projection angular threshold for _projected_sizes.
@@ -734,6 +777,30 @@ class TorchOcMesher:
         # Ensure MC tables are cached for this device
         self._ensure_mc_cache()
 
+        # Optionally JIT-compile hot-path methods for repeated use ----------
+        if use_compile and _HAS_COMPILE:
+            try:
+                self._projected_sizes = torch.compile(  # type: ignore[method-assign]
+                    self._projected_sizes,
+                    dynamic=True,
+                    fullgraph=False,
+                )
+                self._visibility_filter = torch.compile(  # type: ignore[method-assign]
+                    self._visibility_filter,
+                    dynamic=True,
+                    fullgraph=False,
+                )
+                self._marching_cubes = torch.compile(  # type: ignore[method-assign]
+                    self._marching_cubes,
+                    dynamic=True,
+                    fullgraph=False,
+                )
+            except Exception:  # noqa: BLE001
+                logger.warning(
+                    "torch.compile failed to initialise (backend unavailable); "
+                    "falling back to eager execution."
+                )
+
     def _ensure_mc_cache(self):
         """Lazily build marching-cubes lookup tables on *self.device*."""
         if self.device in TorchOcMesher._mc_cache:
@@ -767,28 +834,28 @@ class TorchOcMesher:
             levels:  ``(N,)``  int64 tensor of octree levels.
 
         Returns:
-            ``(N, 3)`` float64 world positions.
+            ``(N, 3)`` float tensor (dtype matches ``self._fdtype``) world positions.
         """
         # Use ldexp instead of 2**level - avoids pow for integer exponents.
         scale = self.size / torch.ldexp(
-            torch.ones_like(levels, dtype=torch.float64),
+            torch.ones_like(levels, dtype=self._fdtype),
             levels,
         ).unsqueeze(1)
-        return self.center.unsqueeze(0) - self.size / 2 + scale * (coords.double() + 0.5)
+        return self.center.unsqueeze(0) - self.size / 2 + scale * (coords.to(dtype=self._fdtype) + 0.5)
 
     @torch.no_grad()
     def _cube_corner_positions(self, coords: torch.Tensor, levels: torch.Tensor) -> torch.Tensor:
         """Return world positions of all 8 corners for each cube.
 
         Returns:
-            ``(N, 8, 3)`` float64 tensor.
+            ``(N, 8, 3)`` float tensor (dtype matches ``self._fdtype``).
         """
         corner_coords = coords.unsqueeze(1) + self._corner_offsets.unsqueeze(0)
         scale = self.size / torch.ldexp(
-            torch.ones_like(levels, dtype=torch.float64),
+            torch.ones_like(levels, dtype=self._fdtype),
             levels,
         ).unsqueeze(1).unsqueeze(2)
-        return self.center.unsqueeze(0).unsqueeze(0) - self.size / 2 + scale * corner_coords.double()
+        return self.center.unsqueeze(0).unsqueeze(0) - self.size / 2 + scale * corner_coords.to(dtype=self._fdtype)
 
     # ------------------------------------------------------------------
     # Batched projection (all cameras at once)
@@ -802,12 +869,12 @@ class TorchOcMesher:
             levels:    ``(N,)``  octree levels.
 
         Returns:
-            ``(N,)`` float64 tensor of projected sizes.
+            ``(N,)`` float tensor of projected sizes (dtype matches ``self._fdtype``).
         """
         # Build homogeneous coords in-place via functional concat (avoids alloc)
         pos_h = torch.nn.functional.pad(positions, (0, 1), value=1.0)  # (N, 4)
         cube_sizes = self.size / torch.ldexp(
-            torch.ones_like(levels, dtype=torch.float64),
+            torch.ones_like(levels, dtype=self._fdtype),
             levels,
         )  # (N,)
 
@@ -1072,7 +1139,7 @@ class TorchOcMesher:
             wb = max(1, int(w / factor))
             bx = (px / factor).long().clamp(0, wb - 1)
             by = (py / factor).long().clamp(0, hb - 1)
-            depth_buf = torch.full((wb * hb,), float("inf"), dtype=torch.float64, device=self.device)
+            depth_buf = torch.full((wb * hb,), float("inf"), dtype=self._fdtype, device=self.device)
             valid = in_view & (depth > 0)
             if valid.any():
                 idx = bx[valid] * hb + by[valid]
@@ -1141,7 +1208,7 @@ class TorchOcMesher:
         denom = s0 - s1
         t = torch.where(denom.abs() < _DENOM_EPS, torch.tensor(0.5, device=device), s0 / denom)
         t.clamp_(0.0, 1.0)
-        t = t.unsqueeze(-1).double()  # (A, 12, 1) match corner dtype for lerp
+        t = t.unsqueeze(-1).to(dtype=a_corners.dtype)  # (A, 12, 1) match corner dtype for lerp
         p0 = a_corners[:, ev[:, 0]]
         p1 = a_corners[:, ev[:, 1]]
         edge_positions = torch.lerp(p0, p1, t)  # fused linear interpolation

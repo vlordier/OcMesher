@@ -196,3 +196,65 @@ class TestBoundsPrecompute:
         assert single_cam_mesher._bounds_min_np.shape == (3,)
         assert single_cam_mesher._bounds_max_np.shape == (3,)
         np.testing.assert_array_less(single_cam_mesher._bounds_min_np, single_cam_mesher._bounds_max_np)
+
+
+# ---------------------------------------------------------------------------
+# Compute dtype (_fdtype) selection
+# ---------------------------------------------------------------------------
+class TestFdtype:
+    def test_cpu_uses_float64(self, single_cam_mesher):
+        """CPU mesher must use float64 for numerical precision."""
+        assert single_cam_mesher._fdtype == torch.float64
+
+    def test_cam_tensors_match_fdtype(self, single_cam_mesher):
+        """Camera tensors should use the compute dtype."""
+        assert single_cam_mesher.cam_inv_poses.dtype == single_cam_mesher._fdtype
+        assert single_cam_mesher.cam_intrinsics.dtype == single_cam_mesher._fdtype
+
+    def test_bounds_tensors_match_fdtype(self, single_cam_mesher):
+        """Bounds tensors should use the compute dtype."""
+        assert single_cam_mesher.bounds_min.dtype == single_cam_mesher._fdtype
+        assert single_cam_mesher.bounds_max.dtype == single_cam_mesher._fdtype
+        assert single_cam_mesher.center.dtype == single_cam_mesher._fdtype
+
+    def test_pix_ang_matches_fdtype(self, single_cam_mesher):
+        """Pixel angular size tensors should use the compute dtype."""
+        assert single_cam_mesher._pix_ang.dtype == single_cam_mesher._fdtype
+        assert single_cam_mesher._pix_ang_ppc.dtype == single_cam_mesher._fdtype
+
+    def test_cam_proj_matches_fdtype(self, single_cam_mesher):
+        """Combined K@inv_pose matrix should use the compute dtype."""
+        assert single_cam_mesher._cam_proj.dtype == single_cam_mesher._fdtype
+
+    def test_cube_centers_dtype(self, single_cam_mesher):
+        """_cube_centers output should match the compute dtype."""
+        coords = torch.zeros((4, 3), dtype=torch.int64, device=single_cam_mesher.device)
+        levels = torch.zeros(4, dtype=torch.int64, device=single_cam_mesher.device)
+        centers = single_cam_mesher._cube_centers(coords, levels)
+        assert centers.dtype == single_cam_mesher._fdtype
+
+    def test_cube_corner_positions_dtype(self, single_cam_mesher):
+        """_cube_corner_positions output should match the compute dtype."""
+        coords = torch.zeros((4, 3), dtype=torch.int64, device=single_cam_mesher.device)
+        levels = torch.zeros(4, dtype=torch.int64, device=single_cam_mesher.device)
+        corners = single_cam_mesher._cube_corner_positions(coords, levels)
+        assert corners.dtype == single_cam_mesher._fdtype
+
+
+# ---------------------------------------------------------------------------
+# use_compile parameter
+# ---------------------------------------------------------------------------
+class TestUseCompile:
+    def test_use_compile_false_does_not_wrap(self, sample_cameras, sample_bounds):
+        """use_compile=False should leave methods unwrapped."""
+        mesher = TorchOcMesher(sample_cameras, sample_bounds, device="cpu", use_compile=False)
+        # Methods should still be callable without error
+        coords, levels = mesher._build_coarse_octree()
+        assert coords.shape[1] == 3
+
+    def test_use_compile_true_still_works(self, sample_cameras, sample_bounds, sphere_kernel):
+        """use_compile=True should not break correctness on CPU (falls back gracefully)."""
+        mesher = TorchOcMesher(sample_cameras, sample_bounds, device="cpu", use_compile=True)
+        meshes, tags = mesher([sphere_kernel])
+        assert len(meshes) == 1
+        assert meshes[0].vertices.shape[0] > 0
