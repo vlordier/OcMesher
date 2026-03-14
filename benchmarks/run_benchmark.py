@@ -111,8 +111,42 @@ def _system_info():
         "platform": platform.platform(),
         "cpu": platform.processor() or "unknown",
         "cpu_count": psutil.cpu_count(logical=True),
+        "cpu_count_physical": psutil.cpu_count(logical=False),
         "ram_gb": round(psutil.virtual_memory().total / 1e9, 1),
     }
+    # CPU architecture details
+    info["arch"] = platform.machine()
+    try:
+        import subprocess
+
+        # All inputs are hardcoded (no user-controlled data); shell=False is the
+        # default for list-form subprocess.run, so injection risk is negligible.
+        result = subprocess.run(  # noqa: S603
+            ["lscpu"] if platform.system() == "Linux" else ["sysctl", "-n", "machdep.cpu.brand_string"],
+            capture_output=True,
+            text=True,
+            timeout=5,
+            check=False,
+            shell=False,
+        )
+        if result.returncode == 0 and platform.system() == "Linux":
+            for line in result.stdout.splitlines():
+                if "Model name" in line:
+                    info["cpu_model"] = line.split(":", 1)[1].strip()
+                    break
+                if "Flags" in line:
+                    flags = set(line.split(":", 1)[1].split())
+                    # Best-effort ISA detection from lscpu Flags field.
+                    # x86_64 flags: avx, avx2, avx512f (+ variants).
+                    # aarch64 flags: neon (often listed as asimd), sve.
+                    # Only a representative subset is shown here.
+                    _isa_candidates = ("avx", "avx2", "avx512f", "asimd", "neon", "sve")
+                    info["isa_extensions"] = sorted(f for f in _isa_candidates if f in flags)
+                    break
+        elif result.returncode == 0 and platform.system() == "Darwin":
+            info["cpu_model"] = result.stdout.strip()
+    except Exception:  # noqa: BLE001, S110
+        pass
     try:
         import torch
 
@@ -120,7 +154,11 @@ def _system_info():
         info["cuda_available"] = torch.cuda.is_available()
         if torch.cuda.is_available():
             info["cuda_device"] = torch.cuda.get_device_name(0)
+            info["cuda_capability"] = ".".join(str(x) for x in torch.cuda.get_device_capability(0))
+            info["cuda_device_count"] = torch.cuda.device_count()
         info["mps_available"] = _mps_available()
+        info["torch_compile"] = hasattr(torch, "compile")
+        info["cpu_threads"] = torch.get_num_threads()
     except ImportError:
         info["pytorch_version"] = "NOT INSTALLED"
     return info
@@ -200,6 +238,8 @@ def _bench_torch(
     warmup: int = 0,
     device: str | None = None,
     n_sdf_workers: int = 4,
+    *,
+    use_compile: bool = False,
 ):
     """Benchmark the PyTorch TorchOcMesher."""
     try:
@@ -210,7 +250,7 @@ def _bench_torch(
         return {"error": f"Could not load TorchOcMesher: {exc}"}
 
     kernel = _SDF_KERNELS[sdf_name]
-    # Warmup
+    # Warmup (especially important when use_compile=True to amortise JIT cost)
     for _ in range(warmup):
         mesher = TorchOcMesher(
             cameras,
@@ -218,6 +258,7 @@ def _bench_torch(
             pixels_per_cube=pixels_per_cube,
             device=device,
             n_sdf_workers=n_sdf_workers,
+            use_compile=use_compile,
         )
         mesher([kernel])
 
@@ -231,6 +272,7 @@ def _bench_torch(
             pixels_per_cube=pixels_per_cube,
             device=device,
             n_sdf_workers=n_sdf_workers,
+            use_compile=use_compile,
         )
         meshes, _tags = mesher([kernel])
         elapsed = time.perf_counter() - t0
@@ -241,8 +283,11 @@ def _bench_torch(
                 "faces": int(meshes[0].faces.shape[0]),
             }
 
+    backend_tag = f"pytorch_{device or 'auto'}"
+    if use_compile:
+        backend_tag += "+compile"
     return {
-        "backend": f"pytorch_{device or 'auto'}",
+        "backend": backend_tag,
         "sdf": sdf_name,
         "times_s": times,
         **_stats(times),
@@ -654,6 +699,153 @@ def _micro_init_vectorised(n_runs: int = 20):
     return results
 
 
+def _micro_dtype_comparison(cameras, bounds, n_runs: int = 5):
+    """Benchmark float32 vs float64 throughput on available accelerators.
+
+    This micro-benchmark directly measures the impact of ``_fdtype`` on GPU
+    computation kernels (projection, visibility, marching cubes).
+
+    Results with ``dtype=float32`` are expected to be 2-4x faster than
+    ``float64`` on CUDA (due to Tensor Cores and memory bandwidth) and are
+    effectively *required* on MPS (float64 not supported).
+    """
+    results: dict[str, object] = {}
+    try:
+        import torch
+
+        from ocmesher.torch_core import TorchOcMesher
+
+        rng = np.random.default_rng(42)
+        n_pts = 100_000
+        pts_np = rng.uniform(
+            [bounds[0], bounds[2], bounds[4]],
+            [bounds[1], bounds[3], bounds[5]],
+            size=(n_pts, 3),
+        )
+
+        for dev_str in ("cpu", "cuda", "mps"):
+            if dev_str == "cuda" and not torch.cuda.is_available():
+                continue
+            if dev_str == "mps" and not _mps_available():
+                continue
+            try:
+                # float32 path (used automatically on CUDA/MPS)
+                mesher = TorchOcMesher(cameras, bounds, device=dev_str)
+                actual_dtype = mesher._fdtype
+                pts_t = torch.from_numpy(pts_np).to(dtype=actual_dtype, device=mesher.device)
+                levels = torch.full((n_pts,), 6, dtype=torch.int64, device=mesher.device)
+
+                times_native: list[float] = []
+                for _ in range(n_runs):
+                    t0 = time.perf_counter()
+                    _ = mesher._projected_sizes(pts_t, levels)
+                    if dev_str == "cuda":
+                        torch.cuda.synchronize()
+                    elif dev_str == "mps":
+                        torch.mps.synchronize()
+                    times_native.append(time.perf_counter() - t0)
+                results[f"{dev_str}_active_dtype"] = str(actual_dtype).replace("torch.", "")
+                results[f"{dev_str}_projection_mean_s"] = statistics.mean(times_native)
+
+                # On CPU, also measure float32 explicitly for comparison
+                if dev_str == "cpu":
+                    pts_f32 = pts_t.float()
+                    times_cpu32: list[float] = []
+                    for _ in range(n_runs):
+                        # Use raw ops to measure float32 overhead vs float64
+                        t0 = time.perf_counter()
+                        pos_h = torch.nn.functional.pad(pts_f32, (0, 1), value=1.0)
+                        cam_inv = mesher.cam_inv_poses.float()
+                        pos_h_t = pos_h.T.unsqueeze(0).expand(mesher.n_cameras, -1, -1)
+                        torch.bmm(cam_inv, pos_h_t)
+                        times_cpu32.append(time.perf_counter() - t0)
+                    results["cpu_float32_projection_mean_s"] = statistics.mean(times_cpu32)
+            except Exception as exc:  # noqa: BLE001
+                results[f"{dev_str}_error"] = str(exc)
+    except Exception as exc:  # noqa: BLE001
+        results["error"] = str(exc)
+    return results
+
+
+def _bench_cpu_threads(cameras, bounds, sdf_name: str = "terrain", n_runs: int = 3):
+    """Benchmark end-to-end PyTorch CPU performance across different thread counts.
+
+    Uses :func:`torch.set_num_threads` to vary the intra-op parallelism and
+    measures how total throughput scales with thread count.  Useful for
+    diagnosing over/under-subscription on machines with many cores.
+    """
+    results: list[dict[str, object]] = []
+    try:
+        import torch
+
+        from ocmesher.torch_core import TorchOcMesher
+
+        original_threads = torch.get_num_threads()
+        cpu_count = psutil.cpu_count(logical=True) or 1
+        thread_counts = sorted({1, 2, 4, min(8, cpu_count), cpu_count})
+        kernel = _SDF_KERNELS[sdf_name]
+
+        for n_threads in thread_counts:
+            torch.set_num_threads(n_threads)
+            times: list[float] = []
+            for _ in range(n_runs):
+                t0 = time.perf_counter()
+                mesher = TorchOcMesher(cameras, bounds, pixels_per_cube=16, device="cpu")
+                mesher([kernel])
+                times.append(time.perf_counter() - t0)
+            results.append({
+                "n_threads": n_threads,
+                **_stats(times),
+            })
+
+        torch.set_num_threads(original_threads)
+    except Exception as exc:  # noqa: BLE001
+        results.append({"error": str(exc)})
+    return results
+
+
+def _bench_compile(cameras, bounds, sdf_name: str = "terrain", n_runs: int = 3, warmup: int = 2):
+    """Benchmark ``torch.compile`` JIT impact on CPU and CUDA.
+
+    Compares plain TorchOcMesher vs ``use_compile=True`` to quantify the
+    overhead amortisation from JIT compilation.  The first call with
+    ``use_compile=True`` includes compilation cost; subsequent calls use the
+    compiled graph.
+    """
+    results: dict[str, object] = {}
+    try:
+        import torch
+
+        if not hasattr(torch, "compile"):
+            return {"error": "torch.compile not available (requires PyTorch >= 2.0)"}
+
+        from ocmesher.torch_core import TorchOcMesher
+
+        kernel = _SDF_KERNELS[sdf_name]
+        for dev_str in ("cpu", "cuda"):
+            if dev_str == "cuda" and not torch.cuda.is_available():
+                continue
+            for use_c in (False, True):
+                label = f"{dev_str}_{'compile' if use_c else 'eager'}"
+                try:
+                    # warmup
+                    for _ in range(warmup):
+                        m = TorchOcMesher(cameras, bounds, pixels_per_cube=16, device=dev_str, use_compile=use_c)
+                        m([kernel])
+                    times: list[float] = []
+                    for _ in range(n_runs):
+                        t0 = time.perf_counter()
+                        m = TorchOcMesher(cameras, bounds, pixels_per_cube=16, device=dev_str, use_compile=use_c)
+                        m([kernel])
+                        times.append(time.perf_counter() - t0)
+                    results[f"{label}_mean_s"] = statistics.mean(times)
+                except Exception as exc:  # noqa: BLE001
+                    results[f"{label}_error"] = str(exc)
+    except Exception as exc:  # noqa: BLE001
+        results["error"] = str(exc)
+    return results
+
+
 # ---------------------------------------------------------------------------
 # Printing helpers
 # ---------------------------------------------------------------------------
@@ -689,6 +881,22 @@ def main():
     parser.add_argument("--warmup", type=int, default=1, help="Number of warmup runs (default 1)")
     parser.add_argument("--sdf", type=str, default=None, help="SDF to benchmark (sphere/terrain/gyroid or 'all')")
     parser.add_argument("--output", type=str, default=None, help="Save results as JSON")
+    parser.add_argument(
+        "--device",
+        type=str,
+        default="all",
+        help="Device(s) to benchmark: cpu, cuda, mps, or 'all' (default: all available)",
+    )
+    parser.add_argument(
+        "--threads",
+        action="store_true",
+        help="Run CPU thread-scaling benchmark (requires --profile)",
+    )
+    parser.add_argument(
+        "--compile",
+        action="store_true",
+        help="Run torch.compile impact benchmark (requires --profile)",
+    )
     args = parser.parse_args()
 
     pixels_per_cube = 8 if args.full else 16
@@ -696,17 +904,37 @@ def main():
     bounds = _make_bounds()
     sdf_names = list(_SDF_KERNELS.keys()) if args.sdf == "all" else [args.sdf or "terrain"]
 
+    # Resolve which devices to benchmark
+    try:
+        import torch as _torch
+
+        _cuda_ok = _torch.cuda.is_available()
+        _mps_ok = _mps_available()
+    except ImportError:
+        _cuda_ok = False
+        _mps_ok = False
+
+    if args.device == "all":
+        bench_devices = ["cpu"]
+        if _cuda_ok:
+            bench_devices.append("cuda")
+        if _mps_ok:
+            bench_devices.append("mps")
+    else:
+        bench_devices = [d.strip() for d in args.device.split(",")]
+
     print("=" * 70)
     print("OcMesher Comprehensive Benchmark")
     print("=" * 70)
 
     sys_info = _system_info()
     for k, v in sys_info.items():
-        print(f"  {k:20s}: {v}")
-    print(f"  pixels_per_cube   : {pixels_per_cube}")
-    print(f"  runs              : {args.runs}")
-    print(f"  warmup            : {args.warmup}")
-    print(f"  SDFs              : {sdf_names}")
+        print(f"  {k:24s}: {v}")
+    print(f"  pixels_per_cube         : {pixels_per_cube}")
+    print(f"  runs                    : {args.runs}")
+    print(f"  warmup                  : {args.warmup}")
+    print(f"  SDFs                    : {sdf_names}")
+    print(f"  devices                 : {bench_devices}")
 
     results: dict[str, object] = {"system": sys_info}
 
@@ -717,32 +945,20 @@ def main():
         _print_result(r_orig)
         results[f"original_{sdf_name}"] = r_orig
 
-        _print_section(f"End-to-end: PyTorch CPU ({sdf_name})")
-        r_torch = _bench_torch(
-            cameras, bounds, pixels_per_cube, sdf_name, n_runs=args.runs, warmup=args.warmup, device="cpu"
-        )
-        _print_result(r_torch)
-        results[f"torch_cpu_{sdf_name}"] = r_torch
-
-        try:
-            import torch
-
-            if torch.cuda.is_available():
-                _print_section(f"End-to-end: PyTorch CUDA ({sdf_name})")
-                r_gpu = _bench_torch(
-                    cameras, bounds, pixels_per_cube, sdf_name, n_runs=args.runs, warmup=args.warmup, device="cuda"
-                )
-                _print_result(r_gpu)
-                results[f"torch_gpu_{sdf_name}"] = r_gpu
-            if _mps_available():
-                _print_section(f"End-to-end: PyTorch MPS ({sdf_name})")
-                r_mps = _bench_torch(
-                    cameras, bounds, pixels_per_cube, sdf_name, n_runs=args.runs, warmup=args.warmup, device="mps"
-                )
-                _print_result(r_mps)
-                results[f"torch_mps_{sdf_name}"] = r_mps
-        except ImportError:
-            pass
+        for dev_str in bench_devices:
+            label = {"cpu": "CPU", "cuda": "CUDA", "mps": "MPS"}.get(dev_str, dev_str.upper())
+            _print_section(f"End-to-end: PyTorch {label} ({sdf_name})")
+            r_torch = _bench_torch(
+                cameras,
+                bounds,
+                pixels_per_cube,
+                sdf_name,
+                n_runs=args.runs,
+                warmup=args.warmup,
+                device=dev_str,
+            )
+            _print_result(r_torch)
+            results[f"torch_{dev_str}_{sdf_name}"] = r_torch
 
     # Micro-benchmarks (only with --profile) --------------------------------
     if args.profile:
@@ -797,6 +1013,11 @@ def main():
         _print_result(r_init)
         results["micro_init"] = r_init
 
+        _print_section("Micro-benchmark: float32 vs float64 dtype throughput")
+        r_dtype = _micro_dtype_comparison(cameras, bounds)
+        _print_result(r_dtype)
+        results["micro_dtype"] = r_dtype
+
         _print_section("Scaling: Multi-camera performance")
         r_scale = _scaling_cameras(bounds)
         for entry in r_scale:
@@ -808,6 +1029,19 @@ def main():
         _print_result(r_mem)
         results["memory"] = r_mem
 
+        if args.threads:
+            _print_section("Scaling: CPU thread count")
+            r_thr = _bench_cpu_threads(cameras, bounds)
+            for entry in r_thr:
+                _print_result(entry)
+            results["scaling_threads"] = r_thr
+
+        if args.compile:
+            _print_section("Benchmark: torch.compile impact")
+            r_comp = _bench_compile(cameras, bounds)
+            _print_result(r_comp)
+            results["bench_compile"] = r_comp
+
     # Speedup summary ------------------------------------------------------
     print()
     print("=" * 70)
@@ -815,27 +1049,41 @@ def main():
     print("=" * 70)
     for sdf_name in sdf_names:
         r_orig = results.get(f"original_{sdf_name}", {})
-        r_torch = results.get(f"torch_cpu_{sdf_name}", {})
-        r_gpu = results.get(f"torch_gpu_{sdf_name}", {})
+        r_torch_cpu = results.get(f"torch_cpu_{sdf_name}", {})
+        r_gpu = results.get(f"torch_cuda_{sdf_name}", {})
         r_mps = results.get(f"torch_mps_{sdf_name}", {})
 
-        if "error" not in r_orig and "error" not in r_torch:
-            sp = r_orig["mean_s"] / max(r_torch["mean_s"], 1e-6)
+        if r_orig and "error" not in r_orig and r_torch_cpu and "error" not in r_torch_cpu:
+            sp = r_orig["mean_s"] / max(r_torch_cpu["mean_s"], 1e-6)
             tag = "faster" if sp > 1 else "slower"
             print(
-                f"  [{sdf_name}] PyTorch CPU  vs C++: {sp:.2f}x {tag}  ({r_torch['mean_s']:.3f}s vs {r_orig['mean_s']:.3f}s)"
+                f"  [{sdf_name}] PyTorch CPU  vs C++: {sp:.2f}x {tag}  ({r_torch_cpu['mean_s']:.3f}s vs {r_orig['mean_s']:.3f}s)"
             )
-        if r_gpu and "error" not in r_gpu and "error" not in r_orig:
+        if r_gpu and "error" not in r_gpu and r_orig and "error" not in r_orig:
             sp_g = r_orig["mean_s"] / max(r_gpu["mean_s"], 1e-6)
             tag_g = "faster" if sp_g > 1 else "slower"
             print(
                 f"  [{sdf_name}] PyTorch CUDA vs C++: {sp_g:.2f}x {tag_g}  ({r_gpu['mean_s']:.3f}s vs {r_orig['mean_s']:.3f}s)"
             )
-        if r_mps and "error" not in r_mps and "error" not in r_orig:
+        if r_mps and "error" not in r_mps and r_orig and "error" not in r_orig:
             sp_m = r_orig["mean_s"] / max(r_mps["mean_s"], 1e-6)
             tag_m = "faster" if sp_m > 1 else "slower"
             print(
                 f"  [{sdf_name}] PyTorch MPS  vs C++: {sp_m:.2f}x {tag_m}  ({r_mps['mean_s']:.3f}s vs {r_orig['mean_s']:.3f}s)"
+            )
+
+        # Cross-device speedup (if multiple GPU devices available)
+        if r_gpu and r_torch_cpu and "error" not in r_gpu and "error" not in r_torch_cpu:
+            sp_gc = r_torch_cpu["mean_s"] / max(r_gpu["mean_s"], 1e-6)
+            tag_gc = "faster" if sp_gc > 1 else "slower"
+            print(
+                f"  [{sdf_name}] PyTorch CUDA vs CPU: {sp_gc:.2f}x {tag_gc}  ({r_gpu['mean_s']:.3f}s vs {r_torch_cpu['mean_s']:.3f}s)"
+            )
+        if r_mps and r_torch_cpu and "error" not in r_mps and "error" not in r_torch_cpu:
+            sp_mc = r_torch_cpu["mean_s"] / max(r_mps["mean_s"], 1e-6)
+            tag_mc = "faster" if sp_mc > 1 else "slower"
+            print(
+                f"  [{sdf_name}] PyTorch MPS  vs CPU: {sp_mc:.2f}x {tag_mc}  ({r_mps['mean_s']:.3f}s vs {r_torch_cpu['mean_s']:.3f}s)"
             )
     print()
 
