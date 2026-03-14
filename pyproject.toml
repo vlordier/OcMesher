@@ -110,6 +110,15 @@ ignore = [
     "INP001",   # implicit namespace package
     "D104",     # empty package init
 ]
+# tests - allow assertions, magic values, no docstrings, etc.
+"tests/**/*.py" = [
+    "S101",     # assert usage expected in tests
+    "D",        # no docstring enforcement in tests
+    "PLR2004",  # magic values OK in test assertions
+    "INP001",   # implicit namespace package
+    "T201",     # print statements for debugging
+    "PT019",    # @patch-injected args look like unused fixtures
+]
 
 [tool.ruff.lint.isort]
 known-first-party = ["ocmesher"]
@@ -162,6 +171,33 @@ python-version = "3.10"
 unresolved-attribute = "ignore"
 # Third-party packages may not be resolvable without a venv; warn, don't fail
 unresolved-import = "warn"
+
+# ---------------------------------------------------------------------------
+# Pytest – test runner configuration
+# ---------------------------------------------------------------------------
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+addopts = [
+    "-v",
+    "--tb=short",
+    "--strict-markers",
+    "--ignore=tests/cpp",
+]
+markers = [
+    "slow: marks tests as slow (deselect with '-m \"not slow\"')",
+    "integration: marks tests requiring compiled C++ library",
+]
+filterwarnings = [
+    "ignore::DeprecationWarning",
+]
+
+[tool.coverage.run]
+source = ["ocmesher"]
+omit = ["tests/*"]
+
+[tool.coverage.report]
+show_missing = true
+fail_under = 60
 
 # ---------------------------------------------------------------------------
 # Vulture – dead code detection

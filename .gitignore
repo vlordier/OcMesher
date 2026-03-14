@@ -30,3 +30,8 @@ env/
 lib/
 results/
 benchmark_results/
+
+# Test / coverage artifacts
+.pytest_cache/
+htmlcov/
+.coverage
