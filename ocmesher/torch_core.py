@@ -810,8 +810,7 @@ class TorchOcMesher:
                 )
             except Exception:  # noqa: BLE001
                 logger.warning(
-                    "torch.compile failed to initialise (backend unavailable); "
-                    "falling back to eager execution."
+                    "torch.compile failed to initialise (backend unavailable); falling back to eager execution."
                 )
 
     def _ensure_mc_cache(self):

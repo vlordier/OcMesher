@@ -146,4 +146,3 @@ class TestTimerSlots:
         t = Timer("slot guard")
         with pytest.raises(AttributeError):
             t.unexpected_attr = 42  # type: ignore[attr-defined]
-
