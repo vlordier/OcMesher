@@ -793,10 +793,12 @@ def _bench_cpu_threads(cameras, bounds, sdf_name: str = "terrain", n_runs: int =
                 mesher = TorchOcMesher(cameras, bounds, pixels_per_cube=16, device="cpu")
                 mesher([kernel])
                 times.append(time.perf_counter() - t0)
-            results.append({
-                "n_threads": n_threads,
-                **_stats(times),
-            })
+            results.append(
+                {
+                    "n_threads": n_threads,
+                    **_stats(times),
+                }
+            )
 
         torch.set_num_threads(original_threads)
     except Exception as exc:  # noqa: BLE001
