@@ -376,7 +376,7 @@ class TestOcMesherInit:
     @patch("ocmesher.core.load_cdll")
     @patch("ocmesher.core.register_func")
     def test_init_size_is_largest_dimension(self, _mock_register, mock_load, sample_cameras):
-        """size must be 1.1 × the largest axis range."""
+        """size must be 1.1x the largest axis range."""
         mock_load.return_value = MagicMock()
         # x-range = 10, y-range = 4, z-range = 2
         bounds = np.array([0.0, 10.0, -2.0, 2.0, -1.0, 1.0])
@@ -388,7 +388,7 @@ class TestOcMesherInit:
     def test_init_multi_camera_packing_shape(
         self, _mock_register, mock_load, sample_camera_pose, sample_intrinsics, sample_bounds
     ):
-        """Camera array must be 2 × CAMERA_DATA_STRIDE for two cameras."""
+        """Camera array must be 2x CAMERA_DATA_STRIDE for two cameras."""
         mock_load.return_value = MagicMock()
         cameras = (
             [sample_camera_pose, sample_camera_pose],
