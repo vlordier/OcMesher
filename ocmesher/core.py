@@ -87,6 +87,9 @@ def _validate_bounds(bounds):
     if bounds.shape != (6,):
         msg = f"bounds must have 6 elements [x_min, x_max, y_min, y_max, z_min, z_max], got shape {bounds.shape}"
         raise ValueError(msg)
+    if not np.all(np.isfinite(bounds)):
+        msg = "bounds must contain only finite values (no NaN or Inf)"
+        raise ValueError(msg)
     for axis, name in enumerate(["x", "y", "z"]):
         if bounds[axis * 2] >= bounds[axis * 2 + 1]:
             msg = f"bounds {name}_min ({bounds[axis * 2]}) must be less than {name}_max ({bounds[axis * 2 + 1]})"

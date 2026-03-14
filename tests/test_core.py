@@ -112,6 +112,14 @@ class TestValidateBounds:
         with pytest.raises(ValueError, match="less than"):
             _validate_bounds([0, 0, -1, 1, -1, 1])
 
+    def test_rejects_nan_values(self):
+        with pytest.raises(ValueError, match="finite"):
+            _validate_bounds([np.nan, 1.0, -1.0, 1.0, -1.0, 1.0])
+
+    def test_rejects_inf_values(self):
+        with pytest.raises(ValueError, match="finite"):
+            _validate_bounds([-np.inf, np.inf, -1.0, 1.0, -1.0, 1.0])
+
 
 # ---------------------------------------------------------------------------
 # Constants
@@ -165,16 +173,18 @@ class TestKernelCaller:
     def test_enclosed_clamps_out_of_bounds(self, sphere_kernel):
         bounds = np.array([-1.0, 1.0, -1.0, 1.0, -1.0, 1.0])
         mesher = self._make_mesher_stub(bounds, enclosed=True)
-        points = np.array([[0, 0, 0], [2, 0, 0]], dtype=np.float64)
+        # [1.5, 0, 0] is outside bounds (x > 1.0); sphere SDF = 0.5, so clamping must force it to 1.0.
+        points = np.array([[0, 0, 0], [1.5, 0, 0]], dtype=np.float64)
         result = mesher.kernel_caller([sphere_kernel], points)
-        assert result[1, 0] == 1.0
+        assert result[1, 0] == pytest.approx(1.0)
 
     def test_not_enclosed_does_not_clamp(self, sphere_kernel):
         bounds = np.array([-1.0, 1.0, -1.0, 1.0, -1.0, 1.0])
         mesher = self._make_mesher_stub(bounds, enclosed=False)
-        points = np.array([[2, 0, 0]], dtype=np.float64)
+        # With enclosed=False, [1.5, 0, 0] is outside bounds but the natural SDF (0.5) must be returned.
+        points = np.array([[1.5, 0, 0]], dtype=np.float64)
         result = mesher.kernel_caller([sphere_kernel], points)
-        np.testing.assert_allclose(result[:, 0], [1.0], atol=1e-6)
+        np.testing.assert_allclose(result[:, 0], [0.5], atol=1e-6)
 
     def test_multiple_kernels(self, sample_bounds, sphere_kernel, plane_kernel):
         mesher = self._make_mesher_stub(sample_bounds)
@@ -203,6 +213,21 @@ class TestKernelCaller:
         points = np.zeros((100, 3), dtype=np.float64)
         result = mesher.kernel_caller([sphere_kernel], points)
         assert result.shape == (100, 1)
+
+    def test_output_dtype_is_float32(self, sample_bounds, sphere_kernel):
+        mesher = self._make_mesher_stub(sample_bounds)
+        points = np.array([[0.5, 0.0, 0.0]], dtype=np.float64)
+        result = mesher.kernel_caller([sphere_kernel], points)
+        assert result.dtype == np.float32
+
+    def test_enclosed_clamps_point_on_boundary(self, sphere_kernel):
+        bounds = np.array([-1.0, 1.0, -1.0, 1.0, -1.0, 1.0])
+        mesher = self._make_mesher_stub(bounds, enclosed=True)
+        # Point exactly on the boundary (x == x_max = 1.0) satisfies x >= x_max,
+        # so it must be clamped.  Sphere SDF = 0.0, but clamped result must be 1.0.
+        points = np.array([[1.0, 0.0, 0.0]], dtype=np.float64)
+        result = mesher.kernel_caller([sphere_kernel], points)
+        assert result[0, 0] == pytest.approx(1.0)
 
 
 # ---------------------------------------------------------------------------
@@ -322,6 +347,58 @@ class TestOcMesherInit:
         mock_load.return_value = MagicMock()
         mesher = OcMesher(sample_cameras_as_lists, sample_bounds)
         assert mesher.n_cameras == 1
+
+    @patch("ocmesher.core.load_cdll")
+    @patch("ocmesher.core.register_func")
+    def test_init_camera_packing_values(
+        self, _mock_register, mock_load, sample_cameras, sample_bounds, sample_camera_pose, sample_intrinsics
+    ):
+        """Camera array must contain correct inv_pose, K, H, W values."""
+        mock_load.return_value = MagicMock()
+        mesher = OcMesher(sample_cameras, sample_bounds)
+        expected_inv_pose = np.linalg.inv(sample_camera_pose)[:3, :4].reshape(-1)
+        expected_k = sample_intrinsics.reshape(-1)
+        cam = mesher.cameras
+        np.testing.assert_allclose(cam[:12], expected_inv_pose, atol=1e-10)
+        np.testing.assert_allclose(cam[12:21], expected_k, atol=1e-10)
+        assert cam[21] == pytest.approx(720.0)   # H
+        assert cam[22] == pytest.approx(1280.0)  # W
+
+    @patch("ocmesher.core.load_cdll")
+    @patch("ocmesher.core.register_func")
+    def test_init_center_for_asymmetric_bounds(self, _mock_register, mock_load, sample_cameras):
+        """Center must be the midpoint of each axis even for non-symmetric bounds."""
+        mock_load.return_value = MagicMock()
+        bounds = np.array([0.0, 4.0, -2.0, 6.0, 1.0, 3.0])
+        mesher = OcMesher(sample_cameras, bounds)
+        np.testing.assert_allclose(mesher.center, [2.0, 2.0, 2.0], atol=1e-10)
+
+    @patch("ocmesher.core.load_cdll")
+    @patch("ocmesher.core.register_func")
+    def test_init_size_is_largest_dimension(self, _mock_register, mock_load, sample_cameras):
+        """size must be 1.1 × the largest axis range."""
+        mock_load.return_value = MagicMock()
+        # x-range = 10, y-range = 4, z-range = 2
+        bounds = np.array([0.0, 10.0, -2.0, 2.0, -1.0, 1.0])
+        mesher = OcMesher(sample_cameras, bounds)
+        assert mesher.size == pytest.approx(11.0)
+
+    @patch("ocmesher.core.load_cdll")
+    @patch("ocmesher.core.register_func")
+    def test_init_multi_camera_packing_shape(
+        self, _mock_register, mock_load, sample_camera_pose, sample_intrinsics, sample_bounds
+    ):
+        """Camera array must be 2 × CAMERA_DATA_STRIDE for two cameras."""
+        mock_load.return_value = MagicMock()
+        cameras = (
+            [sample_camera_pose, sample_camera_pose],
+            [sample_intrinsics, sample_intrinsics],
+            [720, 480],
+            [1280, 640],
+        )
+        mesher = OcMesher(cameras, sample_bounds)
+        assert mesher.n_cameras == 2
+        assert mesher.cameras.shape == (2 * CAMERA_DATA_STRIDE,)
 
 
 # ---------------------------------------------------------------------------

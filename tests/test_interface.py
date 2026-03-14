@@ -6,6 +6,7 @@ import sys
 from ctypes import c_double, c_float, c_int32
 from unittest.mock import MagicMock
 
+import numpy as np
 import pytest
 
 from ocmesher.utils.interface import (
@@ -32,6 +33,10 @@ class TestAsInt:
         with pytest.raises(TypeError, match="Expected a numpy array"):
             AsInt("hello")
 
+    def test_accepts_empty_array(self):
+        result = AsInt(np.array([], dtype=np.int32))
+        assert result is not None
+
 
 class TestAsDouble:
     def test_valid_float64_array(self, sample_numpy_float_array):
@@ -42,6 +47,10 @@ class TestAsDouble:
     def test_rejects_non_array(self):
         with pytest.raises(TypeError, match="Expected a numpy array"):
             AsDouble(42.0)
+
+    def test_accepts_empty_array(self):
+        result = AsDouble(np.array([], dtype=np.float64))
+        assert result is not None
 
 
 class TestAsFloat:
@@ -54,6 +63,10 @@ class TestAsFloat:
         with pytest.raises(TypeError, match="Expected a numpy array"):
             AsFloat(3.14)
 
+    def test_accepts_empty_array(self):
+        result = AsFloat(np.array([], dtype=np.float32))
+        assert result is not None
+
 
 class TestAsBool:
     def test_valid_bool_array(self, sample_numpy_bool_array):
@@ -64,6 +77,10 @@ class TestAsBool:
     def test_rejects_non_array(self):
         with pytest.raises(TypeError, match="Expected a numpy array"):
             AsBool(True)  # noqa: FBT003
+
+    def test_accepts_empty_array(self):
+        result = AsBool(np.array([], dtype=bool))
+        assert result is not None
 
 
 class TestRegisterFunc:
