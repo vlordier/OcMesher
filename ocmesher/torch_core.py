@@ -719,7 +719,7 @@ class TorchOcMesher:
     # ------------------------------------------------------------------
     @torch.no_grad()
     def _cube_centers(self, coords: torch.Tensor, levels: torch.Tensor) -> torch.Tensor:
-        """Integer octree coords -> world-space centre positions.
+        """Integer octree coords -> world-space center positions.
 
         Args:
             coords: ``(N, 3)`` int64 tensor of integer cube coordinates.
@@ -1037,7 +1037,7 @@ class TorchOcMesher:
         denom = s0 - s1
         t = torch.where(denom.abs() < _DENOM_EPS, torch.tensor(0.5, device=device), s0 / denom)
         t.clamp_(0.0, 1.0)
-        t = t.unsqueeze(-1).double()  # (A, 12, 1) match corner dtype
+        t = t.unsqueeze(-1).double()  # (A, 12, 1) match corner dtype for lerp
         p0 = a_corners[:, ev[:, 0]]
         p1 = a_corners[:, ev[:, 1]]
         edge_positions = torch.lerp(p0, p1, t)  # fused linear interpolation

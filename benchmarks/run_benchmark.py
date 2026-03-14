@@ -127,7 +127,7 @@ def _stats(times: list[float]) -> dict[str, float]:
     }
     if len(times) > 1:
         result["std_s"] = statistics.stdev(times)
-        result["p95_s"] = sorted(times)[int(len(times) * 0.95)]
+        result["p95_s"] = float(np.percentile(times, 95))
     return result
 
 
