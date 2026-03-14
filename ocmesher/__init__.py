@@ -5,5 +5,15 @@
 
 from .core import OcMesher
 
-__all__ = ["OcMesher"]
+__all__ = ["OcMesher", "TorchOcMesher"]
 __version__ = "1.0.0"
+
+
+def __getattr__(name: str):
+    """Lazy-import TorchOcMesher so torch is only required when used."""
+    if name == "TorchOcMesher":
+        from .torch_core import TorchOcMesher
+
+        return TorchOcMesher
+    msg = f"module {__name__!r} has no attribute {name!r}"
+    raise AttributeError(msg)

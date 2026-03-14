@@ -29,3 +29,4 @@ env/
 # Project-specific
 lib/
 results/
+benchmark_results/
