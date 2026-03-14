@@ -121,6 +121,8 @@ ignore = [
     "INP001",   # implicit namespace package
     "T201",     # print statements for debugging
     "PT019",    # @patch-injected args look like unused fixtures
+    "SLF001",   # private member access expected in tests
+    "RUF059",   # unused unpacked variables OK in tests
 ]
 
 [tool.ruff.lint.isort]

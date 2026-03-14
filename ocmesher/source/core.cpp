@@ -27,9 +27,9 @@ std::vector<int>
 } // namespace fine
 
 namespace solid {
-std::vector<Cube> cubes;     // NOLINT(cppcoreguidelines-avoid-non-const-global-variables)
-std::set<KeyCube> cubes_set; // NOLINT(cppcoreguidelines-avoid-non-const-global-variables)
-std::set<KeyCube> visible_set,
+std::vector<Cube> cubes;                                          // NOLINT(cppcoreguidelines-avoid-non-const-global-variables)
+std::unordered_set<KeyCube, KeyCubeHash> cubes_set;               // NOLINT(cppcoreguidelines-avoid-non-const-global-variables)
+std::unordered_set<KeyCube, KeyCubeHash> visible_set,
     occluded_set; // NOLINT(cppcoreguidelines-avoid-non-const-global-variables)
 } // namespace solid
 
@@ -39,13 +39,13 @@ std::vector<Vertex> v;                // NOLINT(cppcoreguidelines-avoid-non-cons
 std::vector<Cube> visible_nodes_cube; // NOLINT(cppcoreguidelines-avoid-non-const-global-variables)
 std::vector<int> occluded_nodes_id;   // NOLINT(cppcoreguidelines-avoid-non-const-global-variables)
 int gl, start_node, end_node, size0;  // NOLINT(cppcoreguidelines-avoid-non-const-global-variables)
-std::map<KeyCube, int> vertices;      // NOLINT(cppcoreguidelines-avoid-non-const-global-variables)
+std::unordered_map<KeyCube, int, KeyCubeHash> vertices;     // NOLINT(cppcoreguidelines-avoid-non-const-global-variables)
 std::vector<int> bipolar_edges_s;     // NOLINT(cppcoreguidelines-avoid-non-const-global-variables)
 std::vector<std::vector<KeyEdge>>
     bipolar_edges; // NOLINT(cppcoreguidelines-avoid-non-const-global-variables)
 std::vector<std::vector<int>>
     bipolar_edges_vindices; // NOLINT(cppcoreguidelines-avoid-non-const-global-variables)
-std::map<std::pair<int, KeyCube>, int>
+std::unordered_map<std::pair<int, KeyCube>, int, IntKeyCubeHash>
     bipolar_edges_vertices;    // NOLINT(cppcoreguidelines-avoid-non-const-global-variables)
 std::vector<int> vertices_cnt; // NOLINT(cppcoreguidelines-avoid-non-const-global-variables)
 std::vector<std::vector<KeyCube>>
@@ -68,7 +68,15 @@ std::vector<std::pair<int, ComputedVertex>>
     face_vertices; // NOLINT(cppcoreguidelines-avoid-non-const-global-variables)
 std::vector<bool>
     face_vertices_in_view_tag; // NOLINT(cppcoreguidelines-avoid-non-const-global-variables)
-std::map<std::pair<int, int>, int>
+// Hash for std::pair<int,int> used by computing::face_vertices_map.
+struct IntPairHash {
+    auto operator()(const std::pair<int, int>& p) const noexcept -> std::size_t {
+        std::size_t h = std::hash<int>{}(p.first);
+        h ^= std::hash<int>{}(p.second) + 0x9e3779b9 + (h << 6) + (h >> 2);
+        return h;
+    }
+};
+std::unordered_map<std::pair<int, int>, int, IntPairHash>
     face_vertices_map; // NOLINT(cppcoreguidelines-avoid-non-const-global-variables)
 } // namespace computing
 
@@ -87,6 +95,7 @@ int run_coarse(                                                                 
     params::coarse_count = coarse_count;
     params::memory_limit_mb = memory_limit_mb;
     params::n_elements = n_elements;
+    params::precompute_cam_pix_ang();
     Node root;
     markLeafNode(root);
     memset(root.m_c.m_coords, 0, 3 * sizeof(int));
@@ -368,7 +377,7 @@ int vis_filter( // NOLINT(readability-identifier-naming, modernize-use-trailing-
     }
     visible_set.clear();
     occluded_set.clear();
-    std::set<KeyCube> new_visible_set, old_visible_set;
+    std::unordered_set<KeyCube, KeyCubeHash> new_visible_set, old_visible_set;
     for (int i = 0; i < static_cast<int>(visible.size()); i++) { // NOLINT(modernize-loop-convert)
         if (visible[i])
             visible_set.insert(cubeToKey(cubes[i]));

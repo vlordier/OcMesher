@@ -566,6 +566,94 @@ def _memory_usage(cameras, bounds):
     return results
 
 
+def _micro_visibility_multicam(bounds, n_runs: int = 3):
+    """Benchmark visibility filter scaling with multiple cameras."""
+    results: list[dict[str, object]] = []
+    try:
+        import torch
+
+        from ocmesher.torch_core import TorchOcMesher
+
+        rng = np.random.default_rng(42)
+        n_pts = 50_000
+        for nc in [1, 2, 4, 8]:
+            cameras = _make_cameras(nc)
+            mesher = TorchOcMesher(cameras, bounds, device="cpu")
+            positions = torch.from_numpy(
+                rng.uniform(
+                    [bounds[0], bounds[2], bounds[4]],
+                    [bounds[1], bounds[3], bounds[5]],
+                    size=(n_pts, 3),
+                ),
+            ).to(dtype=torch.float64, device=mesher.device)
+
+            times: list[float] = []
+            for _ in range(n_runs):
+                t0 = time.perf_counter()
+                _ = mesher._visibility_filter(positions)
+                times.append(time.perf_counter() - t0)
+            results.append(
+                {
+                    "n_cameras": nc,
+                    "n_points": n_pts,
+                    **_stats(times),
+                }
+            )
+    except Exception as exc:  # noqa: BLE001
+        results.append({"error": str(exc)})
+    return results
+
+
+def _micro_triangle_extraction(cameras, bounds, n_runs: int = 5):
+    """Benchmark vectorised triangle extraction in marching cubes."""
+    results: dict[str, object] = {}
+    try:
+        from ocmesher.torch_core import TorchOcMesher
+
+        mesher = TorchOcMesher(cameras, bounds, device="cpu")
+        coords, levels = mesher._build_coarse_octree()
+        mask, _ = mesher._find_surface_cubes([sdf_terrain], coords, levels)
+        s_coords = coords[mask]
+        s_levels = levels[mask]
+        corners = mesher._cube_corner_positions(s_coords, s_levels)
+        flat = corners.reshape(-1, 3)
+        sdf_all = mesher._evaluate_sdf([sdf_terrain], flat)
+        sdf_min = sdf_all.min(dim=-1).values.reshape(len(s_coords), 8)
+
+        results["n_surface_cubes"] = len(s_coords)
+        times: list[float] = []
+        for _ in range(n_runs):
+            t0 = time.perf_counter()
+            v, f = mesher._marching_cubes(corners, sdf_min)
+            times.append(time.perf_counter() - t0)
+        results["mean_s"] = statistics.mean(times)
+        results["output_vertices"] = int(v.shape[0])
+        results["output_faces"] = int(f.shape[0])
+    except Exception as exc:  # noqa: BLE001
+        results["error"] = str(exc)
+    return results
+
+
+def _micro_init_vectorised(n_runs: int = 20):
+    """Benchmark vectorised camera initialisation vs loop-based."""
+    results: dict[str, object] = {}
+    try:
+        from ocmesher.torch_core import TorchOcMesher
+
+        bounds = _make_bounds()
+        for nc in [1, 4, 8, 16]:
+            cameras = _make_cameras(nc)
+            times: list[float] = []
+            for _ in range(n_runs):
+                t0 = time.perf_counter()
+                TorchOcMesher(cameras, bounds, device="cpu")
+                times.append(time.perf_counter() - t0)
+            results[f"init_{nc}cam_mean_s"] = statistics.mean(times)
+    except Exception as exc:  # noqa: BLE001
+        results["error"] = str(exc)
+    return results
+
+
 # ---------------------------------------------------------------------------
 # Printing helpers
 # ---------------------------------------------------------------------------
@@ -692,6 +780,22 @@ def main():
         r_vis = _micro_visibility(cameras, bounds)
         _print_result(r_vis)
         results["micro_visibility"] = r_vis
+
+        _print_section("Micro-benchmark: Visibility filter multi-camera scaling")
+        r_vis_mc = _micro_visibility_multicam(bounds)
+        for entry in r_vis_mc:
+            _print_result(entry)
+        results["micro_visibility_multicam"] = r_vis_mc
+
+        _print_section("Micro-benchmark: Triangle extraction (vectorised)")
+        r_tri = _micro_triangle_extraction(cameras, bounds)
+        _print_result(r_tri)
+        results["micro_triangle_extraction"] = r_tri
+
+        _print_section("Micro-benchmark: Initialisation (vectorised)")
+        r_init = _micro_init_vectorised()
+        _print_result(r_init)
+        results["micro_init"] = r_init
 
         _print_section("Scaling: Multi-camera performance")
         r_scale = _scaling_cameras(bounds)
