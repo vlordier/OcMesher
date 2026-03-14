@@ -4,7 +4,7 @@ version = "1.0.0"
 description = "View-Dependent Octree-based Mesh Extraction in Unbounded Scenes for Procedural Synthetic Data"
 readme = "README.md"
 license = { file = "LICENSE" }
-requires-python = ">=3.10"
+requires-python = ">=3.11"
 dependencies = [
     "numpy>=1.24.0",
     "vnoise>=0.1.0",
@@ -21,6 +21,7 @@ torch = [
 dev = [
     "pytest>=7.0",
     "pytest-cov>=4.0",
+    "pyupgrade>=3.15",
     "ruff>=0.4.0",
 ]
 
@@ -35,7 +36,7 @@ ocmesher = ["py.typed"]
 # Ruff – tight lint & format configuration (ignoring E501 line-length)
 # ---------------------------------------------------------------------------
 [tool.ruff]
-target-version = "py310"
+target-version = "py311"
 line-length = 120
 
 [tool.ruff.format]
@@ -156,7 +157,7 @@ convention = "google"
 [tool.pyrefly]
 project_includes = ["ocmesher", "demo.py"]
 project_excludes = ["ocmesher/source"]
-python_version = "3.10"
+python_version = "3.11"
 search_path = ["."]
 
 [tool.pyrefly.errors]
@@ -169,7 +170,7 @@ missing-attribute = false
 [tool.ty]
 
 [tool.ty.environment]
-python-version = "3.10"
+python-version = "3.11"
 
 [tool.ty.rules]
 # Dynamic attributes set via setattr in register_func are unresolvable

@@ -6,7 +6,7 @@
 """Simple wall-clock timer with memory reporting."""
 
 import os
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from types import TracebackType
 from typing import Self
 
@@ -36,7 +36,7 @@ class Timer:
         """Record the start time."""
         if self.disable_timer:
             return self
-        self.start = datetime.now(tz=timezone.utc)
+        self.start = datetime.now(tz=UTC)
         return self
 
     def __exit__(
@@ -48,7 +48,7 @@ class Timer:
         """Print elapsed time and memory on success, or the exception type on failure."""
         if self.disable_timer:
             return
-        self.end = datetime.now(tz=timezone.utc)
+        self.end = datetime.now(tz=UTC)
         self.duration = self.end - self.start  # timedelta
         if exc_type is None:
             try:
