@@ -378,6 +378,95 @@ def _micro_marching_cubes(cameras, bounds, n_runs: int = 3):
     return results
 
 
+def _micro_vertex_dedup(cameras, bounds, n_runs: int = 5):
+    """Benchmark GPU-accelerated vertex deduplication vs numpy baseline."""
+    results: dict[str, object] = {}
+    try:
+        import torch
+
+        from ocmesher.torch_core import TorchOcMesher
+
+        mesher = TorchOcMesher(cameras, bounds, device="cpu")
+        coords, levels = mesher._build_coarse_octree()
+        mask, _ = mesher._find_surface_cubes([sdf_terrain], coords, levels)
+        s_coords = coords[mask]
+        s_levels = levels[mask]
+        corners = mesher._cube_corner_positions(s_coords, s_levels)
+        flat = corners.reshape(-1, 3)
+        sdf_all = mesher._evaluate_sdf([sdf_terrain], flat)
+        sdf_min = sdf_all.min(dim=-1).values.reshape(len(s_coords), 8)
+
+        # Generate vertex data for dedup comparison
+        v, _f = mesher._marching_cubes(corners, sdf_min)
+        n_verts = v.shape[0]
+        results["n_input_vertices"] = int(n_verts * 3)
+        results["n_dedup_vertices"] = n_verts
+
+        # Benchmark numpy.unique baseline
+        verts_t = torch.from_numpy(v).float()
+        verts_dup = verts_t.repeat(3, 1)  # simulate duplicated vertices
+        verts_np = verts_dup.numpy()
+
+        times_np: list[float] = []
+        for _ in range(n_runs):
+            t0 = time.perf_counter()
+            quantized = np.round(verts_np * 1e8).astype(np.int64)
+            np.unique(quantized, axis=0, return_index=True, return_inverse=True)
+            times_np.append(time.perf_counter() - t0)
+        results["numpy_unique_mean_s"] = statistics.mean(times_np)
+
+        # Benchmark torch hash-based dedup
+        times_torch: list[float] = []
+        for _ in range(n_runs):
+            t0 = time.perf_counter()
+            q = (verts_dup * 1e8).round().long()
+            hv = q[:, 0] * 1000000007 + q[:, 1] * 1000000009 + q[:, 2]
+            torch.unique(hv, return_inverse=True)
+            times_torch.append(time.perf_counter() - t0)
+        results["torch_hash_mean_s"] = statistics.mean(times_torch)
+
+        if results["numpy_unique_mean_s"] > 0:
+            results["speedup"] = round(results["numpy_unique_mean_s"] / max(results["torch_hash_mean_s"], 1e-9), 1)
+    except Exception as exc:  # noqa: BLE001
+        results["error"] = str(exc)
+    return results
+
+
+def _micro_coord_computation(_cameras, _bounds, n_runs: int = 5):
+    """Benchmark ldexp vs pow for coordinate computation."""
+    results: dict[str, object] = {}
+    try:
+        import torch
+
+        rng = np.random.default_rng(42)
+        n_cubes = 500_000
+        levels = torch.from_numpy(rng.integers(1, 15, size=n_cubes))
+
+        # Benchmark pow-based scale computation
+        times_pow: list[float] = []
+        for _ in range(n_runs):
+            t0 = time.perf_counter()
+            _ = 1.0 / (2.0 ** levels.double())
+            times_pow.append(time.perf_counter() - t0)
+        results["pow2_mean_s"] = statistics.mean(times_pow)
+
+        # ldexp
+        ones = torch.ones_like(levels, dtype=torch.float64)
+        times_ldexp: list[float] = []
+        for _ in range(n_runs):
+            t0 = time.perf_counter()
+            _ = 1.0 / torch.ldexp(ones, levels)
+            times_ldexp.append(time.perf_counter() - t0)
+        results["ldexp_mean_s"] = statistics.mean(times_ldexp)
+        results["n_cubes"] = n_cubes
+
+        if results["pow2_mean_s"] > 0:
+            results["speedup"] = round(results["pow2_mean_s"] / max(results["ldexp_mean_s"], 1e-9), 1)
+    except Exception as exc:  # noqa: BLE001
+        results["error"] = str(exc)
+    return results
+
+
 def _micro_octree(cameras, bounds, n_runs: int = 3):
     """Benchmark octree construction in isolation."""
     results: dict[str, object] = {}
@@ -579,6 +668,16 @@ def main():
         r_mc = _micro_marching_cubes(cameras, bounds)
         _print_result(r_mc)
         results["micro_marching_cubes"] = r_mc
+
+        _print_section("Micro-benchmark: Vertex deduplication (numpy vs torch hash)")
+        r_dedup = _micro_vertex_dedup(cameras, bounds)
+        _print_result(r_dedup)
+        results["micro_vertex_dedup"] = r_dedup
+
+        _print_section("Micro-benchmark: Coordinate computation (pow vs ldexp)")
+        r_coord = _micro_coord_computation(cameras, bounds)
+        _print_result(r_coord)
+        results["micro_coord_computation"] = r_coord
 
         _print_section("Micro-benchmark: Octree construction")
         r_oct = _micro_octree(cameras, bounds)

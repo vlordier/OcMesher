@@ -766,7 +766,8 @@ class TorchOcMesher:
         """
         # Use ldexp instead of 2**level - avoids pow for integer exponents.
         scale = self.size / torch.ldexp(
-            torch.ones_like(levels, dtype=torch.float64), levels,
+            torch.ones_like(levels, dtype=torch.float64),
+            levels,
         ).unsqueeze(1)
         return self.center.unsqueeze(0) - self.size / 2 + scale * (coords.double() + 0.5)
 
@@ -779,7 +780,8 @@ class TorchOcMesher:
         """
         corner_coords = coords.unsqueeze(1) + self._corner_offsets.unsqueeze(0)
         scale = self.size / torch.ldexp(
-            torch.ones_like(levels, dtype=torch.float64), levels,
+            torch.ones_like(levels, dtype=torch.float64),
+            levels,
         ).unsqueeze(1).unsqueeze(2)
         return self.center.unsqueeze(0).unsqueeze(0) - self.size / 2 + scale * corner_coords.double()
 
@@ -797,11 +799,11 @@ class TorchOcMesher:
         Returns:
             ``(N,)`` float64 tensor of projected sizes.
         """
-        n = positions.shape[0]
         # Build homogeneous coords in-place via functional concat (avoids alloc)
         pos_h = torch.nn.functional.pad(positions, (0, 1), value=1.0)  # (N, 4)
         cube_sizes = self.size / torch.ldexp(
-            torch.ones_like(levels, dtype=torch.float64), levels,
+            torch.ones_like(levels, dtype=torch.float64),
+            levels,
         )  # (N,)
 
         # Batched transform: (C, 3, 4) @ (4, N) -> (C, 3, N) -> (C, N, 3)
@@ -858,6 +860,7 @@ class TorchOcMesher:
                     sdf[out_bound] = 1
                 return sdf.astype(np.float32).reshape(-1, 1)
         else:
+
             def _eval_chunk(chunk_np):
                 if enclosed:
                     out_bound = (
@@ -1147,7 +1150,6 @@ class TorchOcMesher:
             return np.zeros((0, 3), dtype=np.float64), np.zeros((0, 3), dtype=np.int32)
 
         tri_verts = torch.cat(all_face_verts, dim=0)
-        total_tris = tri_verts.shape[0]
         verts_flat = tri_verts.reshape(-1, 3)
 
         # --- Vertex deduplication via quantised coordinate hashing ---
@@ -1155,7 +1157,7 @@ class TorchOcMesher:
         # for the hashing step.  Only transfer the final deduplicated arrays.
         quantized = (verts_flat * 1e8).round().long()
         # Encode (x, y, z) triples into a single int64 hash per vertex.
-        # The components are bounded by the scene extent × 1e8 which fits in
+        # The components are bounded by the scene extent x 1e8 which fits in
         # int64 when multiplied by large primes.
         hash_vals = quantized[:, 0] * 1000000007 + quantized[:, 1] * 1000000009 + quantized[:, 2]
         _, inverse = torch.unique(hash_vals, return_inverse=True)
