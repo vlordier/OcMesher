@@ -66,6 +66,14 @@ class TestTimerBasic:
         with Timer("disabled self", disable_timer=True) as t:
             assert isinstance(t, Timer)
 
+    @patch("ocmesher.utils.timer.psutil.Process", _FakeProcess)
+    def test_timer_output_contains_elapsed_time(self, capsys):
+        with Timer("elapsed test"):
+            pass
+        captured = capsys.readouterr()
+        # Output must include a timedelta-style string, e.g. "0:00:00.000123"
+        assert "0:00:0" in captured.out
+
 
 class TestTimerName:
     def test_name_formatted_with_brackets(self):
