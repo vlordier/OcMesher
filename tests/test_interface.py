@@ -121,6 +121,11 @@ class TestLoadCdll:
         finally:
             sys.path.remove(str(tmp_path))
 
+    def test_raises_file_not_found_for_missing_absolute_path(self, tmp_path):
+        missing = str(tmp_path / "missing.so")
+        with pytest.raises(FileNotFoundError, match="Shared library not found"):
+            load_cdll(missing)
+
     def test_raises_on_invalid_shared_library(self, tmp_path):
         fake_lib = tmp_path / "fake.so"
         fake_lib.write_text("not a real library")
