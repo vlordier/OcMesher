@@ -12,6 +12,7 @@ from ocmesher.core import (
     OcMesher,
     _validate_bounds,
     _validate_cameras,
+    _validate_kernels,
 )
 
 # ---------------------------------------------------------------------------
@@ -209,6 +210,40 @@ class TestOcMesherCallValidation:
         obj = object.__new__(OcMesher)
         with pytest.raises(ValueError, match="non-empty"):
             obj("not a list")
+
+    def test_rejects_non_callable_kernel_in_call(self, sphere_kernel):
+        obj = object.__new__(OcMesher)
+        with pytest.raises(TypeError, match="callable"):
+            obj([sphere_kernel, "not_a_function"])
+
+
+# ---------------------------------------------------------------------------
+# _validate_kernels
+# ---------------------------------------------------------------------------
+
+
+class TestValidateKernels:
+    def test_accepts_single_callable(self, sphere_kernel):
+        _validate_kernels([sphere_kernel])  # no exception
+
+    def test_accepts_multiple_callables(self, sphere_kernel, plane_kernel):
+        _validate_kernels([sphere_kernel, plane_kernel])  # no exception
+
+    def test_rejects_empty_list(self):
+        with pytest.raises(ValueError, match="non-empty"):
+            _validate_kernels([])
+
+    def test_rejects_non_sequence(self):
+        with pytest.raises(ValueError, match="non-empty"):
+            _validate_kernels(42)
+
+    def test_rejects_non_callable_element(self, sphere_kernel):
+        with pytest.raises(TypeError, match=r"kernels\[1\] must be callable"):
+            _validate_kernels([sphere_kernel, "bad"])
+
+    def test_error_includes_index(self):
+        with pytest.raises(TypeError, match=r"kernels\[0\]"):
+            _validate_kernels(["not_callable"])
 
 
 # ---------------------------------------------------------------------------

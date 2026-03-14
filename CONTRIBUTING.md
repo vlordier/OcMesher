@@ -15,18 +15,57 @@ uv sync
 bash install.sh
 ```
 
+4. (Optional) Install pre-commit hooks to automatically lint and format before each commit:
+
+```bash
+uv run pre-commit install
+```
+
 ## Development Guidelines
 
-- Follow [PEP 8](https://peps.python.org/pep-0008/) for Python code style
-- Add type hints to new Python code
-- Keep C++ changes compatible with both GCC and Clang
-- Test your changes with `uv run python demo.py` before submitting
+- Follow the project style enforced by **ruff** (see `pyproject.toml` for rules).
+- Add type hints to new Python code.
+- Keep C++ changes compatible with both GCC and Clang.
+- Run linting and tests before submitting (see commands below).
+
+## Common Development Commands
+
+```bash
+# Run all Python tests
+uv run python -m pytest tests/ -v
+
+# Lint Python code
+uv run ruff check .
+
+# Auto-fix lint issues (where safe)
+uv run ruff check . --fix
+
+# Check formatting
+uv run ruff format --check .
+
+# Apply formatting
+uv run ruff format .
+
+# Build the C++ shared library
+bash install.sh
+```
+
+You can also use the provided `Makefile` shortcuts:
+
+```bash
+make install   # build C++ library and sync Python deps
+make test      # run Python test suite
+make lint      # ruff lint check
+make format    # ruff format check
+```
 
 ## Submitting Changes
 
-1. Commit your changes with a clear, descriptive message
-2. Push to your fork and open a Pull Request
-3. Describe what your changes do and why they are needed
+1. Commit your changes with a clear, descriptive message following
+   [Conventional Commits](https://www.conventionalcommits.org/) style
+   (e.g. `fix: ...`, `feat: ...`, `chore: ...`, `refactor: ...`).
+2. Push to your fork and open a Pull Request.
+3. Describe what your changes do and why they are needed.
 
 ## Reporting Issues
 
