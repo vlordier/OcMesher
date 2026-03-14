@@ -703,6 +703,91 @@ def _micro_init_vectorised(n_runs: int = 20):
     return results
 
 
+def _micro_pipeline_breakdown(cameras, bounds, n_runs: int = 3):
+    """Break down end-to-end timing per pipeline step.
+
+    Measures each step individually so users can identify the dominant
+    bottleneck: coarse octree, surface detection, refinement, visibility
+    filtering, or mesh construction.
+    """
+    results: dict[str, object] = {}
+    try:
+        from ocmesher.torch_core import TorchOcMesher
+
+        mesher = TorchOcMesher(cameras, bounds, device="cpu")
+        kernel = sdf_terrain
+
+        step_times: dict[str, list[float]] = {
+            "coarse_octree": [],
+            "find_surface": [],
+            "refine_surface": [],
+            "visibility_filter": [],
+            "construct_mesh": [],
+            "total": [],
+        }
+
+        import torch
+
+        for _ in range(n_runs):
+            t_total = time.perf_counter()
+
+            t0 = time.perf_counter()
+            coords, levels = mesher._build_coarse_octree()
+            step_times["coarse_octree"].append(time.perf_counter() - t0)
+
+            t0 = time.perf_counter()
+            surface_mask, corner_sdf = mesher._find_surface_cubes([kernel], coords, levels)
+            s_coords = coords[surface_mask]
+            s_levels = levels[surface_mask]
+            s_corner_sdf = corner_sdf[surface_mask]
+            step_times["find_surface"].append(time.perf_counter() - t0)
+
+            t0 = time.perf_counter()
+            s_coords, s_levels, s_corner_sdf = mesher._refine_surface_octree(
+                [kernel],
+                s_coords,
+                s_levels,
+                corner_sdf=s_corner_sdf,
+            )
+            step_times["refine_surface"].append(time.perf_counter() - t0)
+
+            t0 = time.perf_counter()
+            positions = mesher._cube_centers(s_coords, s_levels)
+            vis_mask = mesher._visibility_filter(positions)
+            step_times["visibility_filter"].append(time.perf_counter() - t0)
+
+            t0 = time.perf_counter()
+            vis_c = s_coords[vis_mask]
+            vis_l = s_levels[vis_mask]
+            occ_c = s_coords[~vis_mask]
+            occ_l = s_levels[~vis_mask]
+            all_c = torch.cat([vis_c, occ_c])
+            all_l = torch.cat([vis_l, occ_l])
+            all_sdf = torch.cat([s_corner_sdf[vis_mask], s_corner_sdf[~vis_mask]]) if s_corner_sdf is not None else None
+            n_vis = int(vis_mask.sum().item())
+            mesher._construct_element_mesh(
+                [kernel],
+                all_c,
+                all_l,
+                n_vis,
+                corner_sdf=all_sdf,
+                element_idx=0,
+            )
+            step_times["construct_mesh"].append(time.perf_counter() - t0)
+            step_times["total"].append(time.perf_counter() - t_total)
+
+        for step_name, times_list in step_times.items():
+            results[f"{step_name}_mean_s"] = statistics.mean(times_list)
+        # Percentage breakdown
+        total_mean = results["total_mean_s"]
+        if total_mean > 0:
+            for step_name in ("coarse_octree", "find_surface", "refine_surface", "visibility_filter", "construct_mesh"):
+                results[f"{step_name}_pct"] = round(results[f"{step_name}_mean_s"] / total_mean * 100, 1)
+    except Exception as exc:  # noqa: BLE001
+        results["error"] = str(exc)
+    return results
+
+
 def _micro_dtype_comparison(cameras, bounds, n_runs: int = 5):
     """Benchmark float32 vs float64 throughput on available accelerators.
 
@@ -1035,6 +1120,11 @@ def main():
         r_init = _micro_init_vectorised()
         _log_result(r_init)
         results["micro_init"] = r_init
+
+        _log_section("Micro-benchmark: Pipeline breakdown (per-step timing)")
+        r_pipe = _micro_pipeline_breakdown(cameras, bounds)
+        _log_result(r_pipe)
+        results["micro_pipeline_breakdown"] = r_pipe
 
         _log_section("Micro-benchmark: float32 vs float64 dtype throughput")
         r_dtype = _micro_dtype_comparison(cameras, bounds)
