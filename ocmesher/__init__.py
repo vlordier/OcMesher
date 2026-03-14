@@ -3,7 +3,14 @@
 
 """OcMesher: View-dependent octree-based mesh extraction for unbounded SDF scenes."""
 
+import logging
+
 from .core import OcMesher
+
+# Best practice for library packages: add NullHandler so that log records are
+# discarded unless the application configures a handler.  This prevents
+# "No handlers could be found for logger 'ocmesher'" warnings.
+logging.getLogger(__name__).addHandler(logging.NullHandler())
 
 __all__ = ["OcMesher", "TorchOcMesher"]
 __version__ = "1.0.0"

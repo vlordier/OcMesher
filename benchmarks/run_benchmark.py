@@ -856,9 +856,9 @@ def _bench_compile(cameras, bounds, sdf_name: str = "terrain", n_runs: int = 3, 
 # ---------------------------------------------------------------------------
 def _log_section(title: str):
     logger.info("")
-    logger.info("-" * 70)
-    logger.info(title)
-    logger.info("-" * 70)
+    logger.info("%s", "-" * 70)
+    logger.info("%s", title)
+    logger.info("%s", "-" * 70)
 
 
 def _log_result(result: dict):
@@ -879,7 +879,6 @@ def _log_result(result: dict):
 # ---------------------------------------------------------------------------
 def main():
     """Run benchmarks and log results."""
-    logging.basicConfig(level=logging.INFO, format="%(message)s")
     parser = argparse.ArgumentParser(description="OcMesher benchmark: Python+C++ vs PyTorch")
     parser.add_argument("--full", action="store_true", help="Run full benchmark (slower, higher resolution)")
     parser.add_argument("--profile", action="store_true", help="Run sub-operation micro-benchmarks")
@@ -903,7 +902,22 @@ def main():
         action="store_true",
         help="Run torch.compile impact benchmark (requires --profile)",
     )
+    parser.add_argument(
+        "--verbose",
+        action="store_true",
+        help="Enable DEBUG-level logging (includes per-step mesher output)",
+    )
     args = parser.parse_args()
+
+    # Configure logging: verbose mode shows DEBUG + timestamps; default shows INFO only.
+    if args.verbose:
+        logging.basicConfig(
+            level=logging.DEBUG,
+            format="%(asctime)s %(levelname)-8s %(name)s: %(message)s",
+            datefmt="%H:%M:%S",
+        )
+    else:
+        logging.basicConfig(level=logging.INFO, format="%(message)s")
 
     pixels_per_cube = 8 if args.full else 16
     cameras = _make_cameras(1)
@@ -929,9 +943,9 @@ def main():
     else:
         bench_devices = [d.strip() for d in args.device.split(",")]
 
-    logger.info("=" * 70)
+    logger.info("%s", "=" * 70)
     logger.info("OcMesher Comprehensive Benchmark")
-    logger.info("=" * 70)
+    logger.info("%s", "=" * 70)
 
     sys_info = _system_info()
     for k, v in sys_info.items():
@@ -1050,9 +1064,9 @@ def main():
 
     # Speedup summary ------------------------------------------------------
     logger.info("")
-    logger.info("=" * 70)
+    logger.info("%s", "=" * 70)
     logger.info("SUMMARY")
-    logger.info("=" * 70)
+    logger.info("%s", "=" * 70)
     for sdf_name in sdf_names:
         r_orig = results.get(f"original_{sdf_name}", {})
         r_torch_cpu = results.get(f"torch_cpu_{sdf_name}", {})
