@@ -598,7 +598,12 @@ class TorchOcMesher:
         device=None,
     ):
         """Initialise the mesher with camera intrinsics and bounds."""
-        self.device = torch.device(device if device is not None else ("cuda" if torch.cuda.is_available() else "cpu"))
+        if device is not None:
+            self.device = torch.device(device)
+        elif torch.cuda.is_available():
+            self.device = torch.device("cuda")
+        else:
+            self.device = torch.device("cpu")
 
         cam_poses, Ks, Hs, Ws = cameras
         self.n_cameras = len(cam_poses)
@@ -609,7 +614,8 @@ class TorchOcMesher:
         self.cam_heights: list[int] = []
         self.cam_widths: list[int] = []
         for i in range(self.n_cameras):
-            inv_poses.append(torch.from_numpy(np.linalg.inv(cam_poses[i])[:3, :4].astype(np.float64)))
+            inv_pose_np = np.linalg.inv(cam_poses[i])[:3, :4].astype(np.float64)
+            inv_poses.append(torch.from_numpy(inv_pose_np))
             intrinsics.append(torch.from_numpy(Ks[i].astype(np.float64)))
             self.cam_heights.append(int(Hs[i]))
             self.cam_widths.append(int(Ws[i]))
