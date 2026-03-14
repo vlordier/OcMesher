@@ -16,6 +16,9 @@ on:
       - ".clang-format"
       - ".github/workflows/static-analysis.yml"
 
+permissions:
+  contents: read
+
 jobs:
   clang-format:
     name: clang-format (formatting check)
