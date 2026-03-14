@@ -110,6 +110,7 @@ def _system_info():
         info["cuda_available"] = torch.cuda.is_available()
         if torch.cuda.is_available():
             info["cuda_device"] = torch.cuda.get_device_name(0)
+        info["mps_available"] = hasattr(torch.backends, "mps") and torch.backends.mps.is_available()
     except ImportError:
         info["pytorch_version"] = "NOT INSTALLED"
     return info
@@ -317,6 +318,19 @@ def _micro_projection(cameras, bounds, n_cubes: int = 100_000, n_runs: int = 5):
                 torch.cuda.synchronize()
                 times_gpu.append(time.perf_counter() - t0)
             results["torch_gpu_mean_s"] = statistics.mean(times_gpu)
+
+        if hasattr(torch.backends, "mps") and torch.backends.mps.is_available():
+            mesher_mps = TorchOcMesher(cameras, bounds, device="mps")
+            coords_m = coords.to(mesher_mps.device)
+            levels_m = levels.to(mesher_mps.device)
+            positions_m = mesher_mps._cube_centers(coords_m, levels_m)
+            times_mps: list[float] = []
+            for _ in range(n_runs):
+                t0 = time.perf_counter()
+                _ = mesher_mps._projected_sizes(positions_m, levels_m)
+                torch.mps.synchronize()
+                times_mps.append(time.perf_counter() - t0)
+            results["torch_mps_mean_s"] = statistics.mean(times_mps)
     except Exception as exc:  # noqa: BLE001
         results["error"] = str(exc)
 
@@ -529,6 +543,13 @@ def main():
                 )
                 _print_result(r_gpu)
                 results[f"torch_gpu_{sdf_name}"] = r_gpu
+            if hasattr(torch.backends, "mps") and torch.backends.mps.is_available():
+                _print_section(f"End-to-end: PyTorch MPS ({sdf_name})")
+                r_mps = _bench_torch(
+                    cameras, bounds, pixels_per_cube, sdf_name, n_runs=args.runs, warmup=args.warmup, device="mps"
+                )
+                _print_result(r_mps)
+                results[f"torch_mps_{sdf_name}"] = r_mps
         except ImportError:
             pass
 
@@ -579,6 +600,7 @@ def main():
         r_orig = results.get(f"original_{sdf_name}", {})
         r_torch = results.get(f"torch_cpu_{sdf_name}", {})
         r_gpu = results.get(f"torch_gpu_{sdf_name}", {})
+        r_mps = results.get(f"torch_mps_{sdf_name}", {})
 
         if "error" not in r_orig and "error" not in r_torch:
             sp = r_orig["mean_s"] / max(r_torch["mean_s"], 1e-6)
@@ -591,6 +613,12 @@ def main():
             tag_g = "faster" if sp_g > 1 else "slower"
             print(
                 f"  [{sdf_name}] PyTorch CUDA vs C++: {sp_g:.2f}x {tag_g}  ({r_gpu['mean_s']:.3f}s vs {r_orig['mean_s']:.3f}s)"
+            )
+        if r_mps and "error" not in r_mps and "error" not in r_orig:
+            sp_m = r_orig["mean_s"] / max(r_mps["mean_s"], 1e-6)
+            tag_m = "faster" if sp_m > 1 else "slower"
+            print(
+                f"  [{sdf_name}] PyTorch MPS  vs C++: {sp_m:.2f}x {tag_m}  ({r_mps['mean_s']:.3f}s vs {r_orig['mean_s']:.3f}s)"
             )
     print()
 

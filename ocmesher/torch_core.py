@@ -5,8 +5,14 @@
 
 Provides :class:`TorchOcMesher`, a drop-in replacement for :class:`OcMesher`
 that replaces the C++ backend with pure PyTorch tensor operations.  All heavy
-numerical work (camera projections, SDF evaluation batching, vertex bisection,
-visibility filtering) runs on GPU when available.
+numerical work (camera projections, SDF evaluation batching, visibility
+filtering) runs on the best available accelerator: CUDA, MPS (Apple Silicon),
+or CPU.
+
+Supported devices (auto-detected when ``device=None``):
+- **CUDA** - NVIDIA GPUs via ``torch.cuda``
+- **MPS** - Apple Silicon GPUs via ``torch.backends.mps``
+- **CPU** - fallback for all platforms
 
 Key optimisations over the reference C++ backend:
 - Batched camera projection (all cameras processed simultaneously via bmm)
@@ -597,7 +603,11 @@ class TorchOcMesher:
 
     Drop-in replacement for :class:`OcMesher` - same constructor signature and
     ``__call__`` contract, but all heavy computation is performed with PyTorch
-    tensors (GPU when available).
+    tensors on the best available accelerator (CUDA, MPS, or CPU).
+
+    When ``device=None`` (the default), the device is auto-detected in priority
+    order: CUDA → MPS → CPU.  Pass ``device="mps"`` to explicitly select
+    Apple Silicon GPU acceleration.
 
     Optimisations:
     - Batched camera projection via ``torch.bmm`` (all cameras in one pass)
@@ -633,6 +643,8 @@ class TorchOcMesher:
             self.device = torch.device(device)
         elif torch.cuda.is_available():
             self.device = torch.device("cuda")
+        elif hasattr(torch.backends, "mps") and torch.backends.mps.is_available():
+            self.device = torch.device("mps")
         else:
             self.device = torch.device("cpu")
 
