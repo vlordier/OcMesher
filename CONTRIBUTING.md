@@ -9,10 +9,10 @@ Thank you for your interest in contributing to OcMesher!
 3. Set up your environment:
 
 ```bash
-conda create --name ocmesher python=3.10
-conda activate ocmesher
+git clone https://github.com/princeton-vl/OcMesher.git
+cd OcMesher
+uv sync
 bash install.sh
-pip install -r requirements.txt
 ```
 
 ## Development Guidelines
@@ -20,7 +20,7 @@ pip install -r requirements.txt
 - Follow [PEP 8](https://peps.python.org/pep-0008/) for Python code style
 - Add type hints to new Python code
 - Keep C++ changes compatible with both GCC and Clang
-- Test your changes with `python demo.py` before submitting
+- Test your changes with `uv run python demo.py` before submitting
 
 ## Submitting Changes
 

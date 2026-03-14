@@ -32,22 +32,26 @@ Please view the video [here](https://youtu.be/YA1c5L0Ncuw) for more qualitative 
 
 :bulb: Note: OcMesher is installed by default in Infinigen as of v1.2.0 - if you wish to use OcMesher with Infinigen please follow the Installation instructions on the infinigen repo. Use the instructions below only if you want a standalone installation & demo. 
 
+### Prerequisites
+
+- [uv](https://docs.astral.sh/uv/getting-started/installation/) (Python package manager)
+- Python >= 3.10 (managed automatically by uv)
+- A C++ compiler: `g++` on Linux, or LLVM's `clang++` on macOS
+
 ### Standalone Installation
 
 ```bash
 git clone https://github.com/princeton-vl/OcMesher.git
 cd OcMesher
-conda create --name ocmesher python=3.10
-conda activate ocmesher
+uv sync
 bash install.sh
-pip install -r requirements.txt
 ```
 
 
 ### Demo
 
 ```bash
-python demo.py
+uv run python demo.py
 ```
 
 This example uses one camera and the Perlin Noise from the Python library `vnoise` and outputs the resulting mesh in `results/demo.obj`.
