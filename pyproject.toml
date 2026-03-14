@@ -15,6 +15,9 @@ dependencies = [
 ]
 
 [project.optional-dependencies]
+torch = [
+    "torch>=2.0.0",
+]
 dev = [
     "pytest>=7.0",
     "pytest-cov>=4.0",
@@ -63,6 +66,7 @@ ignore = [
     "INP001",   # implicit namespace package
     "N999",     # module name matches project, intentional
     "D104",     # package-level __init__.py files (some are intentionally empty)
+    "PLC0415",  # conditional/lazy imports in __init__.py
 ]
 # core.py – complex scientific code with many C-bindings
 "ocmesher/core.py" = [
@@ -80,6 +84,31 @@ ignore = [
     "FBT001",   # boolean-typed positional arg (API backwards-compat)
     "FBT002",   # boolean default positional arg (API backwards-compat)
     "T201",     # print statements for timer output
+]
+# PyTorch mesher – complex scientific code with GPU tensor ops
+"ocmesher/torch_core.py" = [
+    "PLR0913",  # too-many-arguments (constructor mirrors original API)
+    "PLR0915",  # too-many-statements (__call__ orchestrates meshing)
+    "T201",     # print statements for progress output
+    "C901",     # complex methods (meshing is inherently complex)
+    "FBT002",   # boolean default positional args (API backwards-compat)
+]
+# benchmark script – standalone runner
+"benchmarks/run_benchmark.py" = [
+    "INP001",   # implicit namespace package
+    "T201",     # print statements for benchmark output
+    "SLF001",   # private member access (benchmarking internal methods)
+    "S101",     # assert usage
+    "PLR0915",  # too-many-statements (benchmark main)
+    "PLC0415",  # conditional imports (benchmarks need try/except for optional backends)
+    "C901",     # complex functions (benchmark main)
+    "PLR0912",  # too-many-branches (benchmark main)
+    "PLR0913",  # too-many-arguments (benchmark functions mirror mesher API)
+]
+# benchmark __init__
+"benchmarks/__init__.py" = [
+    "INP001",   # implicit namespace package
+    "D104",     # empty package init
 ]
 # tests - allow assertions, magic values, no docstrings, etc.
 "tests/**/*.py" = [

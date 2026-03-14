@@ -29,6 +29,7 @@ env/
 # Project-specific
 lib/
 results/
+benchmark_results/
 
 # Test / coverage artifacts
 .pytest_cache/
