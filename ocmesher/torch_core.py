@@ -1032,7 +1032,7 @@ class TorchOcMesher:
 
         Returns:
             ``(mask, corner_sdf)`` where *mask* is ``(N,)`` bool and
-            *corner_sdf* is ``(N, 8, K)`` float tensor.
+            *corner_sdf* is ``(N, 8, K)`` float32 tensor.
         """
         corners = self._cube_corner_positions(coords, levels)
         n = corners.shape[0]
@@ -1064,7 +1064,7 @@ class TorchOcMesher:
             kernels: SDF kernel list.
             coords: ``(N, 3)`` int64 octree coordinates.
             levels: ``(N,)`` int64 octree levels.
-            corner_sdf: ``(N, 8, K)`` float tensor cached SDF values at cube
+            corner_sdf: ``(N, 8, K)`` float32 cached SDF values at cube
                 corners from a prior :meth:`_find_surface_cubes` call.  When
                 provided, the cached values are carried through the refinement
                 loop so that the caller can reuse them for mesh construction
@@ -1073,7 +1073,7 @@ class TorchOcMesher:
 
         Returns:
             ``(coords, levels, corner_sdf)`` where *corner_sdf* is the
-            ``(N, 8, K)`` float tensor from the last
+            ``(N, 8, K)`` float32 tensor from the last
             :meth:`_find_surface_cubes` evaluation (or the input
             *corner_sdf* when no refinement iterations executed).
         """
@@ -1367,7 +1367,7 @@ class TorchOcMesher:
     ) -> tuple[trimesh.Trimesh, np.ndarray]:
         """Build a mesh for one SDF element using marching cubes.
 
-        When *corner_sdf* is provided (``(N, 8, K)`` float tensor cached from
+        When *corner_sdf* is provided (``(N, 8, K)`` float32 tensor cached from
         :meth:`_find_surface_cubes`), the expensive SDF re-evaluation is
         skipped entirely: the cached values for kernel *element_idx* are used
         directly, giving a significant speed-up for the mesh-construction step.

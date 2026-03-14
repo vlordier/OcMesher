@@ -940,14 +940,14 @@ def _bench_compile(cameras, bounds, sdf_name: str = "terrain", n_runs: int = 3, 
 # ---------------------------------------------------------------------------
 # Logging helpers
 # ---------------------------------------------------------------------------
-def _log_section(title: str):
+def _print_section(title: str):
     logger.info("")
     logger.info("%s", "-" * 70)
     logger.info("%s", title)
     logger.info("%s", "-" * 70)
 
 
-def _log_result(result: dict):
+def _print_result(result: dict):
     if "error" in result:
         logger.info("  SKIPPED: %s", result["error"])
         return
@@ -1048,14 +1048,14 @@ def main():
 
     # End-to-end benchmarks ------------------------------------------------
     for sdf_name in sdf_names:
-        _log_section(f"End-to-end: Python + C++ ({sdf_name})")
+        _print_section(f"End-to-end: Python + C++ ({sdf_name})")
         r_orig = _bench_original(cameras, bounds, pixels_per_cube, sdf_name, n_runs=args.runs, warmup=args.warmup)
-        _log_result(r_orig)
+        _print_result(r_orig)
         results[f"original_{sdf_name}"] = r_orig
 
         for dev_str in bench_devices:
             label = {"cpu": "CPU", "cuda": "CUDA", "mps": "MPS"}.get(dev_str, dev_str.upper())
-            _log_section(f"End-to-end: PyTorch {label} ({sdf_name})")
+            _print_section(f"End-to-end: PyTorch {label} ({sdf_name})")
             r_torch = _bench_torch(
                 cameras,
                 bounds,
@@ -1065,94 +1065,94 @@ def main():
                 warmup=args.warmup,
                 device=dev_str,
             )
-            _log_result(r_torch)
+            _print_result(r_torch)
             results[f"torch_{dev_str}_{sdf_name}"] = r_torch
 
     # Micro-benchmarks (only with --profile) --------------------------------
     if args.profile:
-        _log_section("Micro-benchmark: SDF evaluation (threaded)")
+        _print_section("Micro-benchmark: SDF evaluation (threaded)")
         r_sdf = _micro_sdf_eval(cameras, bounds)
-        _log_result(r_sdf)
+        _print_result(r_sdf)
         results["micro_sdf"] = r_sdf
 
-        _log_section("Micro-benchmark: Camera projection (batched)")
+        _print_section("Micro-benchmark: Camera projection (batched)")
         r_proj = _micro_projection(cameras, bounds)
-        _log_result(r_proj)
+        _print_result(r_proj)
         results["micro_projection"] = r_proj
 
-        _log_section("Micro-benchmark: Marching cubes")
+        _print_section("Micro-benchmark: Marching cubes")
         r_mc = _micro_marching_cubes(cameras, bounds)
-        _log_result(r_mc)
+        _print_result(r_mc)
         results["micro_marching_cubes"] = r_mc
 
-        _log_section("Micro-benchmark: Vertex deduplication (numpy vs torch hash)")
+        _print_section("Micro-benchmark: Vertex deduplication (numpy vs torch hash)")
         r_dedup = _micro_vertex_dedup(cameras, bounds)
-        _log_result(r_dedup)
+        _print_result(r_dedup)
         results["micro_vertex_dedup"] = r_dedup
 
-        _log_section("Micro-benchmark: Coordinate computation (pow vs ldexp)")
+        _print_section("Micro-benchmark: Coordinate computation (pow vs ldexp)")
         r_coord = _micro_coord_computation(cameras, bounds)
-        _log_result(r_coord)
+        _print_result(r_coord)
         results["micro_coord_computation"] = r_coord
 
-        _log_section("Micro-benchmark: Octree construction")
+        _print_section("Micro-benchmark: Octree construction")
         r_oct = _micro_octree(cameras, bounds)
-        _log_result(r_oct)
+        _print_result(r_oct)
         results["micro_octree"] = r_oct
 
-        _log_section("Micro-benchmark: Visibility filter")
+        _print_section("Micro-benchmark: Visibility filter")
         r_vis = _micro_visibility(cameras, bounds)
-        _log_result(r_vis)
+        _print_result(r_vis)
         results["micro_visibility"] = r_vis
 
-        _log_section("Micro-benchmark: Visibility filter multi-camera scaling")
+        _print_section("Micro-benchmark: Visibility filter multi-camera scaling")
         r_vis_mc = _micro_visibility_multicam(bounds)
         for entry in r_vis_mc:
-            _log_result(entry)
+            _print_result(entry)
         results["micro_visibility_multicam"] = r_vis_mc
 
-        _log_section("Micro-benchmark: Triangle extraction (vectorised)")
+        _print_section("Micro-benchmark: Triangle extraction (vectorised)")
         r_tri = _micro_triangle_extraction(cameras, bounds)
-        _log_result(r_tri)
+        _print_result(r_tri)
         results["micro_triangle_extraction"] = r_tri
 
-        _log_section("Micro-benchmark: Initialisation (vectorised)")
+        _print_section("Micro-benchmark: Initialisation (vectorised)")
         r_init = _micro_init_vectorised()
-        _log_result(r_init)
+        _print_result(r_init)
         results["micro_init"] = r_init
 
-        _log_section("Micro-benchmark: Pipeline breakdown (per-step timing)")
+        _print_section("Micro-benchmark: Pipeline breakdown (per-step timing)")
         r_pipe = _micro_pipeline_breakdown(cameras, bounds)
-        _log_result(r_pipe)
+        _print_result(r_pipe)
         results["micro_pipeline_breakdown"] = r_pipe
 
-        _log_section("Micro-benchmark: float32 vs float64 dtype throughput")
+        _print_section("Micro-benchmark: float32 vs float64 dtype throughput")
         r_dtype = _micro_dtype_comparison(cameras, bounds)
-        _log_result(r_dtype)
+        _print_result(r_dtype)
         results["micro_dtype"] = r_dtype
 
-        _log_section("Scaling: Multi-camera performance")
+        _print_section("Scaling: Multi-camera performance")
         r_scale = _scaling_cameras(bounds)
         for entry in r_scale:
-            _log_result(entry)
+            _print_result(entry)
         results["scaling_cameras"] = r_scale
 
-        _log_section("Memory usage")
+        _print_section("Memory usage")
         r_mem = _memory_usage(cameras, bounds)
-        _log_result(r_mem)
+        _print_result(r_mem)
         results["memory"] = r_mem
 
         if args.threads:
-            _log_section("Scaling: CPU thread count")
+            _print_section("Scaling: CPU thread count")
             r_thr = _bench_cpu_threads(cameras, bounds)
             for entry in r_thr:
-                _log_result(entry)
+                _print_result(entry)
             results["scaling_threads"] = r_thr
 
         if args.compile:
-            _log_section("Benchmark: torch.compile impact")
+            _print_section("Benchmark: torch.compile impact")
             r_comp = _bench_compile(cameras, bounds)
-            _log_result(r_comp)
+            _print_result(r_comp)
             results["bench_compile"] = r_comp
 
     # Speedup summary ------------------------------------------------------
