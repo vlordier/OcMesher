@@ -119,12 +119,15 @@ def _system_info():
     try:
         import subprocess
 
+        # All inputs are hardcoded (no user-controlled data); shell=False is the
+        # default for list-form subprocess.run, so injection risk is negligible.
         result = subprocess.run(  # noqa: S603
             ["lscpu"] if platform.system() == "Linux" else ["sysctl", "-n", "machdep.cpu.brand_string"],
             capture_output=True,
             text=True,
             timeout=5,
             check=False,
+            shell=False,
         )
         if result.returncode == 0 and platform.system() == "Linux":
             for line in result.stdout.splitlines():
@@ -133,7 +136,12 @@ def _system_info():
                     break
                 if "Flags" in line:
                     flags = set(line.split(":", 1)[1].split())
-                    info["isa_extensions"] = sorted(f for f in ("avx", "avx2", "avx512f", "neon", "sve") if f in flags)
+                    # Best-effort ISA detection from lscpu Flags field.
+                    # x86_64 flags: avx, avx2, avx512f (+ variants).
+                    # aarch64 flags: neon (often listed as asimd), sve.
+                    # Only a representative subset is shown here.
+                    _isa_candidates = ("avx", "avx2", "avx512f", "asimd", "neon", "sve")
+                    info["isa_extensions"] = sorted(f for f in _isa_candidates if f in flags)
                     break
         elif result.returncode == 0 and platform.system() == "Darwin":
             info["cpu_model"] = result.stdout.strip()
