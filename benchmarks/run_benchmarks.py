@@ -13,35 +13,7 @@ if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
 from ocmesher import OcMesher
-
-
-def make_cameras():
-    cam_poses = [
-        np.array(
-            [
-                [1.0, 0.0, 0.0, 0.0],
-                [0.0, 0.0, 1.0, 0.0],
-                [0.0, -1.0, 0.0, 3.0],
-                [0.0, 0.0, 0.0, 1.0],
-            ]
-        )
-    ]
-    intrinsics = [
-        np.array(
-            [
-                [800.0, 0.0, 320.0],
-                [0.0, 800.0, 180.0],
-                [0.0, 0.0, 1.0],
-            ]
-        )
-    ]
-    heights = [360]
-    widths = [640]
-    return cam_poses, intrinsics, heights, widths
-
-
-def sphere_sdf(xyz):
-    return np.linalg.norm(xyz, axis=1) - 0.75
+from tests.fixtures import make_cameras, sphere_sdf
 
 
 def positive_int(value: str) -> int:
