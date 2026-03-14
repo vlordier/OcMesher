@@ -14,7 +14,6 @@ from __future__ import annotations
 import numpy as np
 import torch
 import trimesh
-from tqdm import tqdm
 
 from .utils.timer import Timer
 
@@ -823,24 +822,40 @@ class TorchOcMesher:
         kernels: list,
         coords: torch.Tensor,
         levels: torch.Tensor,
-        max_iters: int = 4,
+        max_iters: int = 2,
     ) -> tuple[torch.Tensor, torch.Tensor]:
-        """Iteratively subdivide surface cubes that project large on screen."""
+        """Iteratively subdivide surface cubes that project large on screen.
+
+        Uses a conservative budget to avoid over-refinement.
+        """
+        offsets = torch.tensor(
+            [[0, 0, 0], [1, 0, 0], [0, 1, 0], [1, 1, 0], [0, 0, 1], [1, 0, 1], [0, 1, 1], [1, 1, 1]],
+            dtype=torch.int64,
+            device=self.device,
+        )
+        target_cubes = self.coarse_count * 4  # budget limit
+
         for _ in range(max_iters):
+            if len(coords) >= target_cubes:
+                break
             positions = self._cube_centers(coords, levels)
             proj = self._projected_sizes(positions, levels)
-            to_expand = proj > 1.0
+            to_expand = proj > self.inv_scale
             if not to_expand.any():
                 break
 
             expand_idx = torch.where(to_expand)[0]
             keep_idx = torch.where(~to_expand)[0]
 
-            offsets = torch.tensor(
-                [[0, 0, 0], [1, 0, 0], [0, 1, 0], [1, 1, 0], [0, 0, 1], [1, 0, 1], [0, 1, 1], [1, 1, 1]],
-                dtype=torch.int64,
-                device=self.device,
-            )
+            # Budget-limit: only expand the largest cubes up to budget
+            budget = max(1, (target_cubes - len(keep_idx)) // 8)
+            if len(expand_idx) > budget:
+                _, top_k = proj[expand_idx].topk(budget)
+                expand_idx = expand_idx[top_k]
+                keep_mask = torch.ones(len(coords), dtype=torch.bool, device=self.device)
+                keep_mask[expand_idx] = False
+                keep_idx = torch.where(keep_mask)[0]
+
             child_c = coords[expand_idx].unsqueeze(1) * 2 + offsets.unsqueeze(0)
             child_l = (levels[expand_idx] + 1).unsqueeze(1).expand(-1, 8)
 
@@ -900,7 +915,7 @@ class TorchOcMesher:
         return visible
 
     # ------------------------------------------------------------------
-    # Marching cubes
+    # Marching cubes (fully vectorized)
     # ------------------------------------------------------------------
     @torch.no_grad()
     def _marching_cubes(
@@ -908,7 +923,7 @@ class TorchOcMesher:
         corners: torch.Tensor,
         sdf: torch.Tensor,
     ) -> tuple[np.ndarray, np.ndarray]:
-        """Run marching cubes on the given cubes.
+        """Run marching cubes on the given cubes (vectorized, no Python loops).
 
         Args:
             corners: ``(N, 8, 3)`` float64 - world positions of cube corners.
@@ -917,97 +932,103 @@ class TorchOcMesher:
         Returns:
             ``(vertices, faces)`` as numpy arrays.
         """
-        sdf_np = sdf.cpu().numpy()
-        corners_np = corners.cpu().double().numpy()
-        n = len(sdf_np)
-
-        edge_table = np.array(_EDGE_TABLE, dtype=np.int32)
-        edge_verts = np.array(_EDGE_VERTICES, dtype=np.int32)
-
-        # Cube configuration indices
-        cube_idx = np.zeros(n, dtype=np.int32)
-        for i in range(8):
-            cube_idx |= np.where(sdf_np[:, i] < 0, 1 << i, 0).astype(np.int32)
-
-        all_verts: list[np.ndarray] = []
-        all_faces: list[np.ndarray] = []
-        vert_offset = 0
-
-        # Per-cube edge interpolation cache: cube_id -> {edge_id: vert_index}
-        # For efficiency, compute all edge vertices at once.
-        for ci in range(n):
-            cfg = cube_idx[ci]
-            if edge_table[cfg] == 0:
-                continue
-
-            edge_verts_map: dict[int, int] = {}
-            for ei in range(12):
-                if edge_table[cfg] & (1 << ei):
-                    v0, v1 = edge_verts[ei]
-                    s0, _s1 = sdf_np[ci, v0], sdf_np[ci, v1]
-                    denom = s0 - _s1
-                    t = 0.5 if abs(denom) < _DENOM_EPS else s0 / denom
-                    t = np.clip(t, 0.0, 1.0)
-                    p = corners_np[ci, v0] * (1 - t) + corners_np[ci, v1] * t
-                    edge_verts_map[ei] = vert_offset + len(all_verts)
-                    all_verts.append(p)
-
-            tri_list = _TRI_TABLE[cfg]
-            j = 0
-            while j < len(tri_list) and tri_list[j] != -1:
-                e0, e1, e2 = tri_list[j], tri_list[j + 1], tri_list[j + 2]
-                all_faces.append(np.array([edge_verts_map[e0], edge_verts_map[e1], edge_verts_map[e2]]))
-                j += 3
-            vert_offset = len(all_verts)
-
-        if len(all_verts) == 0:
+        n = sdf.shape[0]
+        if n == 0:
             return np.zeros((0, 3), dtype=np.float64), np.zeros((0, 3), dtype=np.int32)
-        return np.array(all_verts), np.array(all_faces, dtype=np.int32)
 
-    # ------------------------------------------------------------------
-    # Vertex bisection refinement
-    # ------------------------------------------------------------------
-    @torch.no_grad()
-    def _bisect_edges(
-        self,
-        kernels: list,
-        p0: torch.Tensor,
-        p1: torch.Tensor,
-        s0: torch.Tensor,
-        _s1: torch.Tensor,
-        n_iters: int,
-    ) -> torch.Tensor:
-        """Binary-search along edges for the zero-crossing of the SDF.
+        device = sdf.device
 
-        Args:
-            kernels: list of SDF kernel callables.
-            p0: ``(M, 3)`` first endpoints.
-            p1: ``(M, 3)`` second endpoints.
-            s0: ``(M,)`` SDF values at *p0*.
-            _s1: ``(M,)`` SDF values at *p1* (unused; kept for API symmetry).
-            n_iters: number of bisection steps.
+        # --- Cube configuration indices (vectorized) ---
+        cube_idx = torch.zeros(n, dtype=torch.int32, device=device)
+        for i in range(8):
+            cube_idx |= torch.where(
+                sdf[:, i] < 0,
+                torch.tensor(1 << i, dtype=torch.int32, device=device),
+                torch.tensor(0, dtype=torch.int32, device=device),
+            )
 
-        Returns:
-            ``(M, 3)`` refined vertex positions.
-        """
-        m = p0.shape[0]
-        if m == 0:
-            return torch.zeros((0, 3), dtype=torch.float64, device=self.device)
+        edge_table_t = torch.tensor(_EDGE_TABLE, dtype=torch.int32, device=device)
+        edge_mask = edge_table_t[cube_idx.long()]  # (N,)
+        active = edge_mask != 0
+        if not active.any():
+            return np.zeros((0, 3), dtype=np.float64), np.zeros((0, 3), dtype=np.int32)
 
-        left = p0.clone()
-        right = p1.clone()
-        sl = s0.clone()
+        # Keep only active cubes
+        active_idx = torch.where(active)[0]
+        a_sdf = sdf[active_idx]  # (A, 8)
+        a_corners = corners[active_idx]  # (A, 8, 3)
+        a_cfg = cube_idx[active_idx].long()  # (A,)
 
-        for _ in range(n_iters):
-            mid = (left + right) / 2
-            sm = self._evaluate_sdf(kernels, mid).min(dim=-1).values
-            same_sign = (sm >= 0) == (sl >= 0)
-            left = torch.where(same_sign.unsqueeze(1), mid, left)
-            sl = torch.where(same_sign, sm, sl)
-            right = torch.where(same_sign.unsqueeze(1), right, mid)
+        # --- Pre-compute edge vertex positions for all 12 edges (vectorized) ---
+        ev = torch.tensor(_EDGE_VERTICES, dtype=torch.long, device=device)  # (12, 2)
+        s0 = a_sdf[:, ev[:, 0]]  # (A, 12)
+        s1 = a_sdf[:, ev[:, 1]]  # (A, 12)
+        denom = s0 - s1
+        t = torch.where(denom.abs() < _DENOM_EPS, torch.tensor(0.5, device=device), s0 / denom)
+        t = t.clamp(0.0, 1.0).unsqueeze(-1)  # (A, 12, 1)
+        p0 = a_corners[:, ev[:, 0]]  # (A, 12, 3)
+        p1 = a_corners[:, ev[:, 1]]  # (A, 12, 3)
+        edge_positions = p0 * (1 - t) + p1 * t  # (A, 12, 3)
 
-        # Linear interpolation at final bracket
-        return (left + right) / 2
+        # --- Build triangle table as a padded tensor ---
+        max_tri_entries = max(len(row) for row in _TRI_TABLE)
+        tri_table_np = np.full((256, max_tri_entries), -1, dtype=np.int32)
+        for i, row in enumerate(_TRI_TABLE):
+            tri_table_np[i, : len(row)] = row
+        tri_table_t = torch.from_numpy(tri_table_np).to(device)
+
+        # Lookup per-cube triangle lists
+        tri_entries = tri_table_t[a_cfg]  # (A, max_tri_entries)
+
+        # --- Extract triangles (vectorized over triangle slots) ---
+        # Maximum 5 triangles per cube => 15 entries; process in groups of 3
+        max_tris_per_cube = max_tri_entries // 3
+        all_face_verts: list[torch.Tensor] = []
+
+        for ti in range(max_tris_per_cube):
+            base = ti * 3
+            if base + 2 >= max_tri_entries:
+                break
+            e0 = tri_entries[:, base]  # (A,)
+            e1 = tri_entries[:, base + 1]  # (A,)
+            e2 = tri_entries[:, base + 2]  # (A,)
+            valid = e0 >= 0  # triangles with -1 are inactive
+            if not valid.any():
+                break
+
+            vi = torch.where(valid)[0]  # indices into active cubes
+            # Gather vertex positions for this triangle
+            v0 = edge_positions[vi, e0[vi].long()]  # (T, 3)
+            v1 = edge_positions[vi, e1[vi].long()]  # (T, 3)
+            v2 = edge_positions[vi, e2[vi].long()]  # (T, 3)
+            # Stack as (T, 3, 3) where dim1 is vertex index
+            all_face_verts.append(torch.stack([v0, v1, v2], dim=1))
+
+        if not all_face_verts:
+            return np.zeros((0, 3), dtype=np.float64), np.zeros((0, 3), dtype=np.int32)
+
+        # Concatenate all triangles: (total_tris, 3, 3)
+        tri_verts = torch.cat(all_face_verts, dim=0)
+        total_tris = tri_verts.shape[0]
+
+        # Flatten vertices and build face indices
+        verts_flat = tri_verts.reshape(-1, 3)  # (total_tris*3, 3)
+        faces_flat = torch.arange(total_tris * 3, device=device).reshape(-1, 3)
+
+        # --- Vertex deduplication via rounding + unique ---
+        verts_np = verts_flat.cpu().double().numpy()
+        # Quantize to ~1e-8 precision for dedup
+        quantized = np.round(verts_np * 1e8).astype(np.int64)
+        _, unique_idx, inverse = np.unique(
+            quantized,
+            axis=0,
+            return_index=True,
+            return_inverse=True,
+        )
+        dedup_verts = verts_np[unique_idx]
+        dedup_faces = inverse[faces_flat.cpu().numpy().ravel()].reshape(-1, 3)
+
+        return dedup_verts, dedup_faces.astype(np.int32)
 
     # ------------------------------------------------------------------
     # Main pipeline
@@ -1078,55 +1099,47 @@ class TorchOcMesher:
         if n == 0:
             return trimesh.Trimesh(), np.zeros(0, dtype=bool)
 
-        # Evaluate SDF at cube corners
-        corners = self._cube_corner_positions(coords, levels)  # (N, 8, 3)
-        flat = corners.reshape(-1, 3)
-        sdf_all = self._evaluate_sdf(kernels, flat)  # (N*8, K)
-        sdf_min = sdf_all.min(dim=-1).values.reshape(n, 8)  # (N, 8)
+        # Process in chunks to control memory
+        chunk_size = max(1, min(n, self.memory_limit_mb * 1000 // 64))
+        all_verts: list[np.ndarray] = []
+        all_faces: list[np.ndarray] = []
+        vert_offset = 0
 
-        # Quick marching cubes pass
-        verts_np, faces_np = self._marching_cubes(corners, sdf_min)
+        for start in range(0, n, chunk_size):
+            end = min(start + chunk_size, n)
+            c_coords = coords[start:end]
+            c_levels = levels[start:end]
 
-        if verts_np.shape[0] == 0:
+            # Evaluate SDF at cube corners
+            chunk_corners = self._cube_corner_positions(c_coords, c_levels)  # (C, 8, 3)
+            flat = chunk_corners.reshape(-1, 3)
+            sdf_all = self._evaluate_sdf(kernels, flat)  # (C*8, K)
+            sdf_min = sdf_all.min(dim=-1).values.reshape(end - start, 8)
+
+            # Vectorized marching cubes
+            v, f = self._marching_cubes(chunk_corners, sdf_min)
+            if v.shape[0] > 0:
+                f = f + vert_offset
+                all_verts.append(v)
+                all_faces.append(f)
+                vert_offset += v.shape[0]
+
+        if not all_verts:
             return trimesh.Trimesh(), np.zeros(0, dtype=bool)
 
-        # Bisection refinement on marching-cubes edges
-        verts_t = torch.from_numpy(verts_np).to(dtype=torch.float64, device=self.device)
-        if self.bisection_iters > 0 and len(verts_t) > 0:
-            sdf_v = self._evaluate_sdf(kernels, verts_t).min(dim=-1).values
-            # Nudge vertices towards zero-crossing along gradient direction
-            eps = 1e-4
-            for _ in tqdm(range(min(self.bisection_iters, 5)), desc="bisection", leave=False):
-                grad = torch.zeros_like(verts_t)
-                for d in range(3):
-                    vp = verts_t.clone()
-                    vp[:, d] += eps
-                    sp = self._evaluate_sdf(kernels, vp).min(dim=-1).values
-                    grad[:, d] = (sp - sdf_v) / eps
-                gn = grad.norm(dim=1, keepdim=True).clamp(min=1e-10)
-                grad = grad / gn
-                # Move vertex along gradient to zero-crossing
-                verts_t = verts_t - (sdf_v / gn.squeeze()).unsqueeze(1) * grad
-                verts_t = verts_t.clamp(
-                    self.center.unsqueeze(0) - self.size / 2,
-                    self.center.unsqueeze(0) + self.size / 2,
-                )
-                sdf_v = self._evaluate_sdf(kernels, verts_t).min(dim=-1).values
-
-            verts_np = verts_t.cpu().numpy()
+        verts_np = np.concatenate(all_verts, axis=0)
+        faces_np = np.concatenate(all_faces, axis=0)
 
         # In-view tag: mark vertices as visible if they fall within any
         # visible cube's bounding box (approximate).
         in_view = np.ones(verts_np.shape[0], dtype=bool)
-        if n_visible < len(coords):
+        if n_visible < n and n_visible > 0:
             vis_pos = self._cube_centers(coords[:n_visible], levels[:n_visible])
             vis_pos_np = vis_pos.cpu().numpy()
-            if len(vis_pos_np) > 0:
-                vis_min = vis_pos_np.min(axis=0)
-                vis_max = vis_pos_np.max(axis=0)
-                margin = self.size * 0.05
-                inside = np.all(verts_np >= vis_min - margin, axis=1) & np.all(verts_np <= vis_max + margin, axis=1)
-                in_view = inside
+            vis_min = vis_pos_np.min(axis=0)
+            vis_max = vis_pos_np.max(axis=0)
+            margin = self.size * 0.05
+            in_view = np.all(verts_np >= vis_min - margin, axis=1) & np.all(verts_np <= vis_max + margin, axis=1)
 
         mesh = trimesh.Trimesh(vertices=verts_np, faces=faces_np, process=False)
         return mesh, in_view
