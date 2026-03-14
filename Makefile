@@ -5,14 +5,16 @@
 #   g++ / clang++ – to compile the C++ shared library
 #
 # Usage:
-#   make install   build C++ library and sync Python deps
-#   make test      run Python test suite
-#   make lint      ruff lint check
-#   make format    ruff format check
-#   make fix       auto-fix lint + apply formatting
-#   make clean     remove compiled artifacts
+#   make install    build C++ library and sync Python deps
+#   make test       run Python test suite
+#   make coverage   run tests with coverage report
+#   make lint       ruff lint check
+#   make format     ruff format check
+#   make typecheck  run ty static type checker
+#   make fix        auto-fix lint + apply formatting
+#   make clean      remove compiled artifacts
 
-.PHONY: install test lint format fix clean
+.PHONY: install test coverage lint format typecheck fix clean
 
 install:
 	uv sync
@@ -21,11 +23,17 @@ install:
 test:
 	uv run python -m pytest tests/ -v --ignore=tests/cpp
 
+coverage:
+	uv run python -m pytest tests/ -v --ignore=tests/cpp --cov=ocmesher --cov-report=term-missing --cov-report=html
+
 lint:
 	uv run ruff check .
 
 format:
 	uv run ruff format --check .
+
+typecheck:
+	uv run ty check ocmesher/
 
 fix:
 	uv run ruff check . --fix

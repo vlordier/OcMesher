@@ -77,8 +77,23 @@ def register_func(
 
 
 def load_cdll(path: str) -> CDLL:
-    """Load a shared library from *path* relative to ``sys.path``."""
-    lib_path = Path(sys.path[-1]) / path
+    """Load a shared library from *path*.
+
+    If *path* is absolute it is used directly.  Otherwise every entry in
+    ``sys.path`` is searched in order and the first match is used.
+    """
+    candidate = Path(path)
+    if candidate.is_absolute():
+        lib_path = candidate
+    else:
+        for base in sys.path:
+            resolved = Path(base) / path
+            if resolved.exists():
+                lib_path = resolved
+                break
+        else:
+            msg = f"Shared library not found: '{path}' was not found in any sys.path entry. Run install.sh to build."
+            raise FileNotFoundError(msg)
     if not lib_path.exists():
         msg = f"Shared library not found at {lib_path}. Run install.sh to build."
         raise FileNotFoundError(msg)

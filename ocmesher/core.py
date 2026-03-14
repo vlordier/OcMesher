@@ -252,6 +252,24 @@ class OcMesher:
         register_func(self, dll, "get_faces", [POINTER(c_int32)])
         register_func(self, dll, "get_in_view_tag", [c_int32, POINTER(c_bool)])
 
+    def __repr__(self) -> str:
+        """Return a concise developer-friendly description of the mesher."""
+        return (
+            f"OcMesher("
+            f"n_cameras={self.n_cameras}, "
+            f"bounds={self.bounds.tolist()}, "
+            f"bisection_iters={self.bisection_iters}, "
+            f"enclosed={self.enclosed})"
+        )
+
+    def __enter__(self):
+        """Support ``with OcMesher(...) as m:`` usage."""
+        return self
+
+    def __exit__(self, exc_type, exc_val, exc_tb):
+        """No-op exit; provided so OcMesher can be used as a context manager."""
+        return False
+
     def kernel_caller(self, kernels, XYZ_all):
         """Evaluate SDF *kernels* at the given *XYZ_all* positions."""
         for kernel in kernels:
@@ -264,14 +282,21 @@ class OcMesher:
         sdfs = []
         for i in range(0, n_XYZ, _SDF_BATCH_SIZE):
             XYZ = XYZ_all[i : i + _SDF_BATCH_SIZE]
+            batch_size = len(XYZ)
             sdfs_i = []
-            out_bound = np.zeros(len(XYZ), dtype=bool)
+            out_bound = np.zeros(batch_size, dtype=bool)
             if self.enclosed:
                 for c in range(3):
                     out_bound |= XYZ[:, c] <= self.bounds[c * 2]
                     out_bound |= XYZ[:, c] >= self.bounds[c * 2 + 1]
-            for kernel in kernels:
-                sdf = kernel(XYZ)
+            for k_idx, kernel in enumerate(kernels):
+                sdf = np.asarray(kernel(XYZ))
+                if sdf.shape != (batch_size,):
+                    msg = (
+                        f"kernels[{k_idx}] returned shape {sdf.shape} "
+                        f"for {batch_size} query points; expected ({batch_size},)"
+                    )
+                    raise ValueError(msg)
                 if self.enclosed:
                     sdf[out_bound] = 1
                 sdfs_i.append(sdf)

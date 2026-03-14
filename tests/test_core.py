@@ -188,6 +188,16 @@ class TestKernelCaller:
         with pytest.raises(TypeError, match="callable"):
             mesher.kernel_caller(["not a function"], points)
 
+    def test_rejects_kernel_wrong_output_shape(self, sample_bounds):
+        mesher = self._make_mesher_stub(sample_bounds)
+        points = np.array([[0, 0, 0], [1, 0, 0]], dtype=np.float64)
+
+        def bad_kernel(xyz):
+            return np.zeros((len(xyz), 2))  # wrong: 2D instead of 1D
+
+        with pytest.raises(ValueError, match="returned shape"):
+            mesher.kernel_caller([bad_kernel], points)
+
     def test_large_batch(self, sample_bounds, sphere_kernel):
         mesher = self._make_mesher_stub(sample_bounds)
         points = np.zeros((100, 3), dtype=np.float64)
@@ -312,3 +322,37 @@ class TestOcMesherInit:
         mock_load.return_value = MagicMock()
         mesher = OcMesher(sample_cameras_as_lists, sample_bounds)
         assert mesher.n_cameras == 1
+
+
+# ---------------------------------------------------------------------------
+# OcMesher.__repr__ and context manager
+# ---------------------------------------------------------------------------
+
+
+class TestOcMesherReprAndContextManager:
+    @patch("ocmesher.core.load_cdll")
+    @patch("ocmesher.core.register_func")
+    def test_repr_contains_key_fields(self, _mock_register, mock_load, sample_cameras, sample_bounds):
+        mock_load.return_value = MagicMock()
+        mesher = OcMesher(sample_cameras, sample_bounds)
+        r = repr(mesher)
+        assert "OcMesher(" in r
+        assert "n_cameras=1" in r
+        assert "bisection_iters=15" in r
+        assert "enclosed=True" in r
+
+    @patch("ocmesher.core.load_cdll")
+    @patch("ocmesher.core.register_func")
+    def test_context_manager_returns_self(self, _mock_register, mock_load, sample_cameras, sample_bounds):
+        mock_load.return_value = MagicMock()
+        with OcMesher(sample_cameras, sample_bounds) as m:
+            assert isinstance(m, OcMesher)
+
+    @patch("ocmesher.core.load_cdll")
+    @patch("ocmesher.core.register_func")
+    def test_context_manager_does_not_suppress_exceptions(
+        self, _mock_register, mock_load, sample_cameras, sample_bounds
+    ):
+        mock_load.return_value = MagicMock()
+        with pytest.raises(RuntimeError), OcMesher(sample_cameras, sample_bounds):
+            raise RuntimeError("boom")  # noqa: EM101
