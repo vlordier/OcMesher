@@ -5,6 +5,7 @@
 
 """Octree-based hierarchical 3D mesher driven by signed-distance functions."""
 
+import logging
 from pathlib import Path
 
 import gin
@@ -27,6 +28,8 @@ from .utils.interface import (
     register_func,
 )
 from .utils.timer import Timer
+
+logger = logging.getLogger(__name__)
 
 CAMERA_DATA_STRIDE = 23
 
@@ -368,7 +371,7 @@ class OcMesher:
                 mesh, in_view_tag = self._construct_element_mesh(e, kernels[e : e + 1], nv[e])
                 meshes.append(mesh)
                 in_view_tags.append(in_view_tag)
-                print(f"element {e} has vertices #{mesh.vertices.shape[0]} faces #{mesh.faces.shape[0]}")
+                logger.debug("element %d has vertices #%d faces #%d", e, mesh.vertices.shape[0], mesh.faces.shape[0])
         return meshes, in_view_tags
 
     def _construct_element_mesh(self, e, k_e, num_verts):

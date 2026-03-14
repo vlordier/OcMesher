@@ -14,6 +14,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import logging
 import platform
 import statistics
 import time
@@ -21,6 +22,8 @@ from pathlib import Path
 
 import numpy as np
 import psutil
+
+logger = logging.getLogger(__name__)
 
 # ---------------------------------------------------------------------------
 # SDF kernels at varying complexity levels
@@ -849,33 +852,34 @@ def _bench_compile(cameras, bounds, sdf_name: str = "terrain", n_runs: int = 3, 
 
 
 # ---------------------------------------------------------------------------
-# Printing helpers
+# Logging helpers
 # ---------------------------------------------------------------------------
-def _print_section(title: str):
-    print()
-    print("-" * 70)
-    print(title)
-    print("-" * 70)
+def _log_section(title: str):
+    logger.info("")
+    logger.info("-" * 70)
+    logger.info(title)
+    logger.info("-" * 70)
 
 
-def _print_result(result: dict):
+def _log_result(result: dict):
     if "error" in result:
-        print(f"  SKIPPED: {result['error']}")
+        logger.info("  SKIPPED: %s", result["error"])
         return
     for k, v in result.items():
         if k == "times_s":
             continue
         if isinstance(v, float):
-            print(f"  {k:24s}: {v:.4f}")
+            logger.info("  %-24s: %.4f", k, v)
         else:
-            print(f"  {k:24s}: {v}")
+            logger.info("  %-24s: %s", k, v)
 
 
 # ---------------------------------------------------------------------------
 # Main
 # ---------------------------------------------------------------------------
 def main():
-    """Run benchmarks and print results."""
+    """Run benchmarks and log results."""
+    logging.basicConfig(level=logging.INFO, format="%(message)s")
     parser = argparse.ArgumentParser(description="OcMesher benchmark: Python+C++ vs PyTorch")
     parser.add_argument("--full", action="store_true", help="Run full benchmark (slower, higher resolution)")
     parser.add_argument("--profile", action="store_true", help="Run sub-operation micro-benchmarks")
@@ -925,31 +929,31 @@ def main():
     else:
         bench_devices = [d.strip() for d in args.device.split(",")]
 
-    print("=" * 70)
-    print("OcMesher Comprehensive Benchmark")
-    print("=" * 70)
+    logger.info("=" * 70)
+    logger.info("OcMesher Comprehensive Benchmark")
+    logger.info("=" * 70)
 
     sys_info = _system_info()
     for k, v in sys_info.items():
-        print(f"  {k:24s}: {v}")
-    print(f"  pixels_per_cube         : {pixels_per_cube}")
-    print(f"  runs                    : {args.runs}")
-    print(f"  warmup                  : {args.warmup}")
-    print(f"  SDFs                    : {sdf_names}")
-    print(f"  devices                 : {bench_devices}")
+        logger.info("  %-24s: %s", k, v)
+    logger.info("  %-24s: %s", "pixels_per_cube", pixels_per_cube)
+    logger.info("  %-24s: %s", "runs", args.runs)
+    logger.info("  %-24s: %s", "warmup", args.warmup)
+    logger.info("  %-24s: %s", "SDFs", sdf_names)
+    logger.info("  %-24s: %s", "devices", bench_devices)
 
     results: dict[str, object] = {"system": sys_info}
 
     # End-to-end benchmarks ------------------------------------------------
     for sdf_name in sdf_names:
-        _print_section(f"End-to-end: Python + C++ ({sdf_name})")
+        _log_section(f"End-to-end: Python + C++ ({sdf_name})")
         r_orig = _bench_original(cameras, bounds, pixels_per_cube, sdf_name, n_runs=args.runs, warmup=args.warmup)
-        _print_result(r_orig)
+        _log_result(r_orig)
         results[f"original_{sdf_name}"] = r_orig
 
         for dev_str in bench_devices:
             label = {"cpu": "CPU", "cuda": "CUDA", "mps": "MPS"}.get(dev_str, dev_str.upper())
-            _print_section(f"End-to-end: PyTorch {label} ({sdf_name})")
+            _log_section(f"End-to-end: PyTorch {label} ({sdf_name})")
             r_torch = _bench_torch(
                 cameras,
                 bounds,
@@ -959,96 +963,96 @@ def main():
                 warmup=args.warmup,
                 device=dev_str,
             )
-            _print_result(r_torch)
+            _log_result(r_torch)
             results[f"torch_{dev_str}_{sdf_name}"] = r_torch
 
     # Micro-benchmarks (only with --profile) --------------------------------
     if args.profile:
-        _print_section("Micro-benchmark: SDF evaluation (threaded)")
+        _log_section("Micro-benchmark: SDF evaluation (threaded)")
         r_sdf = _micro_sdf_eval(cameras, bounds)
-        _print_result(r_sdf)
+        _log_result(r_sdf)
         results["micro_sdf"] = r_sdf
 
-        _print_section("Micro-benchmark: Camera projection (batched)")
+        _log_section("Micro-benchmark: Camera projection (batched)")
         r_proj = _micro_projection(cameras, bounds)
-        _print_result(r_proj)
+        _log_result(r_proj)
         results["micro_projection"] = r_proj
 
-        _print_section("Micro-benchmark: Marching cubes")
+        _log_section("Micro-benchmark: Marching cubes")
         r_mc = _micro_marching_cubes(cameras, bounds)
-        _print_result(r_mc)
+        _log_result(r_mc)
         results["micro_marching_cubes"] = r_mc
 
-        _print_section("Micro-benchmark: Vertex deduplication (numpy vs torch hash)")
+        _log_section("Micro-benchmark: Vertex deduplication (numpy vs torch hash)")
         r_dedup = _micro_vertex_dedup(cameras, bounds)
-        _print_result(r_dedup)
+        _log_result(r_dedup)
         results["micro_vertex_dedup"] = r_dedup
 
-        _print_section("Micro-benchmark: Coordinate computation (pow vs ldexp)")
+        _log_section("Micro-benchmark: Coordinate computation (pow vs ldexp)")
         r_coord = _micro_coord_computation(cameras, bounds)
-        _print_result(r_coord)
+        _log_result(r_coord)
         results["micro_coord_computation"] = r_coord
 
-        _print_section("Micro-benchmark: Octree construction")
+        _log_section("Micro-benchmark: Octree construction")
         r_oct = _micro_octree(cameras, bounds)
-        _print_result(r_oct)
+        _log_result(r_oct)
         results["micro_octree"] = r_oct
 
-        _print_section("Micro-benchmark: Visibility filter")
+        _log_section("Micro-benchmark: Visibility filter")
         r_vis = _micro_visibility(cameras, bounds)
-        _print_result(r_vis)
+        _log_result(r_vis)
         results["micro_visibility"] = r_vis
 
-        _print_section("Micro-benchmark: Visibility filter multi-camera scaling")
+        _log_section("Micro-benchmark: Visibility filter multi-camera scaling")
         r_vis_mc = _micro_visibility_multicam(bounds)
         for entry in r_vis_mc:
-            _print_result(entry)
+            _log_result(entry)
         results["micro_visibility_multicam"] = r_vis_mc
 
-        _print_section("Micro-benchmark: Triangle extraction (vectorised)")
+        _log_section("Micro-benchmark: Triangle extraction (vectorised)")
         r_tri = _micro_triangle_extraction(cameras, bounds)
-        _print_result(r_tri)
+        _log_result(r_tri)
         results["micro_triangle_extraction"] = r_tri
 
-        _print_section("Micro-benchmark: Initialisation (vectorised)")
+        _log_section("Micro-benchmark: Initialisation (vectorised)")
         r_init = _micro_init_vectorised()
-        _print_result(r_init)
+        _log_result(r_init)
         results["micro_init"] = r_init
 
-        _print_section("Micro-benchmark: float32 vs float64 dtype throughput")
+        _log_section("Micro-benchmark: float32 vs float64 dtype throughput")
         r_dtype = _micro_dtype_comparison(cameras, bounds)
-        _print_result(r_dtype)
+        _log_result(r_dtype)
         results["micro_dtype"] = r_dtype
 
-        _print_section("Scaling: Multi-camera performance")
+        _log_section("Scaling: Multi-camera performance")
         r_scale = _scaling_cameras(bounds)
         for entry in r_scale:
-            _print_result(entry)
+            _log_result(entry)
         results["scaling_cameras"] = r_scale
 
-        _print_section("Memory usage")
+        _log_section("Memory usage")
         r_mem = _memory_usage(cameras, bounds)
-        _print_result(r_mem)
+        _log_result(r_mem)
         results["memory"] = r_mem
 
         if args.threads:
-            _print_section("Scaling: CPU thread count")
+            _log_section("Scaling: CPU thread count")
             r_thr = _bench_cpu_threads(cameras, bounds)
             for entry in r_thr:
-                _print_result(entry)
+                _log_result(entry)
             results["scaling_threads"] = r_thr
 
         if args.compile:
-            _print_section("Benchmark: torch.compile impact")
+            _log_section("Benchmark: torch.compile impact")
             r_comp = _bench_compile(cameras, bounds)
-            _print_result(r_comp)
+            _log_result(r_comp)
             results["bench_compile"] = r_comp
 
     # Speedup summary ------------------------------------------------------
-    print()
-    print("=" * 70)
-    print("SUMMARY")
-    print("=" * 70)
+    logger.info("")
+    logger.info("=" * 70)
+    logger.info("SUMMARY")
+    logger.info("=" * 70)
     for sdf_name in sdf_names:
         r_orig = results.get(f"original_{sdf_name}", {})
         r_torch_cpu = results.get(f"torch_cpu_{sdf_name}", {})
@@ -1058,42 +1062,47 @@ def main():
         if r_orig and "error" not in r_orig and r_torch_cpu and "error" not in r_torch_cpu:
             sp = r_orig["mean_s"] / max(r_torch_cpu["mean_s"], 1e-6)
             tag = "faster" if sp > 1 else "slower"
-            print(
-                f"  [{sdf_name}] PyTorch CPU  vs C++: {sp:.2f}x {tag}  ({r_torch_cpu['mean_s']:.3f}s vs {r_orig['mean_s']:.3f}s)"
+            logger.info(
+                "  [%s] PyTorch CPU  vs C++: %.2fx %s  (%.3fs vs %.3fs)",
+                sdf_name, sp, tag, r_torch_cpu["mean_s"], r_orig["mean_s"],
             )
         if r_gpu and "error" not in r_gpu and r_orig and "error" not in r_orig:
             sp_g = r_orig["mean_s"] / max(r_gpu["mean_s"], 1e-6)
             tag_g = "faster" if sp_g > 1 else "slower"
-            print(
-                f"  [{sdf_name}] PyTorch CUDA vs C++: {sp_g:.2f}x {tag_g}  ({r_gpu['mean_s']:.3f}s vs {r_orig['mean_s']:.3f}s)"
+            logger.info(
+                "  [%s] PyTorch CUDA vs C++: %.2fx %s  (%.3fs vs %.3fs)",
+                sdf_name, sp_g, tag_g, r_gpu["mean_s"], r_orig["mean_s"],
             )
         if r_mps and "error" not in r_mps and r_orig and "error" not in r_orig:
             sp_m = r_orig["mean_s"] / max(r_mps["mean_s"], 1e-6)
             tag_m = "faster" if sp_m > 1 else "slower"
-            print(
-                f"  [{sdf_name}] PyTorch MPS  vs C++: {sp_m:.2f}x {tag_m}  ({r_mps['mean_s']:.3f}s vs {r_orig['mean_s']:.3f}s)"
+            logger.info(
+                "  [%s] PyTorch MPS  vs C++: %.2fx %s  (%.3fs vs %.3fs)",
+                sdf_name, sp_m, tag_m, r_mps["mean_s"], r_orig["mean_s"],
             )
 
         # Cross-device speedup (if multiple GPU devices available)
         if r_gpu and r_torch_cpu and "error" not in r_gpu and "error" not in r_torch_cpu:
             sp_gc = r_torch_cpu["mean_s"] / max(r_gpu["mean_s"], 1e-6)
             tag_gc = "faster" if sp_gc > 1 else "slower"
-            print(
-                f"  [{sdf_name}] PyTorch CUDA vs CPU: {sp_gc:.2f}x {tag_gc}  ({r_gpu['mean_s']:.3f}s vs {r_torch_cpu['mean_s']:.3f}s)"
+            logger.info(
+                "  [%s] PyTorch CUDA vs CPU: %.2fx %s  (%.3fs vs %.3fs)",
+                sdf_name, sp_gc, tag_gc, r_gpu["mean_s"], r_torch_cpu["mean_s"],
             )
         if r_mps and r_torch_cpu and "error" not in r_mps and "error" not in r_torch_cpu:
             sp_mc = r_torch_cpu["mean_s"] / max(r_mps["mean_s"], 1e-6)
             tag_mc = "faster" if sp_mc > 1 else "slower"
-            print(
-                f"  [{sdf_name}] PyTorch MPS  vs CPU: {sp_mc:.2f}x {tag_mc}  ({r_mps['mean_s']:.3f}s vs {r_torch_cpu['mean_s']:.3f}s)"
+            logger.info(
+                "  [%s] PyTorch MPS  vs CPU: %.2fx %s  (%.3fs vs %.3fs)",
+                sdf_name, sp_mc, tag_mc, r_mps["mean_s"], r_torch_cpu["mean_s"],
             )
-    print()
+    logger.info("")
 
     if args.output:
         outpath = Path(args.output)
         outpath.parent.mkdir(parents=True, exist_ok=True)
         outpath.write_text(json.dumps(results, indent=2, default=str))
-        print(f"Results saved to {outpath}")
+        logger.info("Results saved to %s", outpath)
 
 
 if __name__ == "__main__":
