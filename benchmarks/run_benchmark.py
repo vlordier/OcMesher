@@ -17,6 +17,7 @@ import json
 import logging
 import platform
 import statistics
+import sys
 import time
 from pathlib import Path
 
@@ -910,14 +911,16 @@ def main():
     args = parser.parse_args()
 
     # Configure logging: verbose mode shows DEBUG + timestamps; default shows INFO only.
+    # Use stream=sys.stdout to preserve prior CLI behaviour (print() used stdout).
     if args.verbose:
         logging.basicConfig(
             level=logging.DEBUG,
             format="%(asctime)s %(levelname)-8s %(name)s: %(message)s",
             datefmt="%H:%M:%S",
+            stream=sys.stdout,
         )
     else:
-        logging.basicConfig(level=logging.INFO, format="%(message)s")
+        logging.basicConfig(level=logging.INFO, format="%(message)s", stream=sys.stdout)
 
     pixels_per_cube = 8 if args.full else 16
     cameras = _make_cameras(1)
