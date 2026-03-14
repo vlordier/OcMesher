@@ -43,6 +43,7 @@ except ImportError:
 # Helpers
 # ---------------------------------------------------------------------------
 
+
 def _make_cameras():
     cam_poses = [
         np.array(
@@ -77,6 +78,7 @@ def _make_bounds():
 # ---------------------------------------------------------------------------
 # Benchmark runners
 # ---------------------------------------------------------------------------
+
 
 def _bench_original(cameras, bounds, pixels_per_cube: int, n_runs: int = 1):
     """Benchmark the original Python + C++ OcMesher."""
@@ -143,6 +145,7 @@ def _bench_torch(cameras, bounds, pixels_per_cube: int, n_runs: int = 1, device:
 # ---------------------------------------------------------------------------
 # Sub-operation micro-benchmarks
 # ---------------------------------------------------------------------------
+
 
 def _micro_sdf_eval(cameras, bounds, n_points: int = 500_000, n_runs: int = 3):
     """Compare SDF evaluation throughput (numpy vs torch tensors)."""
@@ -239,6 +242,7 @@ def _micro_projection(cameras, bounds, n_cubes: int = 100_000, n_runs: int = 5):
 # Main
 # ---------------------------------------------------------------------------
 
+
 def main():
     """Run benchmarks and print results."""
     parser = argparse.ArgumentParser(description="OcMesher benchmark: Python+C++ vs PyTorch")
@@ -257,6 +261,7 @@ def main():
 
     try:
         import torch
+
         print(f"PyTorch version : {torch.__version__}")
         print(f"CUDA available  : {torch.cuda.is_available()}")
         if torch.cuda.is_available():
@@ -299,6 +304,7 @@ def main():
 
     try:
         import torch
+
         if torch.cuda.is_available():
             print("-" * 70)
             print("End-to-end: PyTorch (CUDA)")
