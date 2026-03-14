@@ -699,6 +699,24 @@ class TorchOcMesher:
             w = self.cam_widths[k]
             self._pix_ang[k] = float(np.arctan(w / 2 / fx) * 2 / w)
 
+        # Pre-compute projection angular threshold for _projected_sizes.
+        # This avoids recomputing the product every call.
+        self._pix_ang_ppc = self._pix_ang * self.pixels_per_cube  # (C,)
+
+        # Pre-compute combined K @ inv_pose for visibility filter -------------
+        # This avoids two separate matmuls per camera in _visibility_filter.
+        self._cam_proj = torch.bmm(
+            self.cam_intrinsics,
+            self.cam_inv_poses,
+        )  # (C, 3, 4)
+
+        # Pre-compute per-camera bounds for in-view checks ------------------
+        self._cam_heights_t = torch.tensor(self.cam_heights, dtype=torch.int64, device=self.device)
+        self._cam_widths_t = torch.tensor(self.cam_widths, dtype=torch.int64, device=self.device)
+
+        # Pre-compute bounds as numpy for fast out-of-bounds masking --------
+        self._bounds_np = np.array(bounds, dtype=np.float64)
+
         # Pre-allocate reusable octree child offsets -------------------------
         self._child_offsets = torch.tensor(
             [[0, 0, 0], [1, 0, 0], [0, 1, 0], [1, 1, 0], [0, 0, 1], [1, 0, 1], [0, 1, 1], [1, 1, 1]],
@@ -746,7 +764,11 @@ class TorchOcMesher:
         Returns:
             ``(N, 3)`` float64 world positions.
         """
-        scale = self.size / (2.0 ** levels.unsqueeze(1).double())
+        # Use ldexp instead of 2**level - avoids pow for integer exponents.
+        scale = self.size / torch.ldexp(
+            torch.ones_like(levels, dtype=torch.float64),
+            levels,
+        ).unsqueeze(1)
         return self.center.unsqueeze(0) - self.size / 2 + scale * (coords.double() + 0.5)
 
     @torch.no_grad()
@@ -757,7 +779,10 @@ class TorchOcMesher:
             ``(N, 8, 3)`` float64 tensor.
         """
         corner_coords = coords.unsqueeze(1) + self._corner_offsets.unsqueeze(0)
-        scale = self.size / (2.0 ** levels.unsqueeze(1).unsqueeze(2).double())
+        scale = self.size / torch.ldexp(
+            torch.ones_like(levels, dtype=torch.float64),
+            levels,
+        ).unsqueeze(1).unsqueeze(2)
         return self.center.unsqueeze(0).unsqueeze(0) - self.size / 2 + scale * corner_coords.double()
 
     # ------------------------------------------------------------------
@@ -774,19 +799,19 @@ class TorchOcMesher:
         Returns:
             ``(N,)`` float64 tensor of projected sizes.
         """
-        n = positions.shape[0]
-        ones = torch.ones(n, 1, dtype=torch.float64, device=self.device)
-        pos_h = torch.cat([positions, ones], dim=1)  # (N, 4)
-        cube_sizes = self.size / (2.0 ** levels.double())  # (N,)
+        # Build homogeneous coords in-place via functional concat (avoids alloc)
+        pos_h = torch.nn.functional.pad(positions, (0, 1), value=1.0)  # (N, 4)
+        cube_sizes = self.size / torch.ldexp(
+            torch.ones_like(levels, dtype=torch.float64),
+            levels,
+        )  # (N,)
 
         # Batched transform: (C, 3, 4) @ (4, N) -> (C, 3, N) -> (C, N, 3)
-        cam_coords = torch.bmm(
-            self.cam_inv_poses,
-            pos_h.T.unsqueeze(0).expand(self.n_cameras, -1, -1),
-        ).permute(0, 2, 1)  # (C, N, 3)
+        pos_h_t = pos_h.T.unsqueeze(0).expand(self.n_cameras, -1, -1)
+        cam_coords = torch.bmm(self.cam_inv_poses, pos_h_t).permute(0, 2, 1)
 
         r = cam_coords.norm(dim=2).clamp(min=self.min_dist)  # (C, N)
-        ang = self._pix_ang.unsqueeze(1) * self.pixels_per_cube  # (C, 1)
+        ang = self._pix_ang_ppc.unsqueeze(1)  # (C, 1) pre-computed
         proj = cube_sizes.unsqueeze(0) / r / ang  # (C, N)
         return proj.max(dim=0).values  # (N,)
 
@@ -808,25 +833,51 @@ class TorchOcMesher:
             ``(N, len(kernels))`` float32 tensor on *self.device*.
         """
         n = positions.shape[0]
+        n_kernels = len(kernels)
         if n == 0:
-            return torch.zeros((0, len(kernels)), dtype=torch.float32, device=self.device)
+            return torch.zeros((0, n_kernels), dtype=torch.float32, device=self.device)
 
         xyz_np = positions.cpu().double().numpy()
         step = 2_000_000  # chunk size tuned for cache locality
+        bounds_np = self._bounds_np
+        enclosed = self.enclosed
 
-        def _eval_chunk(chunk_np):
-            out_bound = np.zeros(len(chunk_np), dtype=bool)
-            if self.enclosed:
-                for c in range(3):
-                    out_bound |= chunk_np[:, c] <= self.bounds[c * 2]
-                    out_bound |= chunk_np[:, c] >= self.bounds[c * 2 + 1]
-            cols = []
-            for kernel in kernels:
+        if n_kernels == 1:
+            # --- Fast path for the common single-kernel case ---
+            kernel = kernels[0]
+
+            def _eval_chunk(chunk_np):
                 sdf = kernel(chunk_np)
-                if self.enclosed:
+                if enclosed:
+                    out_bound = (
+                        (chunk_np[:, 0] <= bounds_np[0])
+                        | (chunk_np[:, 0] >= bounds_np[1])
+                        | (chunk_np[:, 1] <= bounds_np[2])
+                        | (chunk_np[:, 1] >= bounds_np[3])
+                        | (chunk_np[:, 2] <= bounds_np[4])
+                        | (chunk_np[:, 2] >= bounds_np[5])
+                    )
                     sdf[out_bound] = 1
-                cols.append(sdf)
-            return np.stack(cols, axis=-1).astype(np.float32)
+                return sdf.astype(np.float32).reshape(-1, 1)
+        else:
+
+            def _eval_chunk(chunk_np):
+                if enclosed:
+                    out_bound = (
+                        (chunk_np[:, 0] <= bounds_np[0])
+                        | (chunk_np[:, 0] >= bounds_np[1])
+                        | (chunk_np[:, 1] <= bounds_np[2])
+                        | (chunk_np[:, 1] >= bounds_np[3])
+                        | (chunk_np[:, 2] <= bounds_np[4])
+                        | (chunk_np[:, 2] >= bounds_np[5])
+                    )
+                cols = []
+                for kernel in kernels:
+                    sdf = kernel(chunk_np)
+                    if enclosed:
+                        sdf[out_bound] = 1
+                    cols.append(sdf)
+                return np.stack(cols, axis=-1).astype(np.float32)
 
         chunks = [xyz_np[i : i + step] for i in range(0, n, step)]
 
@@ -836,6 +887,8 @@ class TorchOcMesher:
         else:
             parts = [_eval_chunk(c) for c in chunks]
 
+        if len(parts) == 1:
+            return torch.from_numpy(parts[0]).to(self.device)
         return torch.from_numpy(np.concatenate(parts, axis=0)).to(self.device)
 
     # ------------------------------------------------------------------
@@ -852,7 +905,8 @@ class TorchOcMesher:
         levels = torch.zeros(1, dtype=torch.int64, device=self.device)
 
         for _ in range(30):
-            if len(coords) >= self.coarse_count:
+            n = len(coords)
+            if n >= self.coarse_count:
                 break
             positions = self._cube_centers(coords, levels)
             proj = self._projected_sizes(positions, levels)
@@ -861,22 +915,24 @@ class TorchOcMesher:
                 break
 
             expand_idx = torch.where(to_expand)[0]
-            keep_idx = torch.where(~to_expand)[0]
+            n_expand = len(expand_idx)
+            n_keep = n - n_expand
 
             # Budget-limit expansion
-            remaining = self.coarse_count - len(keep_idx)
-            if remaining < len(expand_idx) * 8:
-                _, top_k = proj[expand_idx].topk(max(1, remaining // 8))
+            remaining = self.coarse_count - n_keep
+            if remaining < n_expand * 8:
+                budget = max(1, remaining // 8)
+                _, top_k = proj[expand_idx].topk(budget)
                 expand_idx = expand_idx[top_k]
-                keep_mask = torch.ones(len(coords), dtype=torch.bool, device=self.device)
-                keep_mask[expand_idx] = False
-                keep_idx = torch.where(keep_mask)[0]
+                to_expand = torch.zeros(n, dtype=torch.bool, device=self.device)
+                to_expand[expand_idx] = True
 
+            keep_mask = ~to_expand
             child_c = coords[expand_idx].unsqueeze(1) * 2 + self._child_offsets.unsqueeze(0)
             child_l = (levels[expand_idx] + 1).unsqueeze(1).expand(-1, 8)
 
-            coords = torch.cat([coords[keep_idx], child_c.reshape(-1, 3)])
-            levels = torch.cat([levels[keep_idx], child_l.reshape(-1)])
+            coords = torch.cat([coords[keep_mask], child_c.reshape(-1, 3)])
+            levels = torch.cat([levels[keep_mask], child_l.reshape(-1)])
         return coords, levels
 
     # ------------------------------------------------------------------
@@ -923,7 +979,8 @@ class TorchOcMesher:
         target_cubes = self.coarse_count * 4
 
         for _ in range(max_iters):
-            if len(coords) >= target_cubes:
+            n = len(coords)
+            if n >= target_cubes:
                 break
             positions = self._cube_centers(coords, levels)
             proj = self._projected_sizes(positions, levels)
@@ -932,21 +989,22 @@ class TorchOcMesher:
                 break
 
             expand_idx = torch.where(to_expand)[0]
-            keep_idx = torch.where(~to_expand)[0]
+            n_expand = len(expand_idx)
+            n_keep = n - n_expand
 
-            budget = max(1, (target_cubes - len(keep_idx)) // 8)
-            if len(expand_idx) > budget:
+            budget = max(1, (target_cubes - n_keep) // 8)
+            if n_expand > budget:
                 _, top_k = proj[expand_idx].topk(budget)
                 expand_idx = expand_idx[top_k]
-                keep_mask = torch.ones(len(coords), dtype=torch.bool, device=self.device)
-                keep_mask[expand_idx] = False
-                keep_idx = torch.where(keep_mask)[0]
+                to_expand = torch.zeros(n, dtype=torch.bool, device=self.device)
+                to_expand[expand_idx] = True
 
+            keep_mask = ~to_expand
             child_c = coords[expand_idx].unsqueeze(1) * 2 + self._child_offsets.unsqueeze(0)
             child_l = (levels[expand_idx] + 1).unsqueeze(1).expand(-1, 8)
 
-            new_coords = torch.cat([coords[keep_idx], child_c.reshape(-1, 3)])
-            new_levels = torch.cat([levels[keep_idx], child_l.reshape(-1)])
+            new_coords = torch.cat([coords[keep_mask], child_c.reshape(-1, 3)])
+            new_levels = torch.cat([levels[keep_mask], child_l.reshape(-1)])
 
             mask, _ = self._find_surface_cubes(kernels, new_coords, new_levels)
             coords = new_coords[mask]
@@ -960,7 +1018,7 @@ class TorchOcMesher:
     def _visibility_filter(self, positions: torch.Tensor) -> torch.Tensor:
         """Classify positions as visible / occluded via depth buffering.
 
-        Uses batched camera projection for all cameras simultaneously.
+        Uses pre-computed K @ inv_pose projection matrix and batched operations.
 
         Returns:
             ``(N,)`` bool tensor - *True* for visible.
@@ -970,10 +1028,15 @@ class TorchOcMesher:
         ones = torch.ones(n, 1, dtype=torch.float64, device=self.device)
         pos_h = torch.cat([positions, ones], dim=1)  # (N, 4)
 
+        # Batched projection: (C, 3, 4) @ (4, N) -> (C, 3, N) -> (C, N, 3)
+        img_all = torch.bmm(
+            self._cam_proj,
+            pos_h.T.unsqueeze(0).expand(self.n_cameras, -1, -1),
+        ).permute(0, 2, 1)  # (C, N, 3)
+
         factor = 10.0
         for k in range(self.n_cameras):
-            cam_xyz = (self.cam_inv_poses[k] @ pos_h.T).T
-            img = (self.cam_intrinsics[k] @ cam_xyz.T).T
+            img = img_all[k]  # (N, 3) - already projected
             depth = img[:, 2]
             px = img[:, 0] / (depth + 1e-10)
             py = img[:, 1] / (depth + 1e-10)
@@ -1087,22 +1150,28 @@ class TorchOcMesher:
             return np.zeros((0, 3), dtype=np.float64), np.zeros((0, 3), dtype=np.int32)
 
         tri_verts = torch.cat(all_face_verts, dim=0)
-        total_tris = tri_verts.shape[0]
         verts_flat = tri_verts.reshape(-1, 3)
-        faces_flat = torch.arange(total_tris * 3, device=device).reshape(-1, 3)
 
         # --- Vertex deduplication via quantised coordinate hashing ---
-        verts_np = verts_flat.cpu().double().numpy()
-        quantized = np.round(verts_np * 1e8).astype(np.int64)
-        _, unique_idx, inverse = np.unique(
-            quantized,
-            axis=0,
-            return_index=True,
-            return_inverse=True,
-        )
-        dedup_verts = verts_np[unique_idx]
-        dedup_faces = inverse[faces_flat.cpu().numpy().ravel()].reshape(-1, 3)
-        return dedup_verts, dedup_faces.astype(np.int32)
+        # Perform quantisation on the device (GPU or CPU) to avoid a transfer
+        # for the hashing step.  Only transfer the final deduplicated arrays.
+        quantized = (verts_flat * 1e8).round().long()
+        # Encode (x, y, z) triples into a single int64 hash per vertex.
+        # The components are bounded by the scene extent x 1e8 which fits in
+        # int64 when multiplied by large primes.
+        hash_vals = quantized[:, 0] * 1000000007 + quantized[:, 1] * 1000000009 + quantized[:, 2] * 1000000021
+        _, inverse = torch.unique(hash_vals, return_inverse=True)
+        # Build compact vertex array: pick the first representative per unique
+        # hash.  Writing indices in reverse order ensures the smallest (first)
+        # index wins for each unique bucket.
+        n_unique = int(inverse.max().item()) + 1
+        n_verts = len(inverse)
+        rep_idx = torch.zeros(n_unique, dtype=torch.long, device=device)
+        rev_arange = torch.arange(n_verts - 1, -1, -1, device=device)
+        rep_idx.scatter_(0, inverse[rev_arange], rev_arange)
+        dedup_verts = verts_flat[rep_idx].cpu().double().numpy()
+        dedup_faces = inverse.reshape(-1, 3).cpu().numpy().astype(np.int32)
+        return dedup_verts, dedup_faces
 
     # ------------------------------------------------------------------
     # Main pipeline
