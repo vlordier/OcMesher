@@ -410,11 +410,11 @@ class OcMesher:
         - **Single-kernel fast path** — when there is exactly one kernel,
           bypasses the pool and writes SDF values directly into the result
           column, avoiding ``_eval_kernels_batch`` dispatch overhead.
+
+        Note: kernel callability is validated once by ``__call__`` at
+        pipeline entry; this method skips per-call validation to avoid
+        repeated checks in the 15-iteration bisection loops.
         """
-        for kernel in kernels:
-            if not callable(kernel):
-                msg = f"Each kernel must be callable, got {type(kernel).__name__}"
-                raise TypeError(msg)
         n_XYZ = len(XYZ_all)
         n_kernels = len(kernels)
         if n_XYZ == 0:
@@ -559,38 +559,46 @@ class OcMesher:
 
     def _construct_element_mesh(self, e, k_e, num_verts):
         """Construct mesh for a single SDF element via bisection refinement."""
+        # Bind frequently-used attributes to locals to avoid repeated
+        # LOAD_ATTR lookups in the tight bisection loop (~15 iterations).
+        _af = self.AF
+        _sdf_af = self.sdf_AF
+        _kernel_caller = self.kernel_caller
+        _np_float = self.np_float_type
+
         # np.empty avoids zero-init since the C function fills these immediately.
-        centers = np.empty((num_verts, 3), dtype=self.np_float_type)
-        self.get_verts_center(e, self.AF(centers))
-        center_sdf = self.kernel_caller(k_e, centers)
-        cubes = np.empty((num_verts * 8, 3), dtype=self.np_float_type)
-        self.update_verts(e, POINTER(self.sdf_float_type)(), POINTER(self.sdf_float_type)(), self.AF(cubes))
-        center_sdf_ptr = self.sdf_AF(center_sdf)
+        centers = np.empty((num_verts, 3), dtype=_np_float)
+        self.get_verts_center(e, _af(centers))
+        center_sdf = _kernel_caller(k_e, centers)
+        cubes = np.empty((num_verts * 8, 3), dtype=_np_float)
+        self.update_verts(e, POINTER(self.sdf_float_type)(), POINTER(self.sdf_float_type)(), _af(cubes))
+        center_sdf_ptr = _sdf_af(center_sdf)
         tol = self.bisection_tol
         check_tol = tol > 0
-        for _ in tqdm(range(self.bisection_iters)):
-            sdf = self.kernel_caller(k_e, cubes)
-            self.update_verts(e, self.sdf_AF(sdf), center_sdf_ptr, self.AF(cubes))
+        _update_verts = self.update_verts
+        for _ in range(self.bisection_iters):
+            sdf = _kernel_caller(k_e, cubes)
+            _update_verts(e, _sdf_af(sdf), center_sdf_ptr, _af(cubes))
             # Early-exit: if all SDF residuals are below tolerance the
             # surface has been located to sufficient accuracy.
-            if check_tol and np.max(np.abs(sdf)) < tol:
+            if check_tol and np.fabs(sdf).max() < tol:
                 break
-        cubes_r = np.empty((num_verts * 8, 3), dtype=self.np_float_type)
-        self.get_lr_verts(e, self.AF(cubes), self.AF(cubes_r))
+        cubes_r = np.empty((num_verts * 8, 3), dtype=_np_float)
+        self.get_lr_verts(e, _af(cubes), _af(cubes_r))
         # Fused left/right SDF evaluation: single kernel_caller call instead
         # of two, halving the Python→SDF round-trip overhead.
         # Pre-allocated buffer avoids np.concatenate allocation overhead.
         n_cubes = len(cubes)
-        lr_combined = np.empty((n_cubes + len(cubes_r), 3), dtype=self.np_float_type)
+        lr_combined = np.empty((n_cubes + len(cubes_r), 3), dtype=_np_float)
         lr_combined[:n_cubes] = cubes
         lr_combined[n_cubes:] = cubes_r
-        lr_sdf = self.kernel_caller(k_e, lr_combined)
+        lr_sdf = _kernel_caller(k_e, lr_combined)
         sdf_l = lr_sdf[:n_cubes]
         sdf_r = lr_sdf[n_cubes:]
         del cubes, cubes_r, centers, center_sdf, lr_combined, lr_sdf
         # np.empty is safe: finalize_verts writes every element before use.
-        vertices = np.empty((num_verts, 3), dtype=self.np_float_type)
-        self.finalize_verts(e, self.sdf_AF(sdf_l), self.sdf_AF(sdf_r), self.AF(vertices))
+        vertices = np.empty((num_verts, 3), dtype=_np_float)
+        self.finalize_verts(e, _sdf_af(sdf_l), _sdf_af(sdf_r), _af(vertices))
         del sdf_l, sdf_r
 
         vertices, faces = self._refine_extra_vertices(e, k_e, vertices)
@@ -615,91 +623,105 @@ class OcMesher:
         - Fused left/right SDF evaluation after bisection: 4 calls → 1.
         - All ``np.concatenate`` calls replaced with pre-allocated
           slice-fill to avoid allocation overhead in hot paths.
+        - Attribute lookups cached as locals for the tight bisection loop.
         """
+        # Bind frequently-used attributes to locals to avoid repeated
+        # LOAD_ATTR lookups in the tight bisection loop (~15 iterations).
+        _af = self.AF
+        _sdf_af = self.sdf_AF
+        _kernel_caller = self.kernel_caller
+        _np_float = self.np_float_type
+
         cnts = np.zeros(3, dtype=np.int32)
-        self.construct_faces(e, self.AF(vertices), AsInt(cnts))
+        self.construct_faces(e, _af(vertices), AsInt(cnts))
         nve, nvf, nf = cnts
         # np.empty avoids zero-init: C functions fill all elements immediately.
-        edge_vertices_c = np.empty((nve, 3), dtype=self.np_float_type)
-        face_vertices_c = np.empty((nvf, 3), dtype=self.np_float_type)
-        self.get_extra_verts_center(self.AF(edge_vertices_c), self.AF(face_vertices_c))
+        edge_vertices_c = np.empty((nve, 3), dtype=_np_float)
+        face_vertices_c = np.empty((nvf, 3), dtype=_np_float)
+        self.get_extra_verts_center(_af(edge_vertices_c), _af(face_vertices_c))
         # Fused center SDF: one kernel_caller call for edge + face centres.
         # Pre-allocated buffer replaces np.concatenate.
         n_edge_c = len(edge_vertices_c)
         n_face_c = len(face_vertices_c)
-        ef_centers = np.empty((n_edge_c + n_face_c, 3), dtype=self.np_float_type)
+        ef_centers = np.empty((n_edge_c + n_face_c, 3), dtype=_np_float)
         ef_centers[:n_edge_c] = edge_vertices_c
         ef_centers[n_edge_c:] = face_vertices_c
-        ef_center_sdf = self.kernel_caller(k_e, ef_centers)
+        ef_center_sdf = _kernel_caller(k_e, ef_centers)
         ecenter_sdf = ef_center_sdf[:n_edge_c]
         fcenter_sdf = ef_center_sdf[n_edge_c:]
         del ef_centers, ef_center_sdf
-        edge_vertices_lr = np.empty((nve * 2, 3), dtype=self.np_float_type)
-        face_vertices_lr = np.empty((nvf * 4, 3), dtype=self.np_float_type)
-        self.update_extra_verts(
-            POINTER(self.sdf_float_type)(),
-            POINTER(self.sdf_float_type)(),
-            POINTER(self.sdf_float_type)(),
-            POINTER(self.sdf_float_type)(),
-            self.AF(edge_vertices_lr),
-            self.AF(face_vertices_lr),
+        edge_vertices_lr = np.empty((nve * 2, 3), dtype=_np_float)
+        face_vertices_lr = np.empty((nvf * 4, 3), dtype=_np_float)
+        _update_extra_verts = self.update_extra_verts
+        _sdf_null = POINTER(self.sdf_float_type)()
+        _update_extra_verts(
+            _sdf_null,
+            _sdf_null,
+            _sdf_null,
+            _sdf_null,
+            _af(edge_vertices_lr),
+            _af(face_vertices_lr),
         )
         n_edge_lr = len(edge_vertices_lr)
         # Pre-allocate combined buffer once; fill slices each iteration.
-        bisection_buf = np.empty((n_edge_lr + len(face_vertices_lr), 3), dtype=self.np_float_type)
+        bisection_buf = np.empty((n_edge_lr + len(face_vertices_lr), 3), dtype=_np_float)
         tol = self.bisection_tol
         check_tol = tol > 0
         for _ in range(self.bisection_iters):
             bisection_buf[:n_edge_lr] = edge_vertices_lr
             bisection_buf[n_edge_lr:] = face_vertices_lr
-            ef_sdf = self.kernel_caller(k_e, bisection_buf)
+            ef_sdf = _kernel_caller(k_e, bisection_buf)
             e_sdf = ef_sdf[:n_edge_lr]
             f_sdf = ef_sdf[n_edge_lr:]
-            self.update_extra_verts(
-                self.sdf_AF(e_sdf),
-                self.sdf_AF(f_sdf),
-                self.sdf_AF(ecenter_sdf),
-                self.sdf_AF(fcenter_sdf),
-                self.AF(edge_vertices_lr),
-                self.AF(face_vertices_lr),
+            _update_extra_verts(
+                _sdf_af(e_sdf),
+                _sdf_af(f_sdf),
+                _sdf_af(ecenter_sdf),
+                _sdf_af(fcenter_sdf),
+                _af(edge_vertices_lr),
+                _af(face_vertices_lr),
             )
-            if check_tol and np.max(np.abs(ef_sdf)) < tol:
+            if check_tol and np.fabs(ef_sdf).max() < tol:
                 break
         del edge_vertices_c, face_vertices_c, ecenter_sdf, fcenter_sdf, bisection_buf
-        edge_vertices_r = np.empty((nve * 2, 3), dtype=self.np_float_type)
-        face_vertices_r = np.empty((nvf * 4, 3), dtype=self.np_float_type)
+        edge_vertices_r = np.empty((nve * 2, 3), dtype=_np_float)
+        face_vertices_r = np.empty((nvf * 4, 3), dtype=_np_float)
         self.get_lr_extra_verts(
-            self.AF(edge_vertices_lr),
-            self.AF(edge_vertices_r),
-            self.AF(face_vertices_lr),
-            self.AF(face_vertices_r),
+            _af(edge_vertices_lr),
+            _af(edge_vertices_r),
+            _af(face_vertices_lr),
+            _af(face_vertices_r),
         )
         # Fused left/right SDF: 1 call instead of 4 — all 4 vertex arrays
         # written into a pre-allocated buffer (no np.concatenate overhead).
+        # Pre-compute slice offsets to avoid repeated arithmetic.
         n_elr = len(edge_vertices_lr)
         n_err = len(edge_vertices_r)
         n_flr = len(face_vertices_lr)
         n_frr = len(face_vertices_r)
-        all_lr = np.empty((n_elr + n_err + n_flr + n_frr, 3), dtype=self.np_float_type)
-        all_lr[:n_elr] = edge_vertices_lr
-        all_lr[n_elr : n_elr + n_err] = edge_vertices_r
-        all_lr[n_elr + n_err : n_elr + n_err + n_flr] = face_vertices_lr
-        all_lr[n_elr + n_err + n_flr :] = face_vertices_r
-        all_lr_sdf = self.kernel_caller(k_e, all_lr)
-        esdf_l = all_lr_sdf[:n_elr]
-        esdf_r = all_lr_sdf[n_elr : 2 * n_elr]
-        fsdf_l = all_lr_sdf[2 * n_elr : 2 * n_elr + n_flr]
-        fsdf_r = all_lr_sdf[2 * n_elr + n_flr :]
+        off1 = n_elr
+        off2 = off1 + n_err
+        off3 = off2 + n_flr
+        all_lr = np.empty((off3 + n_frr, 3), dtype=_np_float)
+        all_lr[:off1] = edge_vertices_lr
+        all_lr[off1:off2] = edge_vertices_r
+        all_lr[off2:off3] = face_vertices_lr
+        all_lr[off3:] = face_vertices_r
+        all_lr_sdf = _kernel_caller(k_e, all_lr)
+        esdf_l = all_lr_sdf[:off1]
+        esdf_r = all_lr_sdf[off1:off2]
+        fsdf_l = all_lr_sdf[off2:off3]
+        fsdf_r = all_lr_sdf[off3:]
         del edge_vertices_lr, edge_vertices_r, face_vertices_lr, face_vertices_r, all_lr, all_lr_sdf
-        edge_vertices = np.empty((nve, 3), dtype=self.np_float_type)
-        face_vertices = np.empty((nvf, 3), dtype=self.np_float_type)
+        edge_vertices = np.empty((nve, 3), dtype=_np_float)
+        face_vertices = np.empty((nvf, 3), dtype=_np_float)
         self.finalize_extra_verts(
-            self.sdf_AF(esdf_l),
-            self.sdf_AF(esdf_r),
-            self.AF(edge_vertices),
-            self.sdf_AF(fsdf_l),
-            self.sdf_AF(fsdf_r),
-            self.AF(face_vertices),
+            _sdf_af(esdf_l),
+            _sdf_af(esdf_r),
+            _af(edge_vertices),
+            _sdf_af(fsdf_l),
+            _sdf_af(fsdf_r),
+            _af(face_vertices),
         )
         del esdf_l, esdf_r, fsdf_l, fsdf_r
         faces = np.empty((nf, 3), dtype=np.int32)
@@ -707,7 +729,7 @@ class OcMesher:
         # Pre-allocated final vertex array avoids np.concatenate overhead.
         n_base = vertices.shape[0]
         n_edge = edge_vertices.shape[0]
-        final_vertices = np.empty((n_base + n_edge + face_vertices.shape[0], 3), dtype=self.np_float_type)
+        final_vertices = np.empty((n_base + n_edge + face_vertices.shape[0], 3), dtype=_np_float)
         final_vertices[:n_base] = vertices
         final_vertices[n_base : n_base + n_edge] = edge_vertices
         final_vertices[n_base + n_edge :] = face_vertices

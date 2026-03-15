@@ -970,3 +970,47 @@ class TestVectorisedCameraPacking:
         cam0 = mesher.cameras[:CAMERA_DATA_STRIDE]
         cam1 = mesher.cameras[CAMERA_DATA_STRIDE : 2 * CAMERA_DATA_STRIDE]
         np.testing.assert_array_equal(cam0, cam1)
+
+
+# ---------------------------------------------------------------------------
+# Hot-path local caching + np.fabs + removed inner tqdm
+# ---------------------------------------------------------------------------
+
+
+class TestHotPathLocalCaching:
+    """Verify that kernel_caller still works after removing per-call validation."""
+
+    @staticmethod
+    def _make_mesher_stub(bounds, *, enclosed=True):
+        obj = object.__new__(OcMesher)
+        obj.bounds = bounds
+        obj.enclosed = enclosed
+        obj.sdf_np_float_type = np.float32
+        obj._bounds_min_np = np.array([bounds[0], bounds[2], bounds[4]], dtype=np.float64)
+        obj._bounds_max_np = np.array([bounds[1], bounds[3], bounds[5]], dtype=np.float64)
+        obj._sdf_pool = None
+        obj._oob_mask = np.empty(_SDF_BATCH_SIZE, dtype=bool)
+        obj._oob_tmp = np.empty(_SDF_BATCH_SIZE, dtype=bool)
+        return obj
+
+    def test_kernel_caller_no_validation_overhead(self, sample_bounds, sphere_kernel):
+        """kernel_caller with valid kernels works without per-call validation."""
+        mesher = self._make_mesher_stub(sample_bounds)
+        points = np.array([[0, 0, 0], [1, 0, 0]], dtype=np.float64)
+        result = mesher.kernel_caller([sphere_kernel], points)
+        np.testing.assert_allclose(result[:, 0], [-1.0, 0.0], atol=1e-6)
+
+    def test_validate_kernels_catches_non_callable(self):
+        """_validate_kernels (called at __call__ entry) catches non-callables."""
+        with pytest.raises(TypeError, match="callable"):
+            _validate_kernels(["not a function"])
+
+    def test_np_fabs_matches_np_abs_for_float32(self):
+        """np.fabs produces same result as np.abs for float32 arrays."""
+        arr = np.array([-1.5, 0.0, 2.3, -0.7], dtype=np.float32)
+        np.testing.assert_array_equal(np.fabs(arr), np.abs(arr))
+
+    def test_np_fabs_max_matches_np_max_np_abs(self):
+        """np.fabs(arr).max() is equivalent to np.max(np.abs(arr))."""
+        arr = np.array([-3.0, 1.5, -2.0, 0.5], dtype=np.float32)
+        assert np.fabs(arr).max() == np.max(np.abs(arr))
