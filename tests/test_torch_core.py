@@ -482,3 +482,60 @@ class TestSDFCaching:
         # Each mesh should have geometry
         assert meshes[0].vertices.shape[0] > 0
         assert meshes[1].vertices.shape[0] > 0
+
+
+# ---------------------------------------------------------------------------
+# Single-chunk fast path + vectorised bounds check (Refactor 3)
+# ---------------------------------------------------------------------------
+
+
+class TestEvaluateSDFSingleChunk:
+    """Verify _evaluate_sdf single-chunk fast path produces correct results."""
+
+    def test_single_chunk_matches_multi_chunk(self, single_cam_mesher, sphere_kernel):
+        """Single-chunk fast path must return identical results to multi-chunk."""
+        mesher = single_cam_mesher
+        pts = torch.tensor(
+            [[0, 0, 0], [1, 0, 0], [2, 0, 0]],
+            dtype=mesher._fdtype,
+            device=mesher.device,
+        )
+        result = mesher._evaluate_sdf([sphere_kernel], pts)
+        assert result.shape == (3, 1)
+        np.testing.assert_allclose(
+            result.cpu().numpy()[:, 0],
+            [-1.0, 0.0, 1.0],
+            atol=1e-5,
+        )
+
+    def test_vectorised_bounds_clamp_in_sdf(self, sample_cameras, sphere_kernel):
+        """Vectorised bounds check must clamp out-of-bounds points correctly."""
+        bounds = [-1.0, 1.0, -1.0, 1.0, -1.0, 1.0]
+        mesher = TorchOcMesher(sample_cameras, bounds, device="cpu")
+        pts = torch.tensor(
+            [[0, 0, 0], [5, 0, 0]],
+            dtype=mesher._fdtype,
+            device=mesher.device,
+        )
+        result = mesher._evaluate_sdf([sphere_kernel], pts)
+        assert result[0, 0].item() == pytest.approx(-1.0, abs=1e-5)
+        assert result[1, 0].item() == pytest.approx(1.0)
+
+    def test_empty_positions_fast_path(self, single_cam_mesher, sphere_kernel):
+        """Empty positions must return empty tensor without error."""
+        pts = torch.zeros((0, 3), dtype=single_cam_mesher._fdtype, device=single_cam_mesher.device)
+        result = single_cam_mesher._evaluate_sdf([sphere_kernel], pts)
+        assert result.shape == (0, 1)
+
+    def test_multiple_kernels_single_chunk(self, single_cam_mesher, sphere_kernel, plane_kernel):
+        """Multi-kernel single-chunk path must produce correct column layout."""
+        pts = torch.tensor(
+            [[0, 0, 0.5], [1, 0, 0]],
+            dtype=single_cam_mesher._fdtype,
+            device=single_cam_mesher.device,
+        )
+        result = single_cam_mesher._evaluate_sdf([sphere_kernel, plane_kernel], pts)
+        assert result.shape == (2, 2)
+        # Sphere SDF at origin: -1+0.5 = -0.5; plane SDF at z=0.5: 0.5
+        np.testing.assert_allclose(result[0, 0].item(), np.linalg.norm([0, 0, 0.5]) - 1, atol=1e-5)
+        np.testing.assert_allclose(result[0, 1].item(), 0.5, atol=1e-5)
