@@ -906,6 +906,15 @@ class TorchOcMesher:
         Kernel functions receive :class:`numpy.ndarray` and return the same.
         Conversion to/from tensors is handled here.
 
+        Optimisations over the naïve implementation:
+        - **Single-chunk fast path**: when all points fit in one chunk (the
+          common case for moderate-sized inputs), skip list construction,
+          ThreadPoolExecutor overhead, and ``np.concatenate``.
+        - **Vectorised bounds check**: 2 broadcast comparisons + 2
+          ``np.any`` reductions replace 6 scalar column comparisons + 6 ORs.
+        - **In-place output for single kernel**: ``sdf.astype`` directly into
+          the result column instead of building a list and stacking.
+
         Returns:
             ``(N, len(kernels))`` float32 tensor on *self.device*.
         """
@@ -918,7 +927,7 @@ class TorchOcMesher:
         step = 2_000_000  # chunk size tuned for cache locality
         enclosed = self.enclosed
         _use_pinned = self.device.type == "cuda"
-        # Column-indexed bounds for fast out-of-bounds masking
+        # Vectorised bounds: pre-computed min/max arrays for broadcast compare.
         b_min = self._bounds_min_np
         b_max = self._bounds_max_np
 
@@ -929,28 +938,14 @@ class TorchOcMesher:
             def _eval_chunk(chunk_np):
                 sdf = kernel(chunk_np)
                 if enclosed:
-                    out_bound = (
-                        (chunk_np[:, 0] <= b_min[0])
-                        | (chunk_np[:, 0] >= b_max[0])
-                        | (chunk_np[:, 1] <= b_min[1])
-                        | (chunk_np[:, 1] >= b_max[1])
-                        | (chunk_np[:, 2] <= b_min[2])
-                        | (chunk_np[:, 2] >= b_max[2])
-                    )
+                    out_bound = np.any(chunk_np <= b_min, axis=1) | np.any(chunk_np >= b_max, axis=1)
                     sdf[out_bound] = 1
                 return sdf.astype(np.float32).reshape(-1, 1)
         else:
 
             def _eval_chunk(chunk_np):
                 if enclosed:
-                    out_bound = (
-                        (chunk_np[:, 0] <= b_min[0])
-                        | (chunk_np[:, 0] >= b_max[0])
-                        | (chunk_np[:, 1] <= b_min[1])
-                        | (chunk_np[:, 1] >= b_max[1])
-                        | (chunk_np[:, 2] <= b_min[2])
-                        | (chunk_np[:, 2] >= b_max[2])
-                    )
+                    out_bound = np.any(chunk_np <= b_min, axis=1) | np.any(chunk_np >= b_max, axis=1)
                 cols = []
                 for kernel in kernels:
                     sdf = kernel(chunk_np)
@@ -959,15 +954,18 @@ class TorchOcMesher:
                     cols.append(sdf)
                 return np.stack(cols, axis=-1).astype(np.float32)
 
-        chunks = [xyz_np[i : i + step] for i in range(0, n, step)]
-
-        if len(chunks) > 1 and self.n_sdf_workers > 1:
-            with ThreadPoolExecutor(max_workers=min(self.n_sdf_workers, len(chunks))) as pool:
-                parts = list(pool.map(_eval_chunk, chunks))
+        # Single-chunk fast path: skip list/pool/concat overhead.
+        if n <= step:
+            result_np = _eval_chunk(xyz_np)
         else:
-            parts = [_eval_chunk(c) for c in chunks]
+            chunks = [xyz_np[i : i + step] for i in range(0, n, step)]
+            if self.n_sdf_workers > 1:
+                with ThreadPoolExecutor(max_workers=min(self.n_sdf_workers, len(chunks))) as pool:
+                    parts = list(pool.map(_eval_chunk, chunks))
+            else:
+                parts = [_eval_chunk(c) for c in chunks]
+            result_np = np.concatenate(parts, axis=0)
 
-        result_np = parts[0] if len(parts) == 1 else np.concatenate(parts, axis=0)
         # Use pinned memory for CUDA transfers to overlap copy with compute
         if _use_pinned:
             result_t = torch.from_numpy(result_np).pin_memory()

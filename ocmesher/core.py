@@ -179,6 +179,11 @@ class OcMesher:
         self.visible_relax_iter = visible_relax_iter
         self.coarse_count = coarse_count
 
+        # Pre-compute bound vectors for vectorised out-of-bounds masking.
+        # Avoids per-axis Python loop in kernel_caller (6 temps → 2 broadcasts).
+        self._bounds_min_np = np.array([bounds[0], bounds[2], bounds[4]], dtype=np.float64)
+        self._bounds_max_np = np.array([bounds[1], bounds[3], bounds[5]], dtype=np.float64)
+
         register_func(
             self,
             dll,
@@ -277,24 +282,37 @@ class OcMesher:
         return False
 
     def kernel_caller(self, kernels, XYZ_all):
-        """Evaluate SDF *kernels* at the given *XYZ_all* positions."""
+        """Evaluate SDF *kernels* at the given *XYZ_all* positions.
+
+        Optimisations over the naïve implementation:
+        - Pre-allocated output buffer filled in-place (no list accumulation,
+          no ``np.stack`` / ``np.concatenate`` per batch).
+        - Vectorised out-of-bounds check using pre-computed bound vectors
+          with a single broadcast comparison per batch (replaces 6 temporary
+          boolean arrays + 6 in-place ORs with 2 broadcasts + 2 reductions).
+        """
         for kernel in kernels:
             if not callable(kernel):
                 msg = f"Each kernel must be callable, got {type(kernel).__name__}"
                 raise TypeError(msg)
         n_XYZ = len(XYZ_all)
+        n_kernels = len(kernels)
         if n_XYZ == 0:
-            return np.zeros((0, len(kernels)), dtype=self.sdf_np_float_type)
-        sdfs = []
+            return np.zeros((0, n_kernels), dtype=self.sdf_np_float_type)
+
+        result = np.empty((n_XYZ, n_kernels), dtype=self.sdf_np_float_type)
+        b_min = self._bounds_min_np
+        b_max = self._bounds_max_np
+
         for i in range(0, n_XYZ, _SDF_BATCH_SIZE):
-            XYZ = XYZ_all[i : i + _SDF_BATCH_SIZE]
-            batch_size = len(XYZ)
-            sdfs_i = []
-            out_bound = np.zeros(batch_size, dtype=bool)
+            end = min(i + _SDF_BATCH_SIZE, n_XYZ)
+            XYZ = XYZ_all[i:end]
+            batch_size = end - i
+
+            # Vectorised bounds check: 2 broadcasts + 2 any-reductions.
             if self.enclosed:
-                for c in range(3):
-                    out_bound |= XYZ[:, c] <= self.bounds[c * 2]
-                    out_bound |= XYZ[:, c] >= self.bounds[c * 2 + 1]
+                out_bound = np.any(b_min >= XYZ, axis=1) | np.any(b_max <= XYZ, axis=1)
+
             for k_idx, kernel in enumerate(kernels):
                 sdf = np.asarray(kernel(XYZ))
                 if sdf.shape != (batch_size,):
@@ -305,9 +323,9 @@ class OcMesher:
                     raise ValueError(msg)
                 if self.enclosed:
                     sdf[out_bound] = 1
-                sdfs_i.append(sdf)
-            sdfs.append(np.stack(sdfs_i, -1).astype(self.sdf_np_float_type))
-        return np.concatenate(sdfs, 0)
+                result[i:end, k_idx] = sdf
+
+        return result
 
     def __call__(self, kernels):
         """Run the full coarse-to-fine meshing pipeline and return meshes."""
@@ -395,9 +413,14 @@ class OcMesher:
             self.update_verts(e, self.sdf_AF(AC(sdf)), center_sdf_ptr, self.AF(cubes))
         cubes_r = AC(np.empty((num_verts * 8, 3), dtype=self.np_float_type))
         self.get_lr_verts(e, self.AF(cubes), self.AF(cubes_r))
-        sdf_l = self.kernel_caller(k_e, cubes)
-        sdf_r = self.kernel_caller(k_e, cubes_r)
-        del cubes, cubes_r, centers, center_sdf
+        # Fused left/right SDF evaluation: single kernel_caller call instead
+        # of two, halving the Python→SDF round-trip overhead.
+        n_cubes = len(cubes)
+        lr_combined = np.concatenate([cubes, cubes_r])
+        lr_sdf = self.kernel_caller(k_e, lr_combined)
+        sdf_l = lr_sdf[:n_cubes]
+        sdf_r = lr_sdf[n_cubes:]
+        del cubes, cubes_r, centers, center_sdf, lr_combined, lr_sdf
         # np.empty is safe: finalize_verts writes every element before use.
         vertices = np.empty((num_verts, 3), dtype=self.np_float_type)
         self.finalize_verts(e, self.sdf_AF(sdf_l), self.sdf_AF(sdf_r), self.AF(vertices))
@@ -410,7 +433,14 @@ class OcMesher:
         return trimesh.Trimesh(vertices=vertices, faces=faces, process=False), in_view_tag
 
     def _refine_extra_vertices(self, e, k_e, vertices):
-        """Compute edge/face extra vertices and assemble final faces."""
+        """Compute edge/face extra vertices and assemble final faces.
+
+        Optimisations:
+        - Fused edge + face SDF evaluation per bisection iteration: a single
+          ``kernel_caller`` call replaces two, halving Python→SDF round trips
+          in the inner loop (30 calls → 15 for the default 15 iterations).
+        - Fused left/right SDF evaluation after bisection: 4 calls → 2.
+        """
         cnts = np.zeros(3, dtype=np.int32)
         self.construct_faces(e, self.AF(vertices), AsInt(cnts))
         nve, nvf, nf = cnts
@@ -418,8 +448,13 @@ class OcMesher:
         edge_vertices_c = AC(np.empty((nve, 3), dtype=self.np_float_type))
         face_vertices_c = AC(np.empty((nvf, 3), dtype=self.np_float_type))
         self.get_extra_verts_center(self.AF(edge_vertices_c), self.AF(face_vertices_c))
-        ecenter_sdf = self.kernel_caller(k_e, edge_vertices_c)
-        fcenter_sdf = self.kernel_caller(k_e, face_vertices_c)
+        # Fused center SDF: one kernel_caller call for edge + face centres.
+        n_edge_c = len(edge_vertices_c)
+        ef_centers = np.concatenate([edge_vertices_c, face_vertices_c])
+        ef_center_sdf = self.kernel_caller(k_e, ef_centers)
+        ecenter_sdf = ef_center_sdf[:n_edge_c]
+        fcenter_sdf = ef_center_sdf[n_edge_c:]
+        del ef_centers, ef_center_sdf
         edge_vertices_lr = AC(np.empty((nve * 2, 3), dtype=self.np_float_type))
         face_vertices_lr = AC(np.empty((nvf * 4, 3), dtype=self.np_float_type))
         self.update_extra_verts(
@@ -430,9 +465,13 @@ class OcMesher:
             self.AF(edge_vertices_lr),
             self.AF(face_vertices_lr),
         )
+        n_edge_lr = len(edge_vertices_lr)
         for _ in range(self.bisection_iters):
-            e_sdf = self.kernel_caller(k_e, edge_vertices_lr)
-            f_sdf = self.kernel_caller(k_e, face_vertices_lr)
+            # Fused edge + face SDF: one call instead of two per iteration.
+            ef_combined = np.concatenate([edge_vertices_lr, face_vertices_lr])
+            ef_sdf = self.kernel_caller(k_e, ef_combined)
+            e_sdf = ef_sdf[:n_edge_lr]
+            f_sdf = ef_sdf[n_edge_lr:]
             self.update_extra_verts(
                 self.sdf_AF(e_sdf),
                 self.sdf_AF(f_sdf),
@@ -450,10 +489,17 @@ class OcMesher:
             self.AF(face_vertices_lr),
             self.AF(face_vertices_r),
         )
-        esdf_l = self.kernel_caller(k_e, edge_vertices_lr)
-        esdf_r = self.kernel_caller(k_e, edge_vertices_r)
-        fsdf_l = self.kernel_caller(k_e, face_vertices_lr)
-        fsdf_r = self.kernel_caller(k_e, face_vertices_r)
+        # Fused left/right SDF: 2 calls instead of 4.
+        n_elr = len(edge_vertices_lr)
+        e_combined = np.concatenate([edge_vertices_lr, edge_vertices_r])
+        e_sdf_all = self.kernel_caller(k_e, e_combined)
+        esdf_l = e_sdf_all[:n_elr]
+        esdf_r = e_sdf_all[n_elr:]
+        n_flr = len(face_vertices_lr)
+        f_combined = np.concatenate([face_vertices_lr, face_vertices_r])
+        f_sdf_all = self.kernel_caller(k_e, f_combined)
+        fsdf_l = f_sdf_all[:n_flr]
+        fsdf_r = f_sdf_all[n_flr:]
         del edge_vertices_lr, edge_vertices_r, face_vertices_lr, face_vertices_r
         edge_vertices = np.empty((nve, 3), dtype=self.np_float_type)
         face_vertices = np.empty((nvf, 3), dtype=self.np_float_type)

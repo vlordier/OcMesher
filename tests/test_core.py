@@ -156,6 +156,8 @@ class TestKernelCaller:
         obj.bounds = bounds
         obj.enclosed = enclosed
         obj.sdf_np_float_type = np.float32
+        obj._bounds_min_np = np.array([bounds[0], bounds[2], bounds[4]], dtype=np.float64)
+        obj._bounds_max_np = np.array([bounds[1], bounds[3], bounds[5]], dtype=np.float64)
         return obj
 
     def test_empty_points_returns_empty(self, sample_bounds, sphere_kernel):
@@ -482,3 +484,115 @@ class TestKernelCallerAllocation:
         pts = np.random.default_rng(0).standard_normal((n, 3)).astype(np.float64)
         result = mesher.kernel_caller([sphere_kernel], pts)
         assert result.shape == (n, 1)
+
+
+# ---------------------------------------------------------------------------
+# Vectorised bounds check (Refactor 1)
+# ---------------------------------------------------------------------------
+
+
+class TestVectorisedBoundsCheck:
+    """Verify the vectorised out-of-bounds masking in kernel_caller."""
+
+    @staticmethod
+    def _make_mesher_stub(bounds, *, enclosed=True):
+        obj = object.__new__(OcMesher)
+        obj.bounds = bounds
+        obj.enclosed = enclosed
+        obj.sdf_np_float_type = np.float32
+        obj._bounds_min_np = np.array([bounds[0], bounds[2], bounds[4]], dtype=np.float64)
+        obj._bounds_max_np = np.array([bounds[1], bounds[3], bounds[5]], dtype=np.float64)
+        return obj
+
+    def test_precomputed_bounds_vectors_exist(self, sample_cameras, sample_bounds):
+        """OcMesher.__init__ must pre-compute _bounds_min_np/_bounds_max_np."""
+        with patch("ocmesher.core.load_cdll") as mock_load:
+            mock_load.return_value = MagicMock()
+            mesher = OcMesher(sample_cameras, sample_bounds)
+        np.testing.assert_array_equal(mesher._bounds_min_np, sample_bounds[0::2])
+        np.testing.assert_array_equal(mesher._bounds_max_np, sample_bounds[1::2])
+
+    def test_vectorised_clamp_matches_per_axis(self, sphere_kernel):
+        bounds = np.array([-2.0, 2.0, -2.0, 2.0, -2.0, 2.0])
+        mesher = self._make_mesher_stub(bounds, enclosed=True)
+        # Mix of in-bounds and out-of-bounds points on all 3 axes.
+        pts = np.array(
+            [
+                [0, 0, 0],        # inside
+                [3, 0, 0],        # out: x > 2
+                [0, -3, 0],       # out: y < -2
+                [0, 0, 2.5],      # out: z > 2
+                [-2.0, 0, 0],     # boundary: x == x_min
+            ],
+            dtype=np.float64,
+        )
+        result = mesher.kernel_caller([sphere_kernel], pts)
+        assert result[0, 0] == pytest.approx(-1.0, abs=1e-6)  # inside → natural SDF
+        assert result[1, 0] == pytest.approx(1.0)              # clamped
+        assert result[2, 0] == pytest.approx(1.0)              # clamped
+        assert result[3, 0] == pytest.approx(1.0)              # clamped
+        assert result[4, 0] == pytest.approx(1.0)              # boundary → clamped
+
+    def test_not_enclosed_ignores_bounds(self, sphere_kernel):
+        bounds = np.array([-1.0, 1.0, -1.0, 1.0, -1.0, 1.0])
+        mesher = self._make_mesher_stub(bounds, enclosed=False)
+        pts = np.array([[5, 0, 0]], dtype=np.float64)
+        result = mesher.kernel_caller([sphere_kernel], pts)
+        # Natural sphere SDF at (5,0,0) is 4.0, not clamped to 1.
+        np.testing.assert_allclose(result[:, 0], [4.0], atol=1e-6)
+
+
+# ---------------------------------------------------------------------------
+# Fused SDF evaluation in bisection loops (Refactor 2)
+# ---------------------------------------------------------------------------
+
+
+class TestFusedBisectionSDF:
+    """Verify that fused SDF calls produce identical results to the unfused path."""
+
+    @staticmethod
+    def _make_mesher_stub(bounds, *, enclosed=True):
+        obj = object.__new__(OcMesher)
+        obj.bounds = bounds
+        obj.enclosed = enclosed
+        obj.sdf_np_float_type = np.float32
+        obj._bounds_min_np = np.array([bounds[0], bounds[2], bounds[4]], dtype=np.float64)
+        obj._bounds_max_np = np.array([bounds[1], bounds[3], bounds[5]], dtype=np.float64)
+        return obj
+
+    def test_fused_eval_matches_separate(self, sample_bounds, sphere_kernel):
+        """kernel_caller on concatenated array must equal separate calls."""
+        mesher = self._make_mesher_stub(sample_bounds)
+        rng = np.random.default_rng(42)
+        edge_pts = rng.standard_normal((20, 3))
+        face_pts = rng.standard_normal((30, 3))
+
+        # Separate calls (old path)
+        e_sdf = mesher.kernel_caller([sphere_kernel], edge_pts)
+        f_sdf = mesher.kernel_caller([sphere_kernel], face_pts)
+
+        # Fused call (new path)
+        combined = np.concatenate([edge_pts, face_pts])
+        combined_sdf = mesher.kernel_caller([sphere_kernel], combined)
+        e_sdf_fused = combined_sdf[:20]
+        f_sdf_fused = combined_sdf[20:]
+
+        np.testing.assert_array_equal(e_sdf, e_sdf_fused)
+        np.testing.assert_array_equal(f_sdf, f_sdf_fused)
+
+    def test_fused_eval_with_enclosed_clamp(self, sphere_kernel):
+        """Fused eval must correctly apply enclosed clamping to all sub-arrays."""
+        bounds = np.array([-1.0, 1.0, -1.0, 1.0, -1.0, 1.0])
+        mesher = self._make_mesher_stub(bounds, enclosed=True)
+        # One in-bounds, one out-of-bounds per array.
+        a = np.array([[0, 0, 0], [5, 0, 0]], dtype=np.float64)
+        b = np.array([[0.5, 0, 0], [-5, 0, 0]], dtype=np.float64)
+
+        combined = np.concatenate([a, b])
+        sdf = mesher.kernel_caller([sphere_kernel], combined)
+        # a[0] inside: natural, a[1] outside: 1.0
+        assert sdf[0, 0] == pytest.approx(-1.0, abs=1e-6)
+        assert sdf[1, 0] == pytest.approx(1.0)
+        # b[0] inside: natural, b[1] outside: 1.0
+        np.testing.assert_allclose(sdf[2, 0], np.linalg.norm([0.5, 0, 0]) - 1, atol=1e-6)
+        assert sdf[3, 0] == pytest.approx(1.0)
