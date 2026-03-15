@@ -106,6 +106,15 @@ ignore = [
     "PLR0912",  # too-many-branches (benchmark main)
     "PLR0913",  # too-many-arguments (benchmark functions mirror mesher API)
 ]
+# Python overhead micro-benchmark
+"benchmarks/bench_python_overhead.py" = [
+    "INP001",   # implicit namespace package
+    "SLF001",   # private member access (benchmarking internal methods)
+    "T201",     # print statements (benchmark output)
+    "B023",     # loop-variable binding in closures (intentional for timing)
+    "D103",     # missing docstring in main()
+    "PTH123",   # open() vs Path.open() (simple CLI)
+]
 # benchmark __init__
 "benchmarks/__init__.py" = [
     "INP001",   # implicit namespace package

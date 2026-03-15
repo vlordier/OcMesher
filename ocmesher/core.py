@@ -596,6 +596,7 @@ class OcMesher:
         _sdf_af = self.sdf_AF
         _kernel_caller = self.kernel_caller
         _np_float = self.np_float_type
+        _sdf_dtype = self.sdf_np_float_type
         _sdf_null = self._sdf_null
         _empty = _np_empty  # module-level cache avoids LOAD_ATTR on np
 
@@ -619,6 +620,15 @@ class OcMesher:
         _fine_iteration = self.fine_iteration
         _fine_iteration_output = self.fine_iteration_output
         with Timer("coarse step part2"), tqdm(total=n_blocks) as pbar:
+            # Growable buffers: allocated once, grown on demand, reused
+            # across inner-loop iterations.  Eliminates per-iteration
+            # np.empty + ctypes pointer construction overhead.
+            _c_cap = 0
+            _c_pos = None
+            _c_pos_ptr = None
+            _c_sdf = None
+            _c_sdf_ptr = None  # cached pointer for _fine_iteration
+            _c_min = None  # min-reduction buffer (multi-element only)
             while True:
                 inc = _fine_group()
                 if inc == 0:
@@ -626,13 +636,22 @@ class OcMesher:
                 pbar.update(inc)
                 n = _fine_iteration(_sdf_null)
                 while n > 0:
-                    # np.empty is safe: fine_iteration_output fills every element.
-                    positions = _empty((n, 3), dtype=_np_float)
-                    _fine_iteration_output(_af(positions))
-                    sdf_all = _kernel_caller(kernels, positions)
-                    # Single-kernel fast path: column view avoids min() reduction.
-                    sdf = sdf_all[:, 0] if single_kernel else sdf_all.min(axis=-1)
-                    n = _fine_iteration(_sdf_af(sdf))
+                    if n > _c_cap:
+                        _c_pos = _empty((n, 3), dtype=_np_float)
+                        _c_pos_ptr = _af(_c_pos)
+                        _c_sdf = _empty((n, n_elements), dtype=_sdf_dtype)
+                        if single_kernel:
+                            # (n, 1) C-ordered: column 0 is contiguous at base.
+                            _c_sdf_ptr = _sdf_af(_c_sdf)
+                        else:
+                            _c_min = _empty(n, dtype=_sdf_dtype)
+                            _c_sdf_ptr = _sdf_af(_c_min)
+                        _c_cap = n
+                    _fine_iteration_output(_c_pos_ptr)
+                    _kernel_caller(kernels, _c_pos[:n], out=_c_sdf[:n])
+                    if not single_kernel:
+                        _c_sdf[:n].min(axis=-1, out=_c_min[:n])
+                    n = _fine_iteration(_c_sdf_ptr)
         with Timer("filter visible blocks"):
             n_vis_block = self.vis_filter(self.simplify_occluded, self.visible_relax_iter)
         logger.info("visible blocks: %d", n_vis_block)
@@ -644,21 +663,37 @@ class OcMesher:
             # np.empty: C function writes nv before any Python read.
             nv = _empty(1, dtype=np.int32)
             nv_ptr = AsInt(nv)
+            # Growable buffers for the fine step loop — same pattern as
+            # the coarse step: allocated once, grown on demand, reused.
+            _f_cap = 0
+            _f_pos = None
+            _f_pos_ptr = None
+            _f_sdf = None
+            _f_sdf_ptr = None
             while True:
                 n = _final_iteration(nv_ptr)
                 if n == 0:
                     break
-                positions = _empty((n, 3), dtype=_np_float)
-                _final_iteration2(_af(positions))
-                sdf = _kernel_caller(kernels, positions)
-                inc = _final_iteration3(_sdf_af(sdf))
+                if n > _f_cap:
+                    _f_pos = _empty((n, 3), dtype=_np_float)
+                    _f_pos_ptr = _af(_f_pos)
+                    _f_sdf = _empty((n, n_elements), dtype=_sdf_dtype)
+                    _f_sdf_ptr = _sdf_af(_f_sdf)
+                    _f_cap = n
+                _final_iteration2(_f_pos_ptr)
+                _kernel_caller(kernels, _f_pos[:n], out=_f_sdf[:n])
+                inc = _final_iteration3(_f_sdf_ptr)
                 pbar.update(inc)
             n = self.final_iteration_occluded(nv_ptr)
             if n != 0:
-                positions = _empty((n, 3), dtype=_np_float)
-                _final_iteration2(_af(positions))
-                sdf = _kernel_caller(kernels, positions)
-                self.final_iteration3_occluded(_sdf_af(sdf))
+                if n > _f_cap:
+                    _f_pos = _empty((n, 3), dtype=_np_float)
+                    _f_pos_ptr = _af(_f_pos)
+                    _f_sdf = _empty((n, n_elements), dtype=_sdf_dtype)
+                    _f_sdf_ptr = _sdf_af(_f_sdf)
+                _final_iteration2(_f_pos_ptr)
+                _kernel_caller(kernels, _f_pos[:n], out=_f_sdf[:n])
+                self.final_iteration3_occluded(_f_sdf_ptr)
             # np.empty: final_remaining fills every element before use.
             nv = _empty(n_elements, dtype=np.int32)
             self.final_remaining(AsInt(nv))
@@ -714,7 +749,7 @@ class OcMesher:
         _sdf_buf_ptr = _sdf_af(_sdf_buf)
         # Pre-allocate fabs buffer reused by tolerance check to avoid
         # allocating a temporary array on each of the ~15 iterations.
-        _fabs_buf = np.empty_like(_sdf_buf) if check_tol else None
+        _fabs_buf = _empty((_n_cubes, _n_ke), dtype=_sdf_dtype) if check_tol else None
         _fabs = _np_fabs  # module-level cache
         for _ in range(_bisection_iters):
             _kernel_caller(k_e, cubes, out=_sdf_buf)
@@ -844,7 +879,7 @@ class OcMesher:
         _f_sdf_ptr = _sdf_af(_f_sdf_view)
         # Pre-allocate fabs buffer reused by tolerance check to avoid
         # allocating a temporary array on each of the ~15 iterations.
-        _fabs_buf = np.empty_like(_sdf_buf) if check_tol else None
+        _fabs_buf = _empty((_n_bisection, _n_ke), dtype=_sdf_dtype) if check_tol else None
         _fabs = _np_fabs  # module-level cache
         for _ in range(_bisection_iters):
             bisection_buf[:n_edge_lr] = edge_vertices_lr

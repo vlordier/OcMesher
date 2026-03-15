@@ -1917,3 +1917,100 @@ class TestBoundsMaskCachedUfuncs:
         # Point 2: on upper boundary (1.0 >= b_max[0]=1.0 is True) → out-of-bounds
         # Point 3: below lower boundary (-0.1 <= b_min[0]=0.0 is True) → out-of-bounds
         np.testing.assert_array_equal(mask, [False, True, True, True])
+
+
+# ---------------------------------------------------------------------------
+# Growable buffer optimisation in __call__ loops
+# ---------------------------------------------------------------------------
+
+
+class TestGrowableBuffersCoarseStep:
+    """Verify the growable position/SDF buffers in the coarse step loop."""
+
+    def test_kernel_caller_out_view_writes_correct_values(self):
+        """kernel_caller with out= on a buffer slice must write correct SDF."""
+        obj = object.__new__(OcMesher)
+        obj.enclosed = False
+        obj.sdf_np_float_type = np.float32
+        obj._sdf_pool = None
+        obj._oob_mask = np.empty(_SDF_BATCH_SIZE, dtype=bool)
+        obj._oob_tmp = np.empty(_SDF_BATCH_SIZE, dtype=bool)
+        obj._bounds_min_np = np.zeros(3)
+        obj._bounds_max_np = np.ones(3)
+        pts = np.array([[1, 2, 3], [4, 5, 6]], dtype=np.float64)
+        kernel = lambda xyz: np.linalg.norm(xyz, axis=1)  # noqa: E731
+        # Allocate a buffer larger than needed and pass a slice as out=.
+        buf = np.full((5, 1), -999.0, dtype=np.float32)
+        out_slice = buf[:2]
+        result = obj.kernel_caller([kernel], pts, out=out_slice)
+        # Result should contain the correct SDF values.
+        np.testing.assert_allclose(result[:, 0], np.linalg.norm(pts, axis=1), rtol=1e-5)
+        # The buffer's first two rows should be updated (same underlying data).
+        np.testing.assert_allclose(buf[:2, 0], np.linalg.norm(pts, axis=1), rtol=1e-5)
+
+    def test_growable_buffer_reuse_produces_stable_pointer(self):
+        """Leading slice of a buffer shares the same data pointer."""
+        buf = np.empty((10, 3), dtype=np.float64)
+        view = buf[:5]
+        # The data pointer of a leading slice equals the base array's.
+        assert buf.ctypes.data == view.ctypes.data
+
+    def test_min_out_parameter(self):
+        """ndarray.min(axis, out=) writes into the provided buffer."""
+        sdf = np.array([[1.0, 3.0], [2.0, 0.5]], dtype=np.float32)
+        out = np.empty(2, dtype=np.float32)
+        sdf.min(axis=-1, out=out)
+        np.testing.assert_array_equal(out, [1.0, 0.5])
+
+
+class TestGrowableBuffersFineStep:
+    """Verify growable buffers in the fine step loop."""
+
+    def test_sdf_buffer_slice_preserves_layout(self):
+        """A (cap, K) buffer sliced to [:n] must be C-contiguous."""
+        buf = np.empty((100, 2), dtype=np.float32)
+        view = buf[:50]
+        assert view.flags["C_CONTIGUOUS"]
+
+    def test_kernel_caller_out_larger_buffer(self):
+        """kernel_caller out= with a view of a larger buffer works correctly."""
+        obj = object.__new__(OcMesher)
+        obj.enclosed = True
+        obj.sdf_np_float_type = np.float32
+        obj._sdf_pool = None
+        obj._oob_mask = np.empty(_SDF_BATCH_SIZE, dtype=bool)
+        obj._oob_tmp = np.empty(_SDF_BATCH_SIZE, dtype=bool)
+        obj._bounds_min_np = np.array([-10.0, -10.0, -10.0])
+        obj._bounds_max_np = np.array([10.0, 10.0, 10.0])
+        pts = np.array([[0, 0, 0], [1, 0, 0], [0, 1, 0]], dtype=np.float64)
+        kernel = lambda xyz: np.linalg.norm(xyz, axis=1) - 5.0  # noqa: E731
+        buf = np.full((10, 1), 999.0, dtype=np.float32)
+        result = obj.kernel_caller([kernel], pts, out=buf[:3])
+        # First 3 rows should have valid SDF; remaining rows untouched.
+        np.testing.assert_allclose(result[:, 0], [-5.0, -4.0, -4.0], rtol=1e-5)
+        assert buf[5, 0] == pytest.approx(999.0)
+
+
+class TestExplicitEmptyForFabsBuf:
+    """Verify _fabs_buf uses explicit _empty() instead of np.empty_like."""
+
+    def test_construct_element_mesh_no_empty_like(self):
+        """_construct_element_mesh source must not use np.empty_like for _fabs_buf."""
+        source = inspect.getsource(OcMesher._construct_element_mesh)
+        # The tolerance buffer should use _empty((...), dtype=...) not np.empty_like.
+        assert "np.empty_like" not in source
+
+    def test_refine_extra_vertices_no_empty_like(self):
+        """_refine_extra_vertices source must not use np.empty_like for _fabs_buf."""
+        source = inspect.getsource(OcMesher._refine_extra_vertices)
+        assert "np.empty_like" not in source
+
+    def test_call_uses_growable_buffers(self):
+        """__call__ source must contain growable buffer pattern."""
+        source = inspect.getsource(OcMesher.__call__)
+        # Check for growable buffer capacity tracking variables.
+        assert "_c_cap" in source, "coarse step should use growable buffer"
+        assert "_f_cap" in source, "fine step should use growable buffer"
+        # Check that out= is used with kernel_caller in the loops.
+        assert "out=_c_sdf[:n]" in source
+        assert "out=_f_sdf[:n]" in source
