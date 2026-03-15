@@ -297,6 +297,9 @@ class OcMesher:
         ``(N,)`` boolean buffers, avoiding the ``(N, 3)`` temporaries that
         ``np.any((XYZ <= lo) | (XYZ >= hi), axis=1)`` would allocate.
 
+        The three-axis loop is fully unrolled to eliminate Python iteration
+        overhead in the hot path.
+
         Returns:
             Boolean array of shape ``(N,)`` where ``True`` means the point
             is on or outside the boundary.
@@ -304,17 +307,20 @@ class OcMesher:
         n = len(xyz)
         _tmp = np.empty(n, dtype=bool)
         out_bound = np.empty(n, dtype=bool)
-        # Seed with first axis: xyz[:,0] <= b_min[0]
+        # X-axis
         np.less_equal(xyz[:, 0], b_min[0], out=out_bound)
-        # OR with xyz[:,0] >= b_max[0]
         np.greater_equal(xyz[:, 0], b_max[0], out=_tmp)
         np.logical_or(out_bound, _tmp, out=out_bound)
-        # Remaining axes
-        for ax in range(1, 3):
-            np.less_equal(xyz[:, ax], b_min[ax], out=_tmp)
-            np.logical_or(out_bound, _tmp, out=out_bound)
-            np.greater_equal(xyz[:, ax], b_max[ax], out=_tmp)
-            np.logical_or(out_bound, _tmp, out=out_bound)
+        # Y-axis
+        np.less_equal(xyz[:, 1], b_min[1], out=_tmp)
+        np.logical_or(out_bound, _tmp, out=out_bound)
+        np.greater_equal(xyz[:, 1], b_max[1], out=_tmp)
+        np.logical_or(out_bound, _tmp, out=out_bound)
+        # Z-axis
+        np.less_equal(xyz[:, 2], b_min[2], out=_tmp)
+        np.logical_or(out_bound, _tmp, out=out_bound)
+        np.greater_equal(xyz[:, 2], b_max[2], out=_tmp)
+        np.logical_or(out_bound, _tmp, out=out_bound)
         return out_bound
 
     def kernel_caller(self, kernels, XYZ_all):
@@ -346,13 +352,14 @@ class OcMesher:
         result = np.empty((n_XYZ, n_kernels), dtype=self.sdf_np_float_type)
         b_min = self._bounds_min_np
         b_max = self._bounds_max_np
+        enclosed = self.enclosed
 
         for i in range(0, n_XYZ, _SDF_BATCH_SIZE):
             end = min(i + _SDF_BATCH_SIZE, n_XYZ)
             XYZ = XYZ_all[i:end]
             batch_size = end - i
 
-            out_bound = self._out_of_bounds_mask(XYZ, b_min, b_max) if self.enclosed else None
+            out_bound = self._out_of_bounds_mask(XYZ, b_min, b_max) if enclosed else None
 
             self._eval_kernels_batch(kernels, XYZ, batch_size, out_bound, result, i, end)
 
@@ -364,6 +371,10 @@ class OcMesher:
         When multiple kernels are present, they are dispatched in parallel
         using a ``ThreadPoolExecutor``.  ctypes / C-extension SDF calls
         release the GIL, enabling true multi-core parallelism.
+
+        SDF values are written directly into the pre-allocated *result*
+        buffer; out-of-bounds clamping is applied in-place on the result
+        slice, avoiding an intermediate copy.
         """
         n_kernels = len(kernels)
 
@@ -382,20 +393,21 @@ class OcMesher:
             # Multi-kernel: dispatch in parallel threads.
             with ThreadPoolExecutor(max_workers=n_kernels) as pool:
                 for k_idx, sdf in pool.map(_eval_one, enumerate(kernels)):
-                    if out_bound is not None:
-                        sdf[out_bound] = 1
                     result[start:end, k_idx] = sdf
+            if out_bound is not None:
+                result[start:end][out_bound] = 1
         else:
             # Single-kernel fast path: no thread-pool overhead.
-            k_idx, sdf = _eval_one((0, kernels[0]))
+            _k_idx, sdf = _eval_one((0, kernels[0]))
+            result[start:end, 0] = sdf
             if out_bound is not None:
-                sdf[out_bound] = 1
-            result[start:end, k_idx] = sdf
+                result[start:end, 0][out_bound] = 1
 
     def __call__(self, kernels):
         """Run the full coarse-to-fine meshing pipeline and return meshes."""
         _validate_kernels(kernels)
         n_elements = len(kernels)
+        single_kernel = n_elements == 1
         # octree only considering cameras, not sdf
         with Timer("coarse step part1"):
             n_blocks = self.run_coarse(
@@ -420,9 +432,12 @@ class OcMesher:
                 pbar.update(inc)
                 n = self.fine_iteration(POINTER(self.sdf_float_type)())
                 while n > 0:
-                    positions = np.zeros((n, 3), dtype=self.np_float_type)
+                    # np.empty is safe: fine_iteration_output fills every element.
+                    positions = np.empty((n, 3), dtype=self.np_float_type)
                     self.fine_iteration_output(self.AF(positions))
-                    sdf = self.kernel_caller(kernels, positions).min(axis=-1)
+                    sdf_all = self.kernel_caller(kernels, positions)
+                    # Single-kernel fast path: column view avoids min() reduction.
+                    sdf = sdf_all[:, 0] if single_kernel else sdf_all.min(axis=-1)
                     n = self.fine_iteration(self.sdf_AF(sdf))
         with Timer("filter visible blocks"):
             n_vis_block = self.vis_filter(self.simplify_occluded, self.visible_relax_iter)
@@ -474,19 +489,23 @@ class OcMesher:
         self.update_verts(e, POINTER(self.sdf_float_type)(), POINTER(self.sdf_float_type)(), self.AF(cubes))
         center_sdf_ptr = self.sdf_AF(center_sdf)
         tol = self.bisection_tol
+        check_tol = tol > 0
         for _ in tqdm(range(self.bisection_iters)):
             sdf = self.kernel_caller(k_e, cubes)
             self.update_verts(e, self.sdf_AF(sdf), center_sdf_ptr, self.AF(cubes))
             # Early-exit: if all SDF residuals are below tolerance the
             # surface has been located to sufficient accuracy.
-            if tol > 0 and np.max(np.abs(sdf)) < tol:
+            if check_tol and np.max(np.abs(sdf)) < tol:
                 break
         cubes_r = np.empty((num_verts * 8, 3), dtype=self.np_float_type)
         self.get_lr_verts(e, self.AF(cubes), self.AF(cubes_r))
         # Fused left/right SDF evaluation: single kernel_caller call instead
         # of two, halving the Python→SDF round-trip overhead.
+        # Pre-allocated buffer avoids np.concatenate allocation overhead.
         n_cubes = len(cubes)
-        lr_combined = np.concatenate([cubes, cubes_r])
+        lr_combined = np.empty((n_cubes + len(cubes_r), 3), dtype=self.np_float_type)
+        lr_combined[:n_cubes] = cubes
+        lr_combined[n_cubes:] = cubes_r
         lr_sdf = self.kernel_caller(k_e, lr_combined)
         sdf_l = lr_sdf[:n_cubes]
         sdf_r = lr_sdf[n_cubes:]
@@ -516,6 +535,8 @@ class OcMesher:
           terminates as soon as the maximum absolute SDF residual drops
           below the tolerance, skipping unnecessary iterations.
         - Fused left/right SDF evaluation after bisection: 4 calls → 1.
+        - All ``np.concatenate`` calls replaced with pre-allocated
+          slice-fill to avoid allocation overhead in hot paths.
         """
         cnts = np.zeros(3, dtype=np.int32)
         self.construct_faces(e, self.AF(vertices), AsInt(cnts))
@@ -525,8 +546,12 @@ class OcMesher:
         face_vertices_c = np.empty((nvf, 3), dtype=self.np_float_type)
         self.get_extra_verts_center(self.AF(edge_vertices_c), self.AF(face_vertices_c))
         # Fused center SDF: one kernel_caller call for edge + face centres.
+        # Pre-allocated buffer replaces np.concatenate.
         n_edge_c = len(edge_vertices_c)
-        ef_centers = np.concatenate([edge_vertices_c, face_vertices_c])
+        n_face_c = len(face_vertices_c)
+        ef_centers = np.empty((n_edge_c + n_face_c, 3), dtype=self.np_float_type)
+        ef_centers[:n_edge_c] = edge_vertices_c
+        ef_centers[n_edge_c:] = face_vertices_c
         ef_center_sdf = self.kernel_caller(k_e, ef_centers)
         ecenter_sdf = ef_center_sdf[:n_edge_c]
         fcenter_sdf = ef_center_sdf[n_edge_c:]
@@ -545,6 +570,7 @@ class OcMesher:
         # Pre-allocate combined buffer once; fill slices each iteration.
         bisection_buf = np.empty((n_edge_lr + len(face_vertices_lr), 3), dtype=self.np_float_type)
         tol = self.bisection_tol
+        check_tol = tol > 0
         for _ in range(self.bisection_iters):
             bisection_buf[:n_edge_lr] = edge_vertices_lr
             bisection_buf[n_edge_lr:] = face_vertices_lr
@@ -559,7 +585,7 @@ class OcMesher:
                 self.AF(edge_vertices_lr),
                 self.AF(face_vertices_lr),
             )
-            if tol > 0 and np.max(np.abs(ef_sdf)) < tol:
+            if check_tol and np.max(np.abs(ef_sdf)) < tol:
                 break
         del edge_vertices_c, face_vertices_c, ecenter_sdf, fcenter_sdf, bisection_buf
         edge_vertices_r = np.empty((nve * 2, 3), dtype=self.np_float_type)
@@ -571,10 +597,16 @@ class OcMesher:
             self.AF(face_vertices_r),
         )
         # Fused left/right SDF: 1 call instead of 4 — all 4 vertex arrays
-        # are concatenated into a single kernel_caller invocation.
+        # written into a pre-allocated buffer (no np.concatenate overhead).
         n_elr = len(edge_vertices_lr)
+        n_err = len(edge_vertices_r)
         n_flr = len(face_vertices_lr)
-        all_lr = np.concatenate([edge_vertices_lr, edge_vertices_r, face_vertices_lr, face_vertices_r])
+        n_frr = len(face_vertices_r)
+        all_lr = np.empty((n_elr + n_err + n_flr + n_frr, 3), dtype=self.np_float_type)
+        all_lr[:n_elr] = edge_vertices_lr
+        all_lr[n_elr : n_elr + n_err] = edge_vertices_r
+        all_lr[n_elr + n_err : n_elr + n_err + n_flr] = face_vertices_lr
+        all_lr[n_elr + n_err + n_flr :] = face_vertices_r
         all_lr_sdf = self.kernel_caller(k_e, all_lr)
         esdf_l = all_lr_sdf[:n_elr]
         esdf_r = all_lr_sdf[n_elr : 2 * n_elr]
@@ -594,5 +626,11 @@ class OcMesher:
         del esdf_l, esdf_r, fsdf_l, fsdf_r
         faces = np.empty((nf, 3), dtype=np.int32)
         self.get_faces(AsInt(faces))
-        vertices = np.concatenate((vertices, edge_vertices, face_vertices))
-        return vertices, faces
+        # Pre-allocated final vertex array avoids np.concatenate overhead.
+        n_base = vertices.shape[0]
+        n_edge = edge_vertices.shape[0]
+        final_vertices = np.empty((n_base + n_edge + face_vertices.shape[0], 3), dtype=self.np_float_type)
+        final_vertices[:n_base] = vertices
+        final_vertices[n_base : n_base + n_edge] = edge_vertices
+        final_vertices[n_base + n_edge :] = face_vertices
+        return final_vertices, faces

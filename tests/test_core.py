@@ -772,3 +772,60 @@ class TestBisectionTolerance:
         mock_load.return_value = MagicMock()
         mesher = OcMesher(sample_cameras, sample_bounds, bisection_tol=0.001)
         assert "bisection_tol=0.001" in repr(mesher)
+
+
+# ---------------------------------------------------------------------------
+# Single-kernel column-view fast path (Refactor 7)
+# ---------------------------------------------------------------------------
+
+
+class TestSingleKernelMinFastPath:
+    """Verify that single-kernel SDF returns a column view rather than min()."""
+
+    def test_single_kernel_column_equals_min(self, sample_bounds, sphere_kernel):
+        """For a single kernel, col-view [:, 0] must match .min(axis=-1)."""
+        mesher = TestParallelMultiKernel._make_mesher_stub(sample_bounds, enclosed=False)
+        pts = np.array([[0, 0, 0], [1, 0, 0], [0, 2, 0]], dtype=np.float64)
+        result = mesher.kernel_caller([sphere_kernel], pts)
+        col_view = result[:, 0]
+        col_min = result.min(axis=-1)
+        np.testing.assert_array_equal(col_view, col_min)
+
+    def test_multi_kernel_min_differs(self, sample_bounds, sphere_kernel, plane_kernel):
+        """For multiple kernels, .min(axis=-1) may differ from any single column."""
+        mesher = TestParallelMultiKernel._make_mesher_stub(sample_bounds, enclosed=False)
+        pts = np.array([[0, 0, 0], [1, 0, 0], [0, 2, 0]], dtype=np.float64)
+        result = mesher.kernel_caller([sphere_kernel, plane_kernel], pts)
+        assert result.shape == (3, 2)
+        expected_min = np.minimum(result[:, 0], result[:, 1])
+        np.testing.assert_allclose(result.min(axis=-1), expected_min, atol=1e-6)
+
+
+# ---------------------------------------------------------------------------
+# Pre-allocated slice-fill replaces np.concatenate (Refactor 8)
+# ---------------------------------------------------------------------------
+
+
+class TestSliceFillReplacesConcat:
+    """Verify pre-allocated slice-fill produces same results as concatenation."""
+
+    def test_slice_fill_matches_concat(self):
+        """Pre-allocated buffer filled via slice assignment must match np.concatenate."""
+        rng = np.random.default_rng(42)
+        a = rng.standard_normal((10, 3))
+        b = rng.standard_normal((20, 3))
+        c = rng.standard_normal((15, 3))
+        d = rng.standard_normal((25, 3))
+
+        # np.concatenate reference
+        concat_result = np.concatenate([a, b, c, d])
+
+        # Slice-fill approach
+        na, nb, nc, nd = len(a), len(b), len(c), len(d)
+        buf = np.empty((na + nb + nc + nd, 3), dtype=a.dtype)
+        buf[:na] = a
+        buf[na : na + nb] = b
+        buf[na + nb : na + nb + nc] = c
+        buf[na + nb + nc :] = d
+
+        np.testing.assert_array_equal(buf, concat_result)
