@@ -36,6 +36,8 @@ class OcMesher:
         self.sdf_np_float_type = np.float32
         self.sdf_AF = AsFloat
         self.bounds = bounds
+        self._bounds_lo = np.array([bounds[0], bounds[2], bounds[4]])
+        self._bounds_hi = np.array([bounds[1], bounds[3], bounds[5]])
         self.memory_limit_mb = memory_limit_mb
 
         cam_poses, Ks, Hs, Ws = cameras
@@ -105,15 +107,22 @@ class OcMesher:
             XYZ = XYZ_all[i: i+step]
             sdfs_i = []
             if self.enclosed:
-                out_bound = np.zeros(len(XYZ), dtype=bool)
-                for c in range(3):
-                    out_bound |= XYZ[:, c] <= self.bounds[c*2]
-                    out_bound |= XYZ[:, c] >= self.bounds[c*2+1]
+                out_bound = np.any(
+                    (XYZ <= self._bounds_lo) | (XYZ >= self._bounds_hi), axis=1,
+                )
             for kernel in kernels:
                 sdf = kernel(XYZ)
                 if self.enclosed: sdf[out_bound] = 1
                 sdfs_i.append(sdf)
-            sdfs.append(np.stack(sdfs_i, -1).astype(self.sdf_np_float_type))
+            if len(sdfs_i) == 1:
+                result = sdfs_i[0]
+                if result.ndim == 1:
+                    result = result[:, np.newaxis]
+                if result.dtype != self.sdf_np_float_type:
+                    result = result.astype(self.sdf_np_float_type)
+                sdfs.append(result)
+            else:
+                sdfs.append(np.stack(sdfs_i, -1).astype(self.sdf_np_float_type))
         return np.concatenate(sdfs, 0)
     
     def __call__(self, kernels):
