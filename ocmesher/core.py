@@ -683,7 +683,7 @@ class OcMesher:
         nve, nvf, nf = cnts
         # Early-exit: when there are no extra vertices, skip all SDF
         # evaluation and bisection — just return the faces.
-        if nve == 0 and nvf == 0:
+        if not (nve | nvf):
             faces = np.empty((nf, 3), dtype=np.int32)
             self.get_faces(AsInt(faces))
             return vertices, faces
@@ -745,7 +745,7 @@ class OcMesher:
             )
             if check_tol and np.fabs(ef_sdf).max() < tol:
                 break
-        del edge_vertices_c, face_vertices_c, ecenter_sdf, fcenter_sdf, bisection_buf, _sdf_buf
+        del edge_vertices_c, face_vertices_c, ecenter_sdf, fcenter_sdf, bisection_buf
         edge_vertices_r = np.empty((nve * 2, 3), dtype=_np_float)
         face_vertices_r = np.empty((nvf * 4, 3), dtype=_np_float)
         self.get_lr_extra_verts(

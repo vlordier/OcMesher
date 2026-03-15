@@ -1178,12 +1178,19 @@ class TestCachedCtypesPointers:
 
 
 class TestEarlyExitZeroExtraVerts:
-    """Verify that _refine_extra_vertices docstring mentions early-exit."""
+    """Verify that _refine_extra_vertices exits early when nve == 0 and nvf == 0."""
 
     def test_docstring_mentions_early_exit(self):
         """The method docstring should document the early-exit optimisation."""
         doc = OcMesher._refine_extra_vertices.__doc__
         assert "Early-exit" in doc or "early-exit" in doc or "nve == 0" in doc
+
+    def test_early_exit_code_path_exists(self):
+        """The early-exit guard for zero extra vertices must be present in source."""
+        import inspect  # noqa: PLC0415
+
+        source = inspect.getsource(OcMesher._refine_extra_vertices)
+        assert "not (nve | nvf)" in source or "(nve == 0 and nvf == 0)" in source
 
 
 # ---------------------------------------------------------------------------
