@@ -230,10 +230,11 @@ class OcMesher:
                 all_extra_sdf = self.kernel_caller(k_e, all_extra)
                 n_elr = nve * 2
                 n_flr = nvf * 4
+                n_edge_total = n_elr * 2
                 esdf_l = all_extra_sdf[:n_elr]
-                esdf_r = all_extra_sdf[n_elr:n_elr * 2]
-                fsdf_l = all_extra_sdf[n_elr * 2:n_elr * 2 + n_flr]
-                fsdf_r = all_extra_sdf[n_elr * 2 + n_flr:]
+                esdf_r = all_extra_sdf[n_elr:n_edge_total]
+                fsdf_l = all_extra_sdf[n_edge_total:n_edge_total + n_flr]
+                fsdf_r = all_extra_sdf[n_edge_total + n_flr:]
                 del edge_vertices_lr, edge_vertices_r, face_vertices_lr, face_vertices_r
                 edge_vertices = np.zeros((nve, 3), dtype=self.np_float_type)
                 face_vertices = np.zeros((nvf, 3), dtype=self.np_float_type)
