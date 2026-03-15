@@ -1437,12 +1437,13 @@ class TestOcMesherSlots:
             "_sdf_null",
             "_bounds_min_np",
             "_bounds_max_np",
-            "kernel_caller",  # should NOT be in slots (it's a method)
         ):
-            if attr == "kernel_caller":
-                # kernel_caller is a method, not a slot
-                continue
             assert attr in slots, f"{attr} missing from __slots__"
+
+    def test_methods_not_in_slots(self):
+        """Instance methods should not appear in __slots__."""
+        slots = OcMesher.__slots__
+        assert "kernel_caller" not in slots
 
     def test_cannot_set_arbitrary_attribute(self):
         """Setting a non-slot attribute should raise AttributeError."""

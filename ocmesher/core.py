@@ -539,6 +539,19 @@ class OcMesher:
             pool = self._get_pool(n_kernels)
             _pool_map = pool.map
             _enumerate = enumerate
+
+            def _make_eval_one(_xyz, _n):
+                def _eval_one(k_idx_kernel):
+                    k_idx, kernel = k_idx_kernel
+                    raw = kernel(_xyz)
+                    sdf = raw if _isinstance(raw, _ndarray) else np.asarray(raw)
+                    if sdf.shape != (_n,):
+                        msg = f"kernels[{k_idx}] returned shape {sdf.shape} for {_n} query points; expected ({_n},)"
+                        raise ValueError(msg)
+                    return k_idx, sdf
+
+                return _eval_one
+
             if self.enclosed:
                 _mask_into = self._out_of_bounds_mask_into
                 b_min = self._bounds_min_np
@@ -546,18 +559,7 @@ class OcMesher:
                 for i in range(0, n_XYZ, _batch):
                     end = _min(i + _batch, n_XYZ)
                     XYZ = XYZ_all[i:end]
-                    n = end - i
-
-                    def _eval_one(k_idx_kernel, _xyz=XYZ, _n=n):
-                        k_idx, kernel = k_idx_kernel
-                        raw = kernel(_xyz)
-                        sdf = raw if _isinstance(raw, _ndarray) else np.asarray(raw)
-                        if sdf.shape != (_n,):
-                            msg = f"kernels[{k_idx}] returned shape {sdf.shape} for {_n} query points; expected ({_n},)"
-                            raise ValueError(msg)
-                        return k_idx, sdf
-
-                    for k_idx, sdf in _pool_map(_eval_one, _enumerate(kernels)):
+                    for k_idx, sdf in _pool_map(_make_eval_one(XYZ, end - i), _enumerate(kernels)):
                         result[i:end, k_idx] = sdf
                     out_bound = _mask_into(XYZ, b_min, b_max)
                     result[i:end][out_bound] = 1
@@ -565,18 +567,7 @@ class OcMesher:
                 for i in range(0, n_XYZ, _batch):
                     end = _min(i + _batch, n_XYZ)
                     XYZ = XYZ_all[i:end]
-                    n = end - i
-
-                    def _eval_one(k_idx_kernel, _xyz=XYZ, _n=n):
-                        k_idx, kernel = k_idx_kernel
-                        raw = kernel(_xyz)
-                        sdf = raw if _isinstance(raw, _ndarray) else np.asarray(raw)
-                        if sdf.shape != (_n,):
-                            msg = f"kernels[{k_idx}] returned shape {sdf.shape} for {_n} query points; expected ({_n},)"
-                            raise ValueError(msg)
-                        return k_idx, sdf
-
-                    for k_idx, sdf in _pool_map(_eval_one, _enumerate(kernels)):
+                    for k_idx, sdf in _pool_map(_make_eval_one(XYZ, end - i), _enumerate(kernels)):
                         result[i:end, k_idx] = sdf
 
         return result
