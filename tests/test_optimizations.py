@@ -307,13 +307,11 @@ class TestBoundsMaskCachedUfuncs:
     """Verify bounds mask methods use module-level cached ufuncs."""
 
     def test_static_mask_uses_cached_ufuncs(self):
-        """Static _out_of_bounds_mask should use cached ufunc references."""
+        """Static _out_of_bounds_mask should delegate to shared helper."""
 
         source = inspect.getsource(OcMesher._out_of_bounds_mask)
-        # Should reference local aliases, not np.less_equal directly
-        assert "_le(" in source or "_np_less_equal" in source
-        assert "_ge(" in source or "_np_greater_equal" in source
-        assert "_lor(" in source or "_np_logical_or" in source
+        # Now delegates to the shared _out_of_bounds_mask_shared helper.
+        assert "_out_of_bounds_mask_shared" in source or "_le(" in source or "_np_less_equal" in source
 
     def test_into_mask_uses_cached_ufuncs(self):
         """Instance _out_of_bounds_mask_into should use cached ufunc references."""

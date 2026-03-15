@@ -8,6 +8,26 @@ import numpy as np
 import pytest
 
 
+def _available_torch_devices() -> list[str]:
+    """Return torch device strings available on this platform."""
+    try:
+        import torch
+    except ImportError:
+        return []
+    devices = ["cpu"]
+    if torch.cuda.is_available():
+        devices.append("cuda")
+    if hasattr(torch.backends, "mps") and torch.backends.mps.is_available():
+        devices.append("mps")
+    return devices
+
+
+@pytest.fixture(params=_available_torch_devices(), scope="session")
+def torch_device(request):
+    """Parametrised fixture yielding each available torch device string."""
+    return request.param
+
+
 @pytest.fixture
 def sample_camera_pose():
     """A single 4x4 identity-like camera pose matrix."""

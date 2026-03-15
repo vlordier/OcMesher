@@ -55,6 +55,8 @@ _np_asarray = np.asarray
 
 # Re-export validation under private names for backwards compatibility.
 from ._validation import _AXIS_NAMES  # noqa: E402, F401
+from ._validation import out_of_bounds_mask as _out_of_bounds_mask_shared  # noqa: E402
+from ._validation import preprocess_cameras as _preprocess_cameras  # noqa: E402
 from ._validation import validate_bounds as _validate_bounds  # noqa: E402
 from ._validation import validate_cameras as _validate_cameras  # noqa: E402
 from ._validation import validate_kernels as _validate_kernels  # noqa: E402
@@ -156,15 +158,14 @@ class OcMesher:
         self.memory_limit_mb = memory_limit_mb
 
         self.n_cameras = len(cam_poses)
-        # Fully vectorised camera packing — no per-camera Python loop.
+        # Use shared camera preprocessing helper — DRY with TorchOcMesher.
         _n_cam = self.n_cameras
-        _inv_poses = np.linalg.inv(np.asarray(cam_poses, dtype=np.float64))  # (C, 4, 4)
-        _intrinsics = np.asarray(Ks, dtype=np.float64)  # (C, 3, 3)
+        inv_poses_3x4, _intrinsics, _, _ = _preprocess_cameras(cam_poses, Ks, Hs, Ws)
         _hs = np.asarray(Hs, dtype=self.np_float_type)
         _ws = np.asarray(Ws, dtype=self.np_float_type)
         # Build a (C, STRIDE) 2-D view and fill all cameras at once.
         cameras_2d = np.empty((_n_cam, CAMERA_DATA_STRIDE), dtype=self.np_float_type)
-        cameras_2d[:, :12] = _inv_poses[:, :3, :4].reshape(_n_cam, 12)
+        cameras_2d[:, :12] = inv_poses_3x4.reshape(_n_cam, 12)
         cameras_2d[:, 12:21] = _intrinsics.reshape(_n_cam, 9)
         cameras_2d[:, 21] = _hs
         cameras_2d[:, 22] = _ws
@@ -329,39 +330,10 @@ class OcMesher:
     def _out_of_bounds_mask(xyz, b_min, b_max):
         """Build a 1-D boolean mask indicating out-of-bounds points.
 
-        Uses per-axis ufunc calls with ``out=`` to accumulate into two
-        ``(N,)`` boolean buffers, avoiding the ``(N, 3)`` temporaries that
-        ``np.any((XYZ <= lo) | (XYZ >= hi), axis=1)`` would allocate.
-
-        The three-axis loop is fully unrolled to eliminate Python iteration
-        overhead in the hot path.  Uses module-level cached ufunc refs
-        to avoid ``LOAD_ATTR`` on the ``np`` module per call.
-
-        Returns:
-            Boolean array of shape ``(N,)`` where ``True`` means the point
-            is on or outside the boundary.
+        Delegates to the shared ``out_of_bounds_mask`` helper in
+        ``_validation``.  See that function for implementation details.
         """
-        n = len(xyz)
-        _le = _np_less_equal
-        _ge = _np_greater_equal
-        _lor = _np_logical_or
-        _tmp = _np_empty(n, dtype=bool)
-        out_bound = _np_empty(n, dtype=bool)
-        # X-axis
-        _le(xyz[:, 0], b_min[0], out=out_bound)
-        _ge(xyz[:, 0], b_max[0], out=_tmp)
-        _lor(out_bound, _tmp, out=out_bound)
-        # Y-axis
-        _le(xyz[:, 1], b_min[1], out=_tmp)
-        _lor(out_bound, _tmp, out=out_bound)
-        _ge(xyz[:, 1], b_max[1], out=_tmp)
-        _lor(out_bound, _tmp, out=out_bound)
-        # Z-axis
-        _le(xyz[:, 2], b_min[2], out=_tmp)
-        _lor(out_bound, _tmp, out=out_bound)
-        _ge(xyz[:, 2], b_max[2], out=_tmp)
-        _lor(out_bound, _tmp, out=out_bound)
-        return out_bound
+        return _out_of_bounds_mask_shared(xyz, b_min, b_max)
 
     def _out_of_bounds_mask_into(self, xyz, b_min, b_max):
         """Like ``_out_of_bounds_mask`` but reuses pre-allocated buffers.
@@ -507,7 +479,7 @@ class OcMesher:
 
         return result
 
-    def __call__(self, kernels):
+    def __call__(self, kernels) -> tuple[list[trimesh.Trimesh], list[np.ndarray]]:
         """Run the full coarse-to-fine meshing pipeline and return meshes."""
         _validate_kernels(kernels)
         n_elements = len(kernels)

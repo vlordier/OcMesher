@@ -39,6 +39,8 @@ import trimesh
 
 from ._constants import CORNER_QUANT_SCALE, DENOM_EPS, MAX_SDF_WORKERS
 from ._mc_tables import CORNER_OFFSETS, EDGE_TABLE, EDGE_VERTICES, TRI_TABLE
+from ._validation import out_of_bounds_mask as _out_of_bounds_mask
+from ._validation import preprocess_cameras as _preprocess_cameras
 from .utils.timer import Timer
 
 logger = logging.getLogger(__name__)
@@ -90,6 +92,27 @@ class TorchOcMesher:
     # Lazily initialised on first use per device.
     _mc_cache: ClassVar[dict[torch.device, dict[str, torch.Tensor]]] = {}
 
+    @staticmethod
+    def _select_device_and_dtype(device=None) -> tuple[torch.device, torch.dtype]:
+        """Auto-detect the best device and matching floating-point dtype.
+
+        Priority: explicit *device* → CUDA → MPS → CPU.
+        Returns ``(device, fdtype)`` where *fdtype* is ``float32`` on
+        accelerators (speed) and ``float64`` on CPU (precision).
+        """
+        if device is not None:
+            dev = torch.device(device)
+        elif torch.cuda.is_available():
+            dev = torch.device("cuda")
+        elif _mps_available():
+            dev = torch.device("mps")
+        else:
+            dev = torch.device("cpu")
+        fdtype = torch.float64 if dev.type == "cpu" else torch.float32
+        if dev.type == "cuda":
+            torch.backends.cudnn.benchmark = True
+        return dev, fdtype
+
     def __init__(
         self,
         cameras,
@@ -128,38 +151,16 @@ class TorchOcMesher:
                 one-time compilation cost on the first call; recommended when
                 the mesher is called many times (e.g., in a training loop).
         """
-        if device is not None:
-            self.device = torch.device(device)
-        elif torch.cuda.is_available():
-            self.device = torch.device("cuda")
-        elif _mps_available():
-            self.device = torch.device("mps")
-        else:
-            self.device = torch.device("cpu")
-
-        # Select compute dtype -----------------------------------------------
-        # float32 is ~4x faster than float64 on CUDA (Tensor Cores) and is the
-        # only floating-point dtype supported by MPS.  CPU keeps float64 for
-        # numerical precision in downstream processing.
-        self._fdtype: torch.dtype = torch.float64 if self.device.type == "cpu" else torch.float32
-
-        # Enable cuDNN auto-tuning for CUDA devices --------------------------
-        if self.device.type == "cuda":
-            torch.backends.cudnn.benchmark = True
+        self.device, self._fdtype = self._select_device_and_dtype(device)
 
         cam_poses, Ks, Hs, Ws = cameras
         self.n_cameras = len(cam_poses)
 
-        # Pack camera data as batched tensors for bmm projection -------------
-        # Vectorised: build numpy arrays first, transfer once to device.
-        # Cast to _fdtype: float32 on CUDA/MPS for speed, float64 on CPU.
-        inv_poses_np = np.stack([np.linalg.inv(cam_poses[i])[:3, :4] for i in range(self.n_cameras)]).astype(np.float64)
-        intrinsics_np = np.stack([np.asarray(Ks[i], dtype=np.float64) for i in range(self.n_cameras)])
-        # Tuples are immutable and have lower overhead than lists; camera
-        # dimensions never change after initialisation.
-        self.cam_heights: tuple[int, ...] = tuple(int(h) for h in Hs)
-        self.cam_widths: tuple[int, ...] = tuple(int(w) for w in Ws)
-        self.cam_inv_poses = torch.from_numpy(inv_poses_np).to(dtype=self._fdtype, device=self.device)  # (C, 3, 4)
+        # Use shared camera preprocessing helper — DRY with OcMesher.
+        inv_poses_3x4, intrinsics_np, cam_h, cam_w = _preprocess_cameras(cam_poses, Ks, Hs, Ws)
+        self.cam_heights: tuple[int, ...] = cam_h
+        self.cam_widths: tuple[int, ...] = cam_w
+        self.cam_inv_poses = torch.from_numpy(inv_poses_3x4).to(dtype=self._fdtype, device=self.device)  # (C, 3, 4)
         self.cam_intrinsics = torch.from_numpy(intrinsics_np).to(dtype=self._fdtype, device=self.device)  # (C, 3, 3)
 
         # Scene bounds -------------------------------------------------------
@@ -293,6 +294,17 @@ class TorchOcMesher:
                 logger.warning(
                     "torch.compile failed to initialise (backend unavailable); falling back to eager execution."
                 )
+
+    def __repr__(self) -> str:
+        """Return a concise developer-friendly description of the mesher."""
+        return (
+            f"TorchOcMesher("
+            f"n_cameras={self.n_cameras}, "
+            f"device={self.device}, "
+            f"dtype={self._fdtype}, "
+            f"bisection_iters={self.bisection_iters}, "
+            f"enclosed={self.enclosed})"
+        )
 
     def _ensure_mc_cache(self):
         """Lazily build marching-cubes lookup tables on *self.device*."""
@@ -459,18 +471,25 @@ class TorchOcMesher:
 
             def _eval_chunk(chunk_np):
                 sdf = kernel(chunk_np)
+                _n = len(chunk_np)
+                if sdf.shape != (_n,):
+                    msg = f"kernels[0] returned shape {sdf.shape} for {_n} query points; expected ({_n},)"
+                    raise ValueError(msg)
                 if enclosed:
-                    out_bound = np.any(chunk_np <= b_min, axis=1) | np.any(chunk_np >= b_max, axis=1)
-                    sdf[out_bound] = 1
+                    sdf[_out_of_bounds_mask(chunk_np, b_min, b_max)] = 1
                 return sdf.astype(np.float32).reshape(-1, 1)
         else:
 
             def _eval_chunk(chunk_np):
+                _n = len(chunk_np)
                 if enclosed:
-                    out_bound = np.any(chunk_np <= b_min, axis=1) | np.any(chunk_np >= b_max, axis=1)
+                    out_bound = _out_of_bounds_mask(chunk_np, b_min, b_max)
                 cols = []
-                for kernel in kernels:
+                for k_idx, kernel in enumerate(kernels):
                     sdf = kernel(chunk_np)
+                    if sdf.shape != (_n,):
+                        msg = f"kernels[{k_idx}] returned shape {sdf.shape} for {_n} query points; expected ({_n},)"
+                        raise ValueError(msg)
                     if enclosed:
                         sdf[out_bound] = 1
                     cols.append(sdf)
@@ -498,6 +517,46 @@ class TorchOcMesher:
     # Octree construction
     # ------------------------------------------------------------------
     @torch.no_grad()
+    def _octree_expansion_step(
+        self,
+        coords: torch.Tensor,
+        levels: torch.Tensor,
+        budget_target: int,
+    ) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor] | None:
+        """Identify cubes to expand and produce their children, budget-limited.
+
+        Shared by :meth:`_build_coarse_octree` and :meth:`_refine_surface_octree`
+        to eliminate duplicated projection → budget → child-generation logic.
+
+        Returns:
+            ``(keep_mask, child_coords, child_levels, proj)`` or ``None``
+            if no cubes need expansion.
+        """
+        n = len(coords)
+        cube_scales = self._cube_scales(levels)
+        positions = self._cube_centers(coords, levels, cube_scales=cube_scales)
+        proj = self._projected_sizes(positions, levels, cube_scales=cube_scales)
+        to_expand = proj > self.inv_scale
+        if not to_expand.any():
+            return None
+
+        expand_idx = torch.where(to_expand)[0]
+        n_expand = len(expand_idx)
+        n_keep = n - n_expand
+
+        budget = max(1, (budget_target - n_keep) // 8)
+        if n_expand > budget:
+            _, top_k = proj[expand_idx].topk(budget)
+            expand_idx = expand_idx[top_k]
+            to_expand = torch.zeros(n, dtype=torch.bool, device=self.device)
+            to_expand[expand_idx] = True
+
+        keep_mask = ~to_expand
+        child_c = coords[expand_idx].unsqueeze(1) * 2 + self._child_offsets.unsqueeze(0)
+        child_l = (levels[expand_idx] + 1).unsqueeze(1).expand(-1, 8)
+        return keep_mask, child_c.reshape(-1, 3), child_l.reshape(-1), proj
+
+    @torch.no_grad()
     def _build_coarse_octree(self) -> tuple[torch.Tensor, torch.Tensor]:
         """Build the coarse adaptive octree driven by camera projections.
 
@@ -508,36 +567,14 @@ class TorchOcMesher:
         levels = torch.zeros(1, dtype=torch.int64, device=self.device)
 
         for _ in range(30):
-            n = len(coords)
-            if n >= self.coarse_count:
+            if len(coords) >= self.coarse_count:
                 break
-            # Compute scale once and share between centers and projection.
-            cube_scales = self._cube_scales(levels)
-            positions = self._cube_centers(coords, levels, cube_scales=cube_scales)
-            proj = self._projected_sizes(positions, levels, cube_scales=cube_scales)
-            to_expand = proj > self.inv_scale
-            if not to_expand.any():
+            result = self._octree_expansion_step(coords, levels, self.coarse_count)
+            if result is None:
                 break
-
-            expand_idx = torch.where(to_expand)[0]
-            n_expand = len(expand_idx)
-            n_keep = n - n_expand
-
-            # Budget-limit expansion
-            remaining = self.coarse_count - n_keep
-            if remaining < n_expand * 8:
-                budget = max(1, remaining // 8)
-                _, top_k = proj[expand_idx].topk(budget)
-                expand_idx = expand_idx[top_k]
-                to_expand = torch.zeros(n, dtype=torch.bool, device=self.device)
-                to_expand[expand_idx] = True
-
-            keep_mask = ~to_expand
-            child_c = coords[expand_idx].unsqueeze(1) * 2 + self._child_offsets.unsqueeze(0)
-            child_l = (levels[expand_idx] + 1).unsqueeze(1).expand(-1, 8)
-
-            coords = torch.cat([coords[keep_mask], child_c.reshape(-1, 3)])
-            levels = torch.cat([levels[keep_mask], child_l.reshape(-1)])
+            keep_mask, child_coords, child_levels, _ = result
+            coords = torch.cat([coords[keep_mask], child_coords])
+            levels = torch.cat([levels[keep_mask], child_levels])
         return coords, levels
 
     # ------------------------------------------------------------------
@@ -647,33 +684,12 @@ class TorchOcMesher:
         target_cubes = self.coarse_count * 4
 
         for _ in range(max_iters):
-            n = len(coords)
-            if n >= target_cubes:
+            if len(coords) >= target_cubes:
                 break
-            # Compute scale once and share between centers and projection.
-            cube_scales = self._cube_scales(levels)
-            positions = self._cube_centers(coords, levels, cube_scales=cube_scales)
-            proj = self._projected_sizes(positions, levels, cube_scales=cube_scales)
-            to_expand = proj > self.inv_scale
-            if not to_expand.any():
+            result = self._octree_expansion_step(coords, levels, target_cubes)
+            if result is None:
                 break
-
-            expand_idx = torch.where(to_expand)[0]
-            n_expand = len(expand_idx)
-            n_keep = n - n_expand
-
-            budget = max(1, (target_cubes - n_keep) // 8)
-            if n_expand > budget:
-                _, top_k = proj[expand_idx].topk(budget)
-                expand_idx = expand_idx[top_k]
-                to_expand = torch.zeros(n, dtype=torch.bool, device=self.device)
-                to_expand[expand_idx] = True
-
-            keep_mask = ~to_expand
-            child_c = coords[expand_idx].unsqueeze(1) * 2 + self._child_offsets.unsqueeze(0)
-            child_l = (levels[expand_idx] + 1).unsqueeze(1).expand(-1, 8)
-            child_coords = child_c.reshape(-1, 3)
-            child_levels = child_l.reshape(-1)
+            keep_mask, child_coords, child_levels, _ = result
 
             if corner_sdf is not None:
                 # Optimised path: kept cubes already have valid corner SDF
@@ -901,7 +917,7 @@ class TorchOcMesher:
     # ------------------------------------------------------------------
     # Main pipeline
     # ------------------------------------------------------------------
-    def __call__(self, kernels):
+    def __call__(self, kernels) -> tuple[list[trimesh.Trimesh], list[np.ndarray]]:
         """Run the full coarse-to-fine meshing pipeline and return meshes."""
         n_elements = len(kernels)
 

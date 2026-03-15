@@ -11,6 +11,8 @@ from __future__ import annotations
 import numpy as np
 
 __all__ = [
+    "out_of_bounds_mask",
+    "preprocess_cameras",
     "validate_bounds",
     "validate_cameras",
     "validate_kernels",
@@ -98,3 +100,70 @@ def validate_kernels(kernels):
         if not callable(k):
             msg = f"kernels[{i}] must be callable, got {type(k).__name__}"
             raise TypeError(msg)
+
+
+def preprocess_cameras(cam_poses, Ks, Hs, Ws):
+    """Invert camera poses and normalise intrinsics as contiguous numpy arrays.
+
+    Shared by both the C++ and PyTorch backends to avoid duplicated
+    camera preprocessing logic.
+
+    Args:
+        cam_poses: List of ``(4, 4)`` float64 pose matrices (already validated).
+        Ks: List of ``(3, 3)`` float64 intrinsics matrices (already validated).
+        Hs: Sequence of image heights.
+        Ws: Sequence of image widths.
+
+    Returns:
+        Tuple of ``(inv_poses_3x4, intrinsics, heights, widths)`` where:
+        - *inv_poses_3x4*: ``(C, 3, 4)`` float64 contiguous array
+        - *intrinsics*: ``(C, 3, 3)`` float64 contiguous array
+        - *heights*: tuple of ints
+        - *widths*: tuple of ints
+
+    Raises:
+        np.linalg.LinAlgError: If any camera pose is singular.
+    """
+    poses_arr = np.stack(cam_poses)  # (C, 4, 4) float64
+    inv_full = np.linalg.inv(poses_arr)  # (C, 4, 4)
+    inv_poses_3x4 = np.ascontiguousarray(inv_full[:, :3, :4])  # (C, 3, 4)
+    intrinsics = np.ascontiguousarray(np.stack(Ks))  # (C, 3, 3) float64
+    heights = tuple(int(h) for h in Hs)
+    widths = tuple(int(w) for w in Ws)
+    return inv_poses_3x4, intrinsics, heights, widths
+
+
+def out_of_bounds_mask(xyz, b_min, b_max):
+    """Build a 1-D boolean mask indicating out-of-bounds points.
+
+    Uses per-axis ufunc calls with ``out=`` to accumulate into two
+    ``(N,)`` boolean buffers, avoiding the ``(N, 3)`` temporaries that
+    ``np.any((XYZ <= lo) | (XYZ >= hi), axis=1)`` would allocate.
+
+    Args:
+        xyz: ``(N, 3)`` array of query positions.
+        b_min: ``(3,)`` array of lower bounds.
+        b_max: ``(3,)`` array of upper bounds.
+
+    Returns:
+        Boolean array of shape ``(N,)`` where ``True`` means the point
+        is on or outside the boundary.
+    """
+    n = len(xyz)
+    _le = np.less_equal
+    _ge = np.greater_equal
+    _lor = np.logical_or
+    _tmp = np.empty(n, dtype=bool)
+    mask = np.empty(n, dtype=bool)
+    _le(xyz[:, 0], b_min[0], out=mask)
+    _ge(xyz[:, 0], b_max[0], out=_tmp)
+    _lor(mask, _tmp, out=mask)
+    _le(xyz[:, 1], b_min[1], out=_tmp)
+    _lor(mask, _tmp, out=mask)
+    _ge(xyz[:, 1], b_max[1], out=_tmp)
+    _lor(mask, _tmp, out=mask)
+    _le(xyz[:, 2], b_min[2], out=_tmp)
+    _lor(mask, _tmp, out=mask)
+    _ge(xyz[:, 2], b_max[2], out=_tmp)
+    _lor(mask, _tmp, out=mask)
+    return mask
