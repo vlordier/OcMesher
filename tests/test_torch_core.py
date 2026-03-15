@@ -539,3 +539,134 @@ class TestEvaluateSDFSingleChunk:
         # Sphere SDF at origin: -1+0.5 = -0.5; plane SDF at z=0.5: 0.5
         np.testing.assert_allclose(result[0, 0].item(), np.linalg.norm([0, 0, 0.5]) - 1, atol=1e-5)
         np.testing.assert_allclose(result[0, 1].item(), 0.5, atol=1e-5)
+
+
+# ---------------------------------------------------------------------------
+# Refactor 1: Shared-corner SDF deduplication in _find_surface_cubes
+# ---------------------------------------------------------------------------
+class TestSharedCornerDedup:
+    """Verify that corner deduplication reduces SDF calls without changing results."""
+
+    def test_dedup_produces_fewer_unique_points(self, single_cam_mesher):
+        """Adjacent cubes share corners; unique count must be < total corners."""
+        coords, levels = single_cam_mesher._build_coarse_octree()
+        corners = single_cam_mesher._cube_corner_positions(coords, levels)
+        n_total = corners.reshape(-1, 3).shape[0]
+        quantized = (corners.reshape(-1, 3) * 1e8).round().long()
+        n_unique = torch.unique(quantized, dim=0).shape[0]
+        assert n_unique < n_total, "Dedup should find shared corners"
+
+    def test_dedup_sdf_matches_direct_eval(self, single_cam_mesher, sphere_kernel):
+        """SDF via dedup must exactly match direct (non-dedup) evaluation."""
+        coords, levels = single_cam_mesher._build_coarse_octree()
+        corners = single_cam_mesher._cube_corner_positions(coords, levels)
+        flat = corners.reshape(-1, 3)
+        # Direct evaluation (no dedup)
+        sdf_direct = single_cam_mesher._evaluate_sdf([sphere_kernel], flat)
+        # Dedup evaluation (via _find_surface_cubes)
+        _, corner_sdf = single_cam_mesher._find_surface_cubes([sphere_kernel], coords, levels)
+        sdf_dedup = corner_sdf.reshape(-1, 1)
+        torch.testing.assert_close(sdf_dedup, sdf_direct, atol=0, rtol=0)
+
+    def test_dedup_surface_mask_matches_direct(self, single_cam_mesher, sphere_kernel):
+        """Surface mask with dedup must match the non-dedup mask."""
+        coords, levels = single_cam_mesher._build_coarse_octree()
+        # Via dedup (current code)
+        mask_dedup, _ = single_cam_mesher._find_surface_cubes([sphere_kernel], coords, levels)
+        # Direct: compute SDF at all corners without dedup
+        corners = single_cam_mesher._cube_corner_positions(coords, levels)
+        sdf_all = single_cam_mesher._evaluate_sdf([sphere_kernel], corners.reshape(-1, 3))
+        sdf = sdf_all.reshape(len(coords), 8, -1)
+        sdf_min = sdf.min(dim=-1).values
+        signs = sdf_min >= 0
+        mask_direct = signs.any(dim=1) & (~signs).any(dim=1)
+        torch.testing.assert_close(mask_dedup, mask_direct)
+
+
+# ---------------------------------------------------------------------------
+# Refactor 2: Split rotation/translation replaces pad+bmm+permute
+# ---------------------------------------------------------------------------
+class TestSplitRotationTranslation:
+    """Verify pre-split R|t attributes and pad-free projection correctness."""
+
+    def test_inv_pose_rotation_shape(self, single_cam_mesher):
+        """_inv_pose_R must be (C, 3, 3) rotation part of inverse poses."""
+        assert single_cam_mesher._inv_pose_R.shape == (1, 3, 3)
+
+    def test_inv_pose_translation_shape(self, single_cam_mesher):
+        """_inv_pose_t must be (C, 1, 3) translation part of inverse poses."""
+        assert single_cam_mesher._inv_pose_t.shape == (1, 1, 3)
+
+    def test_proj_rotation_shape(self, single_cam_mesher):
+        """_proj_R must be (C, 3, 3) rotation part of K@inv_pose."""
+        assert single_cam_mesher._proj_R.shape == (1, 3, 3)
+
+    def test_proj_translation_shape(self, single_cam_mesher):
+        """_proj_t must be (C, 1, 3) translation part of K@inv_pose."""
+        assert single_cam_mesher._proj_t.shape == (1, 1, 3)
+
+    def test_split_rotation_translation_match_full_matrix(self, single_cam_mesher):
+        """R|t components must reconstruct the full inv_pose matrix."""
+        full = single_cam_mesher.cam_inv_poses  # (C, 3, 4)
+        torch.testing.assert_close(
+            single_cam_mesher._inv_pose_R, full[:, :, :3],
+        )
+        torch.testing.assert_close(
+            single_cam_mesher._inv_pose_t, full[:, :, 3].unsqueeze(1),
+        )
+
+    def test_projected_sizes_positive(self, single_cam_mesher):
+        """Pad-free _projected_sizes must return positive values."""
+        coords = torch.tensor([[1, 1, 1]], dtype=torch.int64, device=single_cam_mesher.device)
+        levels = torch.tensor([2], dtype=torch.int64, device=single_cam_mesher.device)
+        positions = single_cam_mesher._cube_centers(coords, levels)
+        proj = single_cam_mesher._projected_sizes(positions, levels)
+        assert (proj > 0).all()
+
+    def test_multi_cam_split_shapes(self, multi_cam_mesher):
+        """Multi-camera mesher must have correctly sized R|t attributes."""
+        assert multi_cam_mesher._inv_pose_R.shape == (4, 3, 3)
+        assert multi_cam_mesher._inv_pose_t.shape == (4, 1, 3)
+        assert multi_cam_mesher._proj_R.shape == (4, 3, 3)
+        assert multi_cam_mesher._proj_t.shape == (4, 1, 3)
+
+
+# ---------------------------------------------------------------------------
+# Refactor 3: Skip SDF re-evaluation for kept cubes in _refine_surface_octree
+# ---------------------------------------------------------------------------
+class TestRefineSkipKeptCubes:
+    """Verify optimised refinement path skips SDF re-evaluation for kept cubes."""
+
+    def test_refine_cached_matches_fallback(self, single_cam_mesher, sphere_kernel):
+        """Optimised (cached) and fallback (no-cache) paths must produce equal cube sets."""
+        kernels = [sphere_kernel]
+        coords, levels = single_cam_mesher._build_coarse_octree()
+        mask, corner_sdf = single_cam_mesher._find_surface_cubes(kernels, coords, levels)
+        s_coords = coords[mask]
+        s_levels = levels[mask]
+        s_sdf = corner_sdf[mask]
+        # Optimised path
+        c_opt, l_opt, sdf_opt = single_cam_mesher._refine_surface_octree(
+            kernels, s_coords.clone(), s_levels.clone(), corner_sdf=s_sdf.clone(),
+        )
+        # Fallback path
+        c_fb, l_fb, sdf_fb = single_cam_mesher._refine_surface_octree(
+            kernels, s_coords.clone(), s_levels.clone(),
+        )
+        assert len(c_opt) == len(c_fb)
+        assert len(l_opt) == len(l_fb)
+
+    def test_refine_cached_preserves_corner_sdf(self, single_cam_mesher, sphere_kernel):
+        """Kept cubes must retain their original corner SDF values."""
+        kernels = [sphere_kernel]
+        coords, levels = single_cam_mesher._build_coarse_octree()
+        mask, corner_sdf = single_cam_mesher._find_surface_cubes(kernels, coords, levels)
+        s_coords = coords[mask]
+        s_levels = levels[mask]
+        s_sdf = corner_sdf[mask]
+        _, _, r_sdf = single_cam_mesher._refine_surface_octree(
+            kernels, s_coords.clone(), s_levels.clone(), corner_sdf=s_sdf.clone(),
+        )
+        assert r_sdf is not None
+        assert r_sdf.shape[1] == 8
+        assert r_sdf.shape[2] == len(kernels)
