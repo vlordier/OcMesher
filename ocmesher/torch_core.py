@@ -862,19 +862,36 @@ class TorchOcMesher:
     # Coordinate helpers
     # ------------------------------------------------------------------
     @torch.no_grad()
-    def _cube_centers(self, coords: torch.Tensor, levels: torch.Tensor) -> torch.Tensor:
+    def _cube_scales(self, levels: torch.Tensor) -> torch.Tensor:
+        """Compute world-space cube side lengths from octree levels.
+
+        This is the shared ``size / 2^level`` computation used by both
+        :meth:`_cube_centers` and :meth:`_projected_sizes`.  Computing it
+        once and passing the result to both methods avoids a redundant
+        ``exp2`` call on every octree iteration (~33 iterations total).
+
+        Returns:
+            ``(N,)`` float tensor of cube side lengths.
+        """
+        return self.size / torch.exp2(levels.to(self._fdtype))
+
+    @torch.no_grad()
+    def _cube_centers(self, coords: torch.Tensor, levels: torch.Tensor, *, cube_scales: torch.Tensor | None = None) -> torch.Tensor:
         """Integer octree coords -> world-space center positions.
 
         Args:
             coords: ``(N, 3)`` int64 tensor of integer cube coordinates.
             levels:  ``(N,)``  int64 tensor of octree levels.
+            cube_scales: optional pre-computed ``(N,)`` cube side lengths
+                from :meth:`_cube_scales`.  When provided, the ``exp2``
+                computation is skipped.
 
         Returns:
             ``(N, 3)`` float tensor (dtype matches ``self._fdtype``) world positions.
         """
-        # exp2 computes 2^level directly - avoids temporary ones_like tensor.
-        scale = (self.size / torch.exp2(levels.to(self._fdtype))).unsqueeze(1)
-        return self._origin.unsqueeze(0) + scale * (coords.to(dtype=self._fdtype) + 0.5)
+        if cube_scales is None:
+            cube_scales = self._cube_scales(levels)
+        return self._origin.unsqueeze(0) + cube_scales.unsqueeze(1) * (coords.to(dtype=self._fdtype) + 0.5)
 
     @torch.no_grad()
     def _cube_corner_positions(self, coords: torch.Tensor, levels: torch.Tensor) -> torch.Tensor:
@@ -884,24 +901,28 @@ class TorchOcMesher:
             ``(N, 8, 3)`` float tensor (dtype matches ``self._fdtype``).
         """
         corner_coords = coords.unsqueeze(1) + self._corner_offsets.unsqueeze(0)
-        scale = (self.size / torch.exp2(levels.to(self._fdtype))).unsqueeze(1).unsqueeze(2)
+        scale = self._cube_scales(levels).unsqueeze(1).unsqueeze(2)
         return self._origin.unsqueeze(0).unsqueeze(0) + scale * corner_coords.to(dtype=self._fdtype)
 
     # ------------------------------------------------------------------
     # Batched projection (all cameras at once)
     # ------------------------------------------------------------------
     @torch.no_grad()
-    def _projected_sizes(self, positions: torch.Tensor, levels: torch.Tensor) -> torch.Tensor:
+    def _projected_sizes(self, positions: torch.Tensor, levels: torch.Tensor, *, cube_scales: torch.Tensor | None = None) -> torch.Tensor:
         """Max projected pixel size across *all* cameras (batched via bmm).
 
         Args:
             positions: ``(N, 3)`` world positions.
             levels:    ``(N,)``  octree levels.
+            cube_scales: optional pre-computed ``(N,)`` cube side lengths
+                from :meth:`_cube_scales`.  When provided, the ``exp2``
+                computation is skipped (saves ~33 redundant calls per run).
 
         Returns:
             ``(N,)`` float tensor of projected sizes (dtype matches ``self._fdtype``).
         """
-        cube_sizes = self.size / torch.exp2(levels.to(self._fdtype))  # (N,)
+        if cube_scales is None:
+            cube_scales = self._cube_scales(levels)
 
         # Pad-free projection: use pre-split rotation + translation to avoid
         # creating an (N, 4) padded tensor, transpose, expand, and permute.
@@ -909,7 +930,7 @@ class TorchOcMesher:
         cam_coords = torch.einsum("cij,nj->cni", self._inv_pose_R, positions) + self._inv_pose_t
 
         r = cam_coords.norm(dim=2).clamp(min=self.min_dist)  # (C, N)
-        proj = cube_sizes.unsqueeze(0) / r / self._pix_ang_ppc  # (C, N) — already (C, 1)
+        proj = cube_scales.unsqueeze(0) / r / self._pix_ang_ppc  # (C, N) — already (C, 1)
         return proj.max(dim=0).values  # (N,)
 
     # ------------------------------------------------------------------
@@ -1009,8 +1030,10 @@ class TorchOcMesher:
             n = len(coords)
             if n >= self.coarse_count:
                 break
-            positions = self._cube_centers(coords, levels)
-            proj = self._projected_sizes(positions, levels)
+            # Compute scale once and share between centers and projection.
+            cube_scales = self._cube_scales(levels)
+            positions = self._cube_centers(coords, levels, cube_scales=cube_scales)
+            proj = self._projected_sizes(positions, levels, cube_scales=cube_scales)
             to_expand = proj > self.inv_scale
             if not to_expand.any():
                 break
@@ -1131,8 +1154,10 @@ class TorchOcMesher:
             n = len(coords)
             if n >= target_cubes:
                 break
-            positions = self._cube_centers(coords, levels)
-            proj = self._projected_sizes(positions, levels)
+            # Compute scale once and share between centers and projection.
+            cube_scales = self._cube_scales(levels)
+            positions = self._cube_centers(coords, levels, cube_scales=cube_scales)
+            proj = self._projected_sizes(positions, levels, cube_scales=cube_scales)
             to_expand = proj > self.inv_scale
             if not to_expand.any():
                 break
