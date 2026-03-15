@@ -679,7 +679,7 @@ class OcMesher:
         cubes_ptr = _af(cubes)
         # Pre-allocate SDF result buffer for the bisection loop to avoid
         # creating a fresh (N, 1) array on every iteration.
-        _n_cubes = num_verts * 8  # computed directly; avoids len(cubes)
+        _n_cubes = num_verts * 8  # 8 cube corners per vertex; avoids len(cubes)
         _n_ke = len(k_e)
         _sdf_buf = np.empty((_n_cubes, _n_ke), dtype=_sdf_dtype)
         # Cache ctypes pointer for _sdf_buf — kernel_caller returns _sdf_buf
@@ -790,8 +790,8 @@ class OcMesher:
             flr_ptr,
         )
         # Compute sizes directly from known dimensions; avoids len() calls.
-        n_edge_lr = nve * 2
-        n_face_lr = nvf * 4
+        n_edge_lr = nve * 2  # left + right per edge vertex
+        n_face_lr = nvf * 4  # 4 quad corners per face vertex
         _n_bisection = n_edge_lr + n_face_lr
         # Pre-allocate combined buffer once; fill slices each iteration.
         bisection_buf = np.empty((_n_bisection, 3), dtype=_np_float)
