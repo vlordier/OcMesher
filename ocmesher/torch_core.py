@@ -748,6 +748,15 @@ class TorchOcMesher:
             self.cam_inv_poses,
         )  # (C, 3, 4)
 
+        # Pre-split rotation/translation components for pad-free projection.
+        # This eliminates the homogeneous pad → bmm → permute sequence in
+        # _projected_sizes and _visibility_filter, avoiding temporary
+        # tensor allocations on every call.
+        self._inv_pose_R = self.cam_inv_poses[:, :, :3].contiguous()  # (C, 3, 3)
+        self._inv_pose_t = self.cam_inv_poses[:, :, 3].unsqueeze(1)  # (C, 1, 3)
+        self._proj_R = self._cam_proj[:, :, :3].contiguous()  # (C, 3, 3)
+        self._proj_t = self._cam_proj[:, :, 3].unsqueeze(1)  # (C, 1, 3)
+
         # Pre-compute per-camera bounds for in-view checks ------------------
         self._cam_heights_t = torch.tensor(self.cam_heights, dtype=torch.int64, device=self.device)
         self._cam_widths_t = torch.tensor(self.cam_widths, dtype=torch.int64, device=self.device)
@@ -879,13 +888,12 @@ class TorchOcMesher:
         Returns:
             ``(N,)`` float tensor of projected sizes (dtype matches ``self._fdtype``).
         """
-        # Build homogeneous coords in-place via functional concat (avoids alloc)
-        pos_h = torch.nn.functional.pad(positions, (0, 1), value=1.0)  # (N, 4)
         cube_sizes = self.size / torch.exp2(levels.to(self._fdtype))  # (N,)
 
-        # Batched transform: (C, 3, 4) @ (4, N) -> (C, 3, N) -> (C, N, 3)
-        pos_h_t = pos_h.T.unsqueeze(0).expand(self.n_cameras, -1, -1)
-        cam_coords = torch.bmm(self.cam_inv_poses, pos_h_t).permute(0, 2, 1)
+        # Pad-free projection: use pre-split rotation + translation to avoid
+        # creating an (N, 4) padded tensor, transpose, expand, and permute.
+        # einsum('cij,nj->cni', R, pos) gives (C, N, 3) directly.
+        cam_coords = torch.einsum("cij,nj->cni", self._inv_pose_R, positions) + self._inv_pose_t
 
         r = cam_coords.norm(dim=2).clamp(min=self.min_dist)  # (C, N)
         ang = self._pix_ang_ppc.unsqueeze(1)  # (C, 1) pre-computed
@@ -1028,6 +1036,11 @@ class TorchOcMesher:
     ) -> tuple[torch.Tensor, torch.Tensor]:
         """Identify cubes that straddle the zero iso-surface.
 
+        Adjacent octree cubes share corners, so we deduplicate corner
+        positions before SDF evaluation and scatter results back.  This
+        reduces SDF calls by 2-4x for typical octrees, dramatically
+        cutting the dominant pipeline cost.
+
         Returns:
             ``(mask, corner_sdf)`` where *mask* is ``(N,)`` bool and
             *corner_sdf* is ``(N, 8, K)`` float32 tensor.
@@ -1035,7 +1048,25 @@ class TorchOcMesher:
         corners = self._cube_corner_positions(coords, levels)
         n = corners.shape[0]
         flat = corners.reshape(-1, 3)
-        sdf = self._evaluate_sdf(kernels, flat)
+
+        # --- shared-corner deduplication ---
+        # Quantise positions to int64 triples and find unique rows.
+        # torch.unique(dim=0) is collision-free (unlike single-int hashing)
+        # and fast enough for the typical corner count.
+        quantized = (flat * 1e8).round().long()
+        _unique_rows, inverse = torch.unique(quantized, dim=0, return_inverse=True)
+        # Pick one representative position per unique quantised triple.
+        n_flat = flat.shape[0]
+        n_unique = _unique_rows.shape[0]
+        rep_idx = torch.zeros(n_unique, dtype=torch.long, device=flat.device)
+        rev_arange = torch.arange(n_flat - 1, -1, -1, device=flat.device)
+        rep_idx.scatter_(0, inverse[rev_arange], rev_arange)
+        unique_pts = flat[rep_idx]
+
+        # Evaluate SDF only at unique positions, then scatter back.
+        unique_sdf = self._evaluate_sdf(kernels, unique_pts)  # (U, K)
+        sdf = unique_sdf[inverse]  # (N*8, K)
+
         sdf = sdf.reshape(n, 8, -1)
         sdf_min = sdf.min(dim=-1).values  # (N, 8)
         signs = sdf_min >= 0
@@ -1057,6 +1088,10 @@ class TorchOcMesher:
         """Iteratively subdivide surface cubes that project large on screen.
 
         Uses a conservative budget to avoid over-refinement.
+
+        When *corner_sdf* is provided, kept (non-expanded) cubes reuse their
+        cached SDF values, so only newly-created children are evaluated — this
+        avoids ``n_keep * 8`` redundant SDF queries per iteration.
 
         Args:
             kernels: SDF kernel list.
@@ -1101,14 +1136,26 @@ class TorchOcMesher:
             keep_mask = ~to_expand
             child_c = coords[expand_idx].unsqueeze(1) * 2 + self._child_offsets.unsqueeze(0)
             child_l = (levels[expand_idx] + 1).unsqueeze(1).expand(-1, 8)
+            child_coords = child_c.reshape(-1, 3)
+            child_levels = child_l.reshape(-1)
 
-            new_coords = torch.cat([coords[keep_mask], child_c.reshape(-1, 3)])
-            new_levels = torch.cat([levels[keep_mask], child_l.reshape(-1)])
-
-            mask, corner_sdf_new = self._find_surface_cubes(kernels, new_coords, new_levels)
-            coords = new_coords[mask]
-            levels = new_levels[mask]
-            corner_sdf = corner_sdf_new[mask]
+            if corner_sdf is not None:
+                # Optimised path: kept cubes already have valid corner SDF
+                # values — evaluate only the new children.
+                child_mask, child_corner_sdf = self._find_surface_cubes(
+                    kernels, child_coords, child_levels,
+                )
+                coords = torch.cat([coords[keep_mask], child_coords[child_mask]])
+                levels = torch.cat([levels[keep_mask], child_levels[child_mask]])
+                corner_sdf = torch.cat([corner_sdf[keep_mask], child_corner_sdf[child_mask]])
+            else:
+                # Fallback: no cached SDF — evaluate everything.
+                new_coords = torch.cat([coords[keep_mask], child_coords])
+                new_levels = torch.cat([levels[keep_mask], child_levels])
+                mask, corner_sdf_new = self._find_surface_cubes(kernels, new_coords, new_levels)
+                coords = new_coords[mask]
+                levels = new_levels[mask]
+                corner_sdf = corner_sdf_new[mask]
         return coords, levels, corner_sdf
 
     # ------------------------------------------------------------------
@@ -1126,13 +1173,9 @@ class TorchOcMesher:
         """
         n = positions.shape[0]
         visible = torch.zeros(n, dtype=torch.bool, device=self.device)
-        pos_h = torch.nn.functional.pad(positions, (0, 1), value=1.0)  # (N, 4)
 
-        # Batched projection: (C, 3, 4) @ (4, N) -> (C, 3, N) -> (C, N, 3)
-        img_all = torch.bmm(
-            self._cam_proj,
-            pos_h.T.unsqueeze(0).expand(self.n_cameras, -1, -1),
-        ).permute(0, 2, 1)  # (C, N, 3)
+        # Pad-free projection: use pre-split rotation + translation.
+        img_all = torch.einsum("cij,nj->cni", self._proj_R, positions) + self._proj_t  # (C, N, 3)
 
         # Vectorised across all cameras: extract depth and pixel coords
         depth_all = img_all[:, :, 2]  # (C, N)
