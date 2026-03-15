@@ -440,6 +440,12 @@ class OcMesher:
         _sdf_dtype = self.sdf_np_float_type
         result = out if out is not None else np.empty((n_XYZ, n_kernels), dtype=_sdf_dtype)
         single_kernel = n_kernels == 1
+        # Cache module-level constant and builtin to avoid LOAD_GLOBAL
+        # on every iteration of the batch loop.
+        _batch = _SDF_BATCH_SIZE
+        _min = min
+        _isinstance = isinstance
+        _ndarray = np.ndarray
 
         if single_kernel:
             # ---- Single-kernel fast path ----
@@ -448,12 +454,12 @@ class OcMesher:
                 _mask_into = self._out_of_bounds_mask_into
                 b_min = self._bounds_min_np
                 b_max = self._bounds_max_np
-                for i in range(0, n_XYZ, _SDF_BATCH_SIZE):
-                    end = min(i + _SDF_BATCH_SIZE, n_XYZ)
+                for i in range(0, n_XYZ, _batch):
+                    end = _min(i + _batch, n_XYZ)
                     XYZ = XYZ_all[i:end]
                     n = end - i
                     raw = k0(XYZ)
-                    sdf = raw if isinstance(raw, np.ndarray) else np.asarray(raw)
+                    sdf = raw if _isinstance(raw, _ndarray) else np.asarray(raw)
                     if sdf.shape != (n,):
                         msg = f"kernels[0] returned shape {sdf.shape} for {n} query points; expected ({n},)"
                         raise ValueError(msg)
@@ -461,12 +467,12 @@ class OcMesher:
                     result_col[:] = sdf
                     result_col[_mask_into(XYZ, b_min, b_max)] = 1
             else:
-                for i in range(0, n_XYZ, _SDF_BATCH_SIZE):
-                    end = min(i + _SDF_BATCH_SIZE, n_XYZ)
+                for i in range(0, n_XYZ, _batch):
+                    end = _min(i + _batch, n_XYZ)
                     XYZ = XYZ_all[i:end]
                     n = end - i
                     raw = k0(XYZ)
-                    sdf = raw if isinstance(raw, np.ndarray) else np.asarray(raw)
+                    sdf = raw if _isinstance(raw, _ndarray) else np.asarray(raw)
                     if sdf.shape != (n,):
                         msg = f"kernels[0] returned shape {sdf.shape} for {n} query points; expected ({n},)"
                         raise ValueError(msg)
@@ -474,23 +480,24 @@ class OcMesher:
         else:
             # ---- Multi-kernel path: dispatch via persistent thread pool ----
             pool = self._get_pool(n_kernels)
+            _eval_batch = self._eval_kernels_batch
             if self.enclosed:
                 _mask_into = self._out_of_bounds_mask_into
                 b_min = self._bounds_min_np
                 b_max = self._bounds_max_np
-                for i in range(0, n_XYZ, _SDF_BATCH_SIZE):
-                    end = min(i + _SDF_BATCH_SIZE, n_XYZ)
+                for i in range(0, n_XYZ, _batch):
+                    end = _min(i + _batch, n_XYZ)
                     XYZ = XYZ_all[i:end]
                     n = end - i
-                    self._eval_kernels_batch(kernels, XYZ, n, pool, result, i, end)
+                    _eval_batch(kernels, XYZ, n, pool, result, i, end)
                     out_bound = _mask_into(XYZ, b_min, b_max)
                     result[i:end][out_bound] = 1
             else:
-                for i in range(0, n_XYZ, _SDF_BATCH_SIZE):
-                    end = min(i + _SDF_BATCH_SIZE, n_XYZ)
+                for i in range(0, n_XYZ, _batch):
+                    end = _min(i + _batch, n_XYZ)
                     XYZ = XYZ_all[i:end]
                     n = end - i
-                    self._eval_kernels_batch(kernels, XYZ, n, pool, result, i, end)
+                    _eval_batch(kernels, XYZ, n, pool, result, i, end)
 
         return result
 
@@ -505,10 +512,13 @@ class OcMesher:
         SDF values are written directly into the pre-allocated *result*
         buffer, avoiding an intermediate copy.
         """
+        _isinstance = isinstance
+        _ndarray = np.ndarray
 
         def _eval_one(k_idx_kernel):
             k_idx, kernel = k_idx_kernel
-            sdf = np.asarray(kernel(xyz))
+            raw = kernel(xyz)
+            sdf = raw if _isinstance(raw, _ndarray) else np.asarray(raw)
             if sdf.shape != (batch_size,):
                 msg = (
                     f"kernels[{k_idx}] returned shape {sdf.shape} "
@@ -640,15 +650,19 @@ class OcMesher:
         # creating a fresh (N, 1) array on every iteration.
         _n_cubes = len(cubes)
         _sdf_buf = np.empty((_n_cubes, len(k_e)), dtype=_sdf_dtype)
+        # Cache ctypes pointer for _sdf_buf — kernel_caller returns _sdf_buf
+        # (via out=), so the pointer is stable across all iterations.
+        _sdf_buf_ptr = _sdf_af(_sdf_buf)
         # Pre-allocate fabs buffer reused by tolerance check to avoid
         # allocating a temporary array on each of the ~15 iterations.
         _fabs_buf = np.empty_like(_sdf_buf) if check_tol else None
+        _np_fabs = np.fabs
         for _ in range(_bisection_iters):
-            sdf = _kernel_caller(k_e, cubes, out=_sdf_buf)
-            _update_verts(e, _sdf_af(sdf), center_sdf_ptr, cubes_ptr)
+            _kernel_caller(k_e, cubes, out=_sdf_buf)
+            _update_verts(e, _sdf_buf_ptr, center_sdf_ptr, cubes_ptr)
             # Early-exit: if all SDF residuals are below tolerance the
             # surface has been located to sufficient accuracy.
-            if check_tol and np.fabs(sdf, out=_fabs_buf).max() < tol:
+            if check_tol and _np_fabs(_sdf_buf, out=_fabs_buf).max() < tol:
                 break
         cubes_r = np.empty((num_verts * 8, 3), dtype=_np_float)
         self.get_lr_verts(e, cubes_ptr, _af(cubes_r))
@@ -758,24 +772,30 @@ class OcMesher:
         _n_bisection = len(bisection_buf)
         _n_ke = len(k_e)
         _sdf_buf = np.empty((_n_bisection, _n_ke), dtype=_sdf_dtype)
+        # Pre-create stable views into _sdf_buf for edge/face SDF slices.
+        # kernel_caller writes into _sdf_buf via out=, so the underlying
+        # buffer address is stable — cache the ctypes pointers once.
+        _e_sdf_view = _sdf_buf[:n_edge_lr]
+        _f_sdf_view = _sdf_buf[n_edge_lr:]
+        _e_sdf_ptr = _sdf_af(_e_sdf_view)
+        _f_sdf_ptr = _sdf_af(_f_sdf_view)
         # Pre-allocate fabs buffer reused by tolerance check to avoid
         # allocating a temporary array on each of the ~15 iterations.
         _fabs_buf = np.empty_like(_sdf_buf) if check_tol else None
+        _np_fabs = np.fabs
         for _ in range(_bisection_iters):
             bisection_buf[:n_edge_lr] = edge_vertices_lr
             bisection_buf[n_edge_lr:] = face_vertices_lr
-            ef_sdf = _kernel_caller(k_e, bisection_buf, out=_sdf_buf)
-            e_sdf = ef_sdf[:n_edge_lr]
-            f_sdf = ef_sdf[n_edge_lr:]
+            _kernel_caller(k_e, bisection_buf, out=_sdf_buf)
             _update_extra_verts(
-                _sdf_af(e_sdf),
-                _sdf_af(f_sdf),
+                _e_sdf_ptr,
+                _f_sdf_ptr,
                 ecenter_ptr,
                 fcenter_ptr,
                 elr_ptr,
                 flr_ptr,
             )
-            if check_tol and np.fabs(ef_sdf, out=_fabs_buf).max() < tol:
+            if check_tol and _np_fabs(_sdf_buf, out=_fabs_buf).max() < tol:
                 break
         del edge_vertices_c, face_vertices_c, ecenter_sdf, fcenter_sdf, bisection_buf
         edge_vertices_r = np.empty((nve * 2, 3), dtype=_np_float)

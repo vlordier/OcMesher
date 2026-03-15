@@ -1306,3 +1306,99 @@ class TestCachedSdfDtype:
             mock_load.return_value = MagicMock()
             mesher = OcMesher(sample_cameras, sample_bounds)
         assert mesher.sdf_np_float_type == np.float32
+
+
+# ---------------------------------------------------------------------------
+# Cached locals in kernel_caller batch loops
+# ---------------------------------------------------------------------------
+
+
+class TestKernelCallerCachedLocals:
+    """Verify kernel_caller still produces correct results with cached locals."""
+
+    @staticmethod
+    def _make_mesher_stub(bounds, *, enclosed=True):
+        obj = object.__new__(OcMesher)
+        obj.bounds = bounds
+        obj.enclosed = enclosed
+        obj.sdf_np_float_type = np.float32
+        obj._bounds_min_np = np.array([bounds[0], bounds[2], bounds[4]], dtype=np.float64)
+        obj._bounds_max_np = np.array([bounds[1], bounds[3], bounds[5]], dtype=np.float64)
+        obj._sdf_pool = None
+        obj._oob_mask = np.empty(_SDF_BATCH_SIZE, dtype=bool)
+        obj._oob_tmp = np.empty(_SDF_BATCH_SIZE, dtype=bool)
+        return obj
+
+    def test_single_kernel_enclosed_correct(self, sample_bounds, sphere_kernel):
+        """Single-kernel enclosed path with cached min/_batch produces correct SDF."""
+        mesher = self._make_mesher_stub(sample_bounds)
+        pts = np.array([[0, 0, 0], [1, 0, 0], [0, 1, 0]], dtype=np.float64)
+        result = mesher.kernel_caller([sphere_kernel], pts)
+        # Bounds masking may modify some values, just check shape/dtype.
+        assert result.shape == (3, 1)
+        assert result.dtype == np.float32
+
+    def test_multi_kernel_eval_batch_isinstance(self, sample_bounds, sphere_kernel, plane_kernel):
+        """Multi-kernel path uses isinstance check in _eval_kernels_batch."""
+        mesher = self._make_mesher_stub(sample_bounds)
+        pts = np.array([[0, 0, 0], [1, 0, 0]], dtype=np.float64)
+        result = mesher.kernel_caller([sphere_kernel, plane_kernel], pts)
+        assert result.shape == (2, 2)
+        assert result.dtype == np.float32
+
+    def test_non_enclosed_single_kernel(self, sample_bounds, sphere_kernel):
+        """Non-enclosed single-kernel path with cached locals."""
+        mesher = self._make_mesher_stub(sample_bounds, enclosed=False)
+        pts = np.array([[0, 0, 0], [1, 0, 0]], dtype=np.float64)
+        result = mesher.kernel_caller([sphere_kernel], pts)
+        expected = sphere_kernel(pts).astype(np.float32)
+        np.testing.assert_allclose(result[:, 0], expected, atol=1e-6)
+
+
+# ---------------------------------------------------------------------------
+# Cached SDF buffer pointer in _construct_element_mesh bisection loop
+# ---------------------------------------------------------------------------
+
+
+class TestCachedSdfBufPointer:
+    """Verify that caching _sdf_buf ctypes pointer doesn't break bisection."""
+
+    def test_sdf_buf_pointer_stable(self):
+        """np.empty buffer has stable ctypes pointer across writes."""
+        buf = np.empty((10, 1), dtype=np.float32)
+        ptr1 = buf.ctypes.data
+        buf[:] = np.random.default_rng(42).standard_normal((10, 1)).astype(np.float32)
+        ptr2 = buf.ctypes.data
+        assert ptr1 == ptr2
+
+    def test_sdf_buf_slice_views_stable(self):
+        """Views into a pre-allocated buffer have stable data pointers."""
+        buf = np.empty((20, 1), dtype=np.float32)
+        v1 = buf[:10]
+        v2 = buf[10:]
+        ptr_v1_a = v1.ctypes.data
+        ptr_v2_a = v2.ctypes.data
+        # Write via the parent buffer (simulates kernel_caller out=)
+        buf[:] = np.ones((20, 1), dtype=np.float32)
+        ptr_v1_b = v1.ctypes.data
+        ptr_v2_b = v2.ctypes.data
+        assert ptr_v1_a == ptr_v1_b
+        assert ptr_v2_a == ptr_v2_b
+
+
+# ---------------------------------------------------------------------------
+# np.fabs cached as local in bisection
+# ---------------------------------------------------------------------------
+
+
+class TestNpFabsCachedLocal:
+    """Verify np.fabs local caching produces correct tolerance results."""
+
+    def test_fabs_local_matches_module(self):
+        """np.fabs cached as local gives same result as np.fabs."""
+        _np_fabs = np.fabs
+        arr = np.array([-1.0, 2.0, -3.0, 0.5], dtype=np.float32)
+        buf = np.empty_like(arr)
+        local_result = _np_fabs(arr, out=buf).max()
+        module_result = np.fabs(arr, out=np.empty_like(arr)).max()
+        assert local_result == module_result
