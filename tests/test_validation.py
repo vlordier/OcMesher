@@ -1,0 +1,171 @@
+"""Tests for ``ocmesher._validation`` (via core re-exports)."""
+
+from __future__ import annotations
+
+import numpy as np
+import pytest
+
+from ocmesher.core import (
+    _AXIS_NAMES,
+    _validate_bounds,
+    _validate_cameras,
+    _validate_kernels,
+)
+
+# ---------------------------------------------------------------------------
+# _validate_cameras
+# ---------------------------------------------------------------------------
+
+
+class TestValidateCameras:
+    def test_valid_single_camera(self, sample_cameras):
+        poses, _ks, _hs, _ws = _validate_cameras(sample_cameras)
+        assert len(poses) == 1
+
+    def test_valid_multiple_cameras(self, sample_camera_pose, sample_intrinsics):
+        cameras = (
+            [sample_camera_pose, sample_camera_pose],
+            [sample_intrinsics, sample_intrinsics],
+            [720, 720],
+            [1280, 1280],
+        )
+        poses, _ks, _hs, _ws = _validate_cameras(cameras)
+        assert len(poses) == 2
+
+    def test_normalises_lists_to_arrays(self, sample_cameras_as_lists):
+        poses, ks, _hs, _ws = _validate_cameras(sample_cameras_as_lists)
+        assert isinstance(poses[0], np.ndarray)
+        assert isinstance(ks[0], np.ndarray)
+        assert poses[0].dtype == np.float64
+        assert ks[0].dtype == np.float64
+
+    def test_rejects_wrong_type(self):
+        with pytest.raises(ValueError, match="must be a tuple/list"):
+            _validate_cameras("not a tuple")
+
+    def test_rejects_wrong_length(self):
+        with pytest.raises(ValueError, match="must be a tuple/list"):
+            _validate_cameras(([], []))
+
+    def test_rejects_mismatched_lengths(self, sample_camera_pose, sample_intrinsics):
+        cameras = ([sample_camera_pose], [sample_intrinsics, sample_intrinsics], [720], [1280])
+        with pytest.raises(ValueError, match="same length"):
+            _validate_cameras(cameras)
+
+    def test_rejects_empty_cameras(self):
+        with pytest.raises(ValueError, match="At least one camera"):
+            _validate_cameras(([], [], [], []))
+
+    def test_rejects_bad_pose_shape(self, sample_intrinsics):
+        bad_pose = np.eye(3)
+        cameras = ([bad_pose], [sample_intrinsics], [720], [1280])
+        with pytest.raises(ValueError, match="4x4 matrix"):
+            _validate_cameras(cameras)
+
+    def test_rejects_bad_intrinsics_shape(self, sample_camera_pose):
+        bad_k = np.eye(4)
+        cameras = ([sample_camera_pose], [bad_k], [720], [1280])
+        with pytest.raises(ValueError, match="3x3 matrix"):
+            _validate_cameras(cameras)
+
+
+# ---------------------------------------------------------------------------
+# _validate_bounds
+# ---------------------------------------------------------------------------
+
+
+class TestValidateBounds:
+    def test_valid_bounds(self, sample_bounds):
+        result = _validate_bounds(sample_bounds)
+        assert result.shape == (6,)
+        assert result.dtype == np.float64
+
+    def test_converts_list_to_array(self):
+        result = _validate_bounds([-1, 1, -2, 2, -3, 3])
+        assert isinstance(result, np.ndarray)
+        assert result.shape == (6,)
+
+    def test_converts_tuple_to_array(self):
+        result = _validate_bounds((-10, 10, -10, 10, -2, 2))
+        assert isinstance(result, np.ndarray)
+
+    def test_rejects_wrong_length(self):
+        with pytest.raises(ValueError, match="6 elements"):
+            _validate_bounds([0, 1, 2])
+
+    def test_rejects_min_geq_max_x(self):
+        with pytest.raises(ValueError, match=r"x_min.*less than.*x_max"):
+            _validate_bounds([5, -5, -1, 1, -1, 1])
+
+    def test_rejects_min_geq_max_y(self):
+        with pytest.raises(ValueError, match=r"y_min.*less than.*y_max"):
+            _validate_bounds([-1, 1, 5, -5, -1, 1])
+
+    def test_rejects_min_geq_max_z(self):
+        with pytest.raises(ValueError, match=r"z_min.*less than.*z_max"):
+            _validate_bounds([-1, 1, -1, 1, 5, -5])
+
+    def test_rejects_equal_min_max(self):
+        with pytest.raises(ValueError, match="less than"):
+            _validate_bounds([0, 0, -1, 1, -1, 1])
+
+    def test_rejects_nan_values(self):
+        with pytest.raises(ValueError, match="finite"):
+            _validate_bounds([np.nan, 1.0, -1.0, 1.0, -1.0, 1.0])
+
+    def test_rejects_inf_values(self):
+        with pytest.raises(ValueError, match="finite"):
+            _validate_bounds([-np.inf, np.inf, -1.0, 1.0, -1.0, 1.0])
+
+
+# ---------------------------------------------------------------------------
+# _validate_kernels
+# ---------------------------------------------------------------------------
+
+
+class TestValidateKernels:
+    def test_accepts_single_callable(self, sphere_kernel):
+        _validate_kernels([sphere_kernel])  # no exception
+
+    def test_accepts_multiple_callables(self, sphere_kernel, plane_kernel):
+        _validate_kernels([sphere_kernel, plane_kernel])  # no exception
+
+    def test_rejects_empty_list(self):
+        with pytest.raises(ValueError, match="non-empty"):
+            _validate_kernels([])
+
+    def test_rejects_non_sequence(self):
+        with pytest.raises(ValueError, match="non-empty"):
+            _validate_kernels(42)
+
+    def test_rejects_non_callable_element(self, sphere_kernel):
+        with pytest.raises(TypeError, match=r"kernels\[1\] must be callable"):
+            _validate_kernels([sphere_kernel, "bad"])
+
+    def test_error_includes_index(self):
+        with pytest.raises(TypeError, match=r"kernels\[0\]"):
+            _validate_kernels(["not_callable"])
+
+
+# ---------------------------------------------------------------------------
+# Refactoring: module-level _AXIS_NAMES constant
+# ---------------------------------------------------------------------------
+
+
+class TestAxisNamesConstant:
+    """Verify _AXIS_NAMES module constant is a tuple of the 3 axis labels."""
+
+    def test_is_tuple(self):
+        assert isinstance(_AXIS_NAMES, tuple)
+
+    def test_contents(self):
+        assert _AXIS_NAMES == ("x", "y", "z")
+
+    def test_validation_uses_correct_names(self):
+        """Bounds validation error messages reference the correct axis names."""
+        with pytest.raises(ValueError, match="x_min"):
+            _validate_bounds([5, 1, 0, 10, 0, 10])
+        with pytest.raises(ValueError, match="y_min"):
+            _validate_bounds([0, 10, 5, 1, 0, 10])
+        with pytest.raises(ValueError, match="z_min"):
+            _validate_bounds([0, 10, 0, 10, 5, 1])
