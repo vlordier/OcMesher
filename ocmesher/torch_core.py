@@ -754,6 +754,10 @@ class TorchOcMesher:
         # on every invocation (called 30+ times in _build_coarse_octree).
         self._pix_ang_ppc = (self._pix_ang * self.pixels_per_cube).unsqueeze(1)  # (C, 1)
 
+        # Pre-compute reciprocal for _projected_sizes: replaces a division
+        # with a multiplication on every call in the 30-iteration hot loop.
+        self._inv_pix_ang_ppc = (1.0 / self._pix_ang_ppc)  # (C, 1)
+
         # Pre-compute combined K @ inv_pose for visibility filter -------------
         # This avoids two separate matmuls per camera in _visibility_filter.
         self._cam_proj = torch.bmm(
@@ -929,8 +933,10 @@ class TorchOcMesher:
         # einsum('cij,nj->cni', R, pos) gives (C, N, 3) directly.
         cam_coords = torch.einsum("cij,nj->cni", self._inv_pose_R, positions) + self._inv_pose_t
 
-        r = cam_coords.norm(dim=2).clamp(min=self.min_dist)  # (C, N)
-        proj = cube_scales.unsqueeze(0) / r / self._pix_ang_ppc  # (C, N) — already (C, 1)
+        # In-place clamp avoids allocating a new tensor; multiply by
+        # pre-computed reciprocal replaces a division on every iteration.
+        r = cam_coords.norm(dim=2).clamp_(min=self.min_dist)  # (C, N) in-place
+        proj = cube_scales.unsqueeze(0) * self._inv_pix_ang_ppc / r  # (C, N)
         return proj.max(dim=0).values  # (N,)
 
     # ------------------------------------------------------------------
