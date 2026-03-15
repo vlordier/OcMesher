@@ -5,12 +5,16 @@
 
 from __future__ import annotations
 
-from collections.abc import Callable
+from typing import TYPE_CHECKING
 
 import numpy as np
-from numpy.typing import NDArray
 
 from .types import SDF_BATCH_SIZE
+
+if TYPE_CHECKING:
+    from collections.abc import Callable
+
+    from numpy.typing import NDArray
 
 
 def evaluate_sdfs(
@@ -48,7 +52,8 @@ def evaluate_sdfs(
         out_of_bounds: NDArray | None = None
         if clamp:
             out_of_bounds = np.any(batch <= bounds_min, axis=1) | np.any(
-                batch >= bounds_max, axis=1,
+                batch >= bounds_max,
+                axis=1,
             )
 
         batch_sdfs: list[NDArray] = []

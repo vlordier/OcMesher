@@ -5,13 +5,17 @@
 
 from __future__ import annotations
 
-from collections.abc import Sequence
 from dataclasses import dataclass
+from typing import TYPE_CHECKING
 
 import numpy as np
-from numpy.typing import NDArray
 
-# 12 (3×4 inv_pose) + 9 (3×3 K) + 1 (H) + 1 (W) = 23 values per camera
+if TYPE_CHECKING:
+    from collections.abc import Sequence
+
+    from numpy.typing import NDArray
+
+# 12 (3x4 inv_pose) + 9 (3x3 K) + 1 (H) + 1 (W) = 23 values per camera
 CAMERA_DATA_STRIDE = 23
 SDF_BATCH_SIZE = 10_000_000
 
@@ -54,11 +58,13 @@ class Bounds:
     @property
     def center(self) -> NDArray[np.float64]:
         """Center point of the bounding box."""
-        return np.array([
-            (self.x_min + self.x_max) / 2,
-            (self.y_min + self.y_max) / 2,
-            (self.z_min + self.z_max) / 2,
-        ])
+        return np.array(
+            [
+                (self.x_min + self.x_max) / 2,
+                (self.y_min + self.y_max) / 2,
+                (self.z_min + self.z_max) / 2,
+            ]
+        )
 
     @property
     def max_extent(self) -> float:
@@ -90,6 +96,7 @@ class CameraSet:
     widths: list[int]
 
     def __post_init__(self) -> None:
+        """Validate camera list lengths and individual array shapes."""
         n = len(self.poses)
         if not (len(self.intrinsics) == len(self.heights) == len(self.widths) == n):
             msg = "All camera arrays must have the same length"
@@ -139,9 +146,14 @@ class CameraSet:
         ks_flat = np.stack(self.intrinsics).reshape(n, -1)
         hs = np.asarray(self.heights, dtype=dtype).reshape(n, 1)
         ws = np.asarray(self.widths, dtype=dtype).reshape(n, 1)
-        return np.concatenate(
-            [inv_poses, ks_flat, hs, ws], axis=1,
-        ).astype(dtype).ravel()
+        return (
+            np.concatenate(
+                [inv_poses, ks_flat, hs, ws],
+                axis=1,
+            )
+            .astype(dtype)
+            .ravel()
+        )
 
 
 @dataclass

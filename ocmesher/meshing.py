@@ -6,16 +6,20 @@
 from __future__ import annotations
 
 import logging
-from collections.abc import Callable
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 import numpy as np
 import trimesh
-from numpy.typing import NDArray
 from tqdm import tqdm
 
-from .dll import CoreDLL
 from .utils.interface import AC, POINTER, as_bool, as_int
+
+if TYPE_CHECKING:
+    from collections.abc import Callable
+
+    from numpy.typing import NDArray
+
+    from .dll import CoreDLL
 
 logger = logging.getLogger(__name__)
 
@@ -50,31 +54,44 @@ def bisect_cube_vertices(
     Returns:
         (nv_count, 3) refined vertex positions.
     """
-    centers = np.zeros((nv_count, 3), dtype=np_float)
+    # np.empty avoids zero-init since the C function fills these immediately.
+    centers = np.empty((nv_count, 3), dtype=np_float)
     dll.get_verts_center(element_idx, as_flt(centers))
     center_sdf = eval_fn(kernel, centers)
 
-    cubes = AC(np.zeros((nv_count * 8, 3), dtype=np_float))
+    cubes = AC(np.empty((nv_count * 8, 3), dtype=np_float))
     null_sdf = POINTER(sdf_ctype)()
     dll.update_verts(element_idx, null_sdf, null_sdf, as_flt(cubes))
+    center_sdf_ptr = as_sdf_flt(AC(center_sdf))
 
     for _ in tqdm(range(bisection_iters)):
         sdf = eval_fn(kernel, cubes)
         dll.update_verts(
             element_idx,
             as_sdf_flt(AC(sdf)),
-            as_sdf_flt(AC(center_sdf)),
+            center_sdf_ptr,
             as_flt(cubes),
         )
 
-    cubes_r = AC(np.zeros((nv_count * 8, 3), dtype=np_float))
+    cubes_r = AC(np.empty((nv_count * 8, 3), dtype=np_float))
     dll.get_lr_verts(element_idx, as_flt(cubes), as_flt(cubes_r))
-    sdf_l = eval_fn(kernel, cubes)
-    sdf_r = eval_fn(kernel, cubes_r)
 
-    vertices = np.zeros((nv_count, 3), dtype=np_float)
+    # Fused left/right SDF evaluation: single eval_fn call instead
+    # of two, halving the Python→SDF round-trip overhead.
+    n_cubes = len(cubes)
+    lr_combined = np.concatenate([cubes, cubes_r])
+    lr_sdf = eval_fn(kernel, lr_combined)
+    sdf_l = lr_sdf[:n_cubes]
+    sdf_r = lr_sdf[n_cubes:]
+    del cubes, cubes_r, centers, center_sdf, lr_combined, lr_sdf
+
+    # np.empty is safe: finalize_verts writes every element before use.
+    vertices = np.empty((nv_count, 3), dtype=np_float)
     dll.finalize_verts(
-        element_idx, as_sdf_flt(sdf_l), as_sdf_flt(sdf_r), as_flt(vertices),
+        element_idx,
+        as_sdf_flt(sdf_l),
+        as_sdf_flt(sdf_r),
+        as_flt(vertices),
     )
     return vertices
 
@@ -94,6 +111,12 @@ def bisect_extra_vertices(
 ) -> tuple[NDArray, NDArray]:
     """Refine edge and face vertex positions via iterative bisection.
 
+    Optimisations:
+    - Fused edge + face SDF evaluation per bisection iteration: a single
+      ``eval_fn`` call replaces two, halving Python→SDF round trips
+      in the inner loop (30 calls → 15 for the default 15 iterations).
+    - Fused left/right SDF evaluation after bisection: 4 calls → 2.
+
     Args:
         dll: Loaded C++ library wrapper.
         kernel: Single-element kernel list for SDF evaluation.
@@ -109,44 +132,81 @@ def bisect_extra_vertices(
     Returns:
         Tuple of (edge_vertices, face_vertices), each (N, 3).
     """
-    edge_c = AC(np.zeros((nve, 3), dtype=np_float))
-    face_c = AC(np.zeros((nvf, 3), dtype=np_float))
+    # np.empty avoids zero-init: C functions fill all elements immediately.
+    edge_c = AC(np.empty((nve, 3), dtype=np_float))
+    face_c = AC(np.empty((nvf, 3), dtype=np_float))
     dll.get_extra_verts_center(as_flt(edge_c), as_flt(face_c))
-    ecenter_sdf = eval_fn(kernel, edge_c)
-    fcenter_sdf = eval_fn(kernel, face_c)
 
-    edge_lr = AC(np.zeros((nve * 2, 3), dtype=np_float))
-    face_lr = AC(np.zeros((nvf * 4, 3), dtype=np_float))
+    # Fused center SDF: one eval_fn call for edge + face centres.
+    n_edge_c = len(edge_c)
+    ef_centers = np.concatenate([edge_c, face_c])
+    ef_center_sdf = eval_fn(kernel, ef_centers)
+    ecenter_sdf = ef_center_sdf[:n_edge_c]
+    fcenter_sdf = ef_center_sdf[n_edge_c:]
+    del ef_centers, ef_center_sdf
+
+    edge_lr = AC(np.empty((nve * 2, 3), dtype=np_float))
+    face_lr = AC(np.empty((nvf * 4, 3), dtype=np_float))
     null_sdf = POINTER(sdf_ctype)()
     dll.update_extra_verts(
-        null_sdf, null_sdf, null_sdf, null_sdf,
-        as_flt(edge_lr), as_flt(face_lr),
+        null_sdf,
+        null_sdf,
+        null_sdf,
+        null_sdf,
+        as_flt(edge_lr),
+        as_flt(face_lr),
     )
 
+    n_edge_lr = len(edge_lr)
     for _ in range(bisection_iters):
-        e_sdf = eval_fn(kernel, edge_lr)
-        f_sdf = eval_fn(kernel, face_lr)
+        # Fused edge + face SDF: one call instead of two per iteration.
+        ef_combined = np.concatenate([edge_lr, face_lr])
+        ef_sdf = eval_fn(kernel, ef_combined)
+        e_sdf = ef_sdf[:n_edge_lr]
+        f_sdf = ef_sdf[n_edge_lr:]
         dll.update_extra_verts(
-            as_sdf_flt(e_sdf), as_sdf_flt(f_sdf),
-            as_sdf_flt(ecenter_sdf), as_sdf_flt(fcenter_sdf),
-            as_flt(edge_lr), as_flt(face_lr),
+            as_sdf_flt(e_sdf),
+            as_sdf_flt(f_sdf),
+            as_sdf_flt(ecenter_sdf),
+            as_sdf_flt(fcenter_sdf),
+            as_flt(edge_lr),
+            as_flt(face_lr),
         )
 
-    edge_r = AC(np.zeros((nve * 2, 3), dtype=np_float))
-    face_r = AC(np.zeros((nvf * 4, 3), dtype=np_float))
+    del edge_c, face_c, ecenter_sdf, fcenter_sdf
+    edge_r = AC(np.empty((nve * 2, 3), dtype=np_float))
+    face_r = AC(np.empty((nvf * 4, 3), dtype=np_float))
     dll.get_lr_extra_verts(
-        as_flt(edge_lr), as_flt(edge_r), as_flt(face_lr), as_flt(face_r),
+        as_flt(edge_lr),
+        as_flt(edge_r),
+        as_flt(face_lr),
+        as_flt(face_r),
     )
-    esdf_l = eval_fn(kernel, edge_lr)
-    esdf_r = eval_fn(kernel, edge_r)
-    fsdf_l = eval_fn(kernel, face_lr)
-    fsdf_r = eval_fn(kernel, face_r)
 
-    edge_verts = np.zeros((nve, 3), dtype=np_float)
-    face_verts = np.zeros((nvf, 3), dtype=np_float)
+    # Fused left/right SDF: 2 calls instead of 4.
+    n_elr = len(edge_lr)
+    e_combined = np.concatenate([edge_lr, edge_r])
+    e_sdf_all = eval_fn(kernel, e_combined)
+    esdf_l = e_sdf_all[:n_elr]
+    esdf_r = e_sdf_all[n_elr:]
+
+    n_flr = len(face_lr)
+    f_combined = np.concatenate([face_lr, face_r])
+    f_sdf_all = eval_fn(kernel, f_combined)
+    fsdf_l = f_sdf_all[:n_flr]
+    fsdf_r = f_sdf_all[n_flr:]
+
+    del edge_lr, edge_r, face_lr, face_r
+
+    edge_verts = np.empty((nve, 3), dtype=np_float)
+    face_verts = np.empty((nvf, 3), dtype=np_float)
     dll.finalize_extra_verts(
-        as_sdf_flt(esdf_l), as_sdf_flt(esdf_r), as_flt(edge_verts),
-        as_sdf_flt(fsdf_l), as_sdf_flt(fsdf_r), as_flt(face_verts),
+        as_sdf_flt(esdf_l),
+        as_sdf_flt(esdf_r),
+        as_flt(edge_verts),
+        as_sdf_flt(fsdf_l),
+        as_sdf_flt(fsdf_r),
+        as_flt(face_verts),
     )
     return edge_verts, face_verts
 
@@ -182,7 +242,11 @@ def construct_element_mesh(
     }
 
     vertices = bisect_cube_vertices(
-        dll, element_idx, kernel, nv_count, **bisect_kw,
+        dll,
+        element_idx,
+        kernel,
+        nv_count,
+        **bisect_kw,
     )
 
     cnts = np.zeros(3, dtype=np.int32)
@@ -190,10 +254,14 @@ def construct_element_mesh(
     nve, nvf, nf = int(cnts[0]), int(cnts[1]), int(cnts[2])
 
     edge_verts, face_verts = bisect_extra_vertices(
-        dll, kernel, nve, nvf, **bisect_kw,
+        dll,
+        kernel,
+        nve,
+        nvf,
+        **bisect_kw,
     )
 
-    faces = AC(np.zeros((nf, 3), dtype=np.int32))
+    faces = AC(np.empty((nf, 3), dtype=np.int32))
     dll.get_faces(as_int(faces))
     vertices = np.concatenate((vertices, edge_verts, face_verts))
 
@@ -202,7 +270,9 @@ def construct_element_mesh(
 
     mesh = trimesh.Trimesh(vertices=vertices, faces=faces, process=False)
     logger.info(
-        "element %d has vertices #%d faces #%d",
-        element_idx, mesh.vertices.shape[0], mesh.faces.shape[0],
+        "element %d: %d vertices, %d faces",
+        element_idx,
+        mesh.vertices.shape[0],
+        mesh.faces.shape[0],
     )
     return mesh, in_view_tag

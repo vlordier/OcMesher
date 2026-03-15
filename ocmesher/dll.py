@@ -28,11 +28,22 @@ _BP = POINTER(c_bool)
 # Grouped by pipeline stage for readability.
 _FUNCTION_SPECS: list[tuple[str, list[Any], Any]] = [
     # --- Coarse octree construction ---
-    ("run_coarse", [
-        _FP, c_double, c_int32, _FP,
-        c_double, c_double, c_double,
-        c_int32, c_int32, c_int32,
-    ], c_int32),
+    (
+        "run_coarse",
+        [
+            _FP,
+            c_double,
+            c_int32,
+            _FP,
+            c_double,
+            c_double,
+            c_double,
+            c_int32,
+            c_int32,
+            c_int32,
+        ],
+        c_int32,
+    ),
     # --- Fine-group SDF refinement ---
     ("fine_group", [], c_int32),
     ("fine_iteration", [_SFP], c_int32),
@@ -77,6 +88,7 @@ class CoreDLL:
     """
 
     def __init__(self, lib_dir: str | Path | None = None) -> None:
+        """Load the shared library and register all exported functions."""
         if lib_dir is None:
             lib_dir = Path(__file__).parent.resolve() / "lib"
         lib_path = Path(lib_dir) / "core.so"

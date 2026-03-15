@@ -1,0 +1,39 @@
+cff-version: 1.2.0
+message: "If you use OcMesher in your research, please cite it as follows."
+title: "OcMesher: View-Dependent Octree-based Mesh Extraction in Unbounded Scenes for Procedural Synthetic Data"
+version: "1.0.0"
+license: BSD-3-Clause
+repository-code: "https://github.com/princeton-vl/OcMesher"
+url: "https://arxiv.org/abs/2312.08364"
+date-released: "2023-12-14"
+authors:
+  - family-names: Ma
+    given-names: Zeyu
+    affiliation: Princeton University
+    website: "https://mazeyu.github.io/"
+  - family-names: Raistrick
+    given-names: Alexander
+    affiliation: Princeton University
+    website: "http://araistrick.com/"
+  - family-names: Lipson
+    given-names: Lahav
+    affiliation: Princeton University
+    website: "https://www.lahavlipson.com/"
+  - family-names: Deng
+    given-names: Jia
+    affiliation: Princeton University
+    website: "http://www.cs.princeton.edu/~jiadeng"
+preferred-citation:
+  type: article
+  title: "View-Dependent Octree-based Mesh Extraction in Unbounded Scenes for Procedural Synthetic Data"
+  authors:
+    - family-names: Ma
+      given-names: Zeyu
+    - family-names: Raistrick
+      given-names: Alexander
+    - family-names: Lipson
+      given-names: Lahav
+    - family-names: Deng
+      given-names: Jia
+  year: 2023
+  url: "https://arxiv.org/abs/2312.08364"

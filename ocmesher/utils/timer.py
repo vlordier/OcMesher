@@ -3,46 +3,64 @@
 
 # Authors: Zeyu Ma
 
-"""Context manager for timing code blocks with memory reporting."""
+"""Simple wall-clock timer with memory reporting."""
 
-from __future__ import annotations
-
+import logging
 import os
-import time
+from datetime import UTC, datetime
+from types import TracebackType
+from typing import Self
 
 import psutil
 
+logger = logging.getLogger(__name__)
+
+__all__ = ["Timer"]
+
 
 class Timer:
-    """Context manager that measures elapsed time and reports memory usage."""
+    """Context manager that measures wall-clock duration and reports memory usage.
+
+    Usage::
+
+        with Timer("my step"):
+            do_work()
+        # logs: [my step] finished in 0:00:01.234 with memory usage 0.5 GB
+    """
+
+    __slots__ = ("disable_timer", "duration", "end", "name", "start")
 
     def __init__(self, desc: str, disable_timer: bool = False) -> None:
+        """Create a timer labelled *desc*."""
         self.disable_timer = disable_timer
-        if not self.disable_timer:
-            self.name = f"[{desc}]"
-        self._start: float = 0.0
-        self.elapsed: float = 0.0
+        if self.disable_timer:
+            return
+        self.name = f"[{desc}]"
 
-    def __enter__(self) -> Timer:
-        if not self.disable_timer:
-            self._start = time.perf_counter()
+    def __enter__(self) -> Self:
+        """Record the start time."""
+        if self.disable_timer:
+            return self
+        self.start = datetime.now(tz=UTC)
         return self
 
     def __exit__(
         self,
         exc_type: type[BaseException] | None,
-        exc_val: BaseException | None,
-        traceback: object,
+        _exc_val: BaseException | None,
+        _traceback: TracebackType | None,
     ) -> None:
+        """Log elapsed time and memory on success, or the exception type on failure."""
         if self.disable_timer:
             return
-        self.elapsed = time.perf_counter() - self._start
+        self.end = datetime.now(tz=UTC)
+        self.duration = self.end - self.start  # timedelta
         if exc_type is None:
-            process = psutil.Process(os.getpid())
-            mem_gb = process.memory_info().rss / (1024**3)
-            print(
-                f"{self.name} finished in {self.elapsed:.6f}s"
-                f" with memory usage {mem_gb:.2f} GB",
-            )
+            try:
+                process = psutil.Process(os.getpid())
+                mem_gb = process.memory_info().rss / 1024**3
+                logger.info("%s finished in %s with memory usage %.2f GB", self.name, self.duration, mem_gb)
+            except (psutil.NoSuchProcess, psutil.AccessDenied):
+                logger.info("%s finished in %s", self.name, self.duration)
         else:
-            print(f"{self.name} failed with {exc_type}")
+            logger.warning("%s failed with %s: %s", self.name, exc_type.__name__, _exc_val)
