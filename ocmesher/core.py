@@ -295,9 +295,9 @@ class OcMesher:
         """
         n = len(xyz)
         _tmp = np.empty(n, dtype=bool)
+        out_bound = np.empty(n, dtype=bool)
         # Seed with first axis: xyz[:,0] <= b_min[0]
-        np.less_equal(xyz[:, 0], b_min[0], out=_tmp)
-        out_bound = _tmp.copy()
+        np.less_equal(xyz[:, 0], b_min[0], out=out_bound)
         # OR with xyz[:,0] >= b_max[0]
         np.greater_equal(xyz[:, 0], b_max[0], out=_tmp)
         np.logical_or(out_bound, _tmp, out=out_bound)
@@ -528,12 +528,12 @@ class OcMesher:
         n_edge_lr = len(edge_vertices_lr)
         # Pre-allocate combined buffer outside the loop so each iteration
         # only copies slices instead of allocating a fresh array.
-        ef_combined = np.empty((n_edge_lr + len(face_vertices_lr), 3), dtype=self.np_float_type)
+        bisection_buf = np.empty((n_edge_lr + len(face_vertices_lr), 3), dtype=self.np_float_type)
         for _ in range(self.bisection_iters):
             # Fill combined buffer from the two sub-arrays (avoids np.concatenate alloc).
-            ef_combined[:n_edge_lr] = edge_vertices_lr
-            ef_combined[n_edge_lr:] = face_vertices_lr
-            ef_sdf = self.kernel_caller(k_e, ef_combined)
+            bisection_buf[:n_edge_lr] = edge_vertices_lr
+            bisection_buf[n_edge_lr:] = face_vertices_lr
+            ef_sdf = self.kernel_caller(k_e, bisection_buf)
             e_sdf = ef_sdf[:n_edge_lr]
             f_sdf = ef_sdf[n_edge_lr:]
             self.update_extra_verts(
