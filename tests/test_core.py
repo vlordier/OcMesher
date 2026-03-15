@@ -160,8 +160,8 @@ class TestKernelCaller:
         obj._bounds_min_np = np.array([bounds[0], bounds[2], bounds[4]], dtype=np.float64)
         obj._bounds_max_np = np.array([bounds[1], bounds[3], bounds[5]], dtype=np.float64)
         obj._sdf_pool = None
-        obj._oob_mask = np.empty(10_000_000, dtype=bool)
-        obj._oob_tmp = np.empty(10_000_000, dtype=bool)
+        obj._oob_mask = np.empty(_SDF_BATCH_SIZE, dtype=bool)
+        obj._oob_tmp = np.empty(_SDF_BATCH_SIZE, dtype=bool)
         return obj
 
     def test_empty_points_returns_empty(self, sample_bounds, sphere_kernel):
@@ -508,8 +508,8 @@ class TestVectorisedBoundsCheck:
         obj._bounds_min_np = np.array([bounds[0], bounds[2], bounds[4]], dtype=np.float64)
         obj._bounds_max_np = np.array([bounds[1], bounds[3], bounds[5]], dtype=np.float64)
         obj._sdf_pool = None
-        obj._oob_mask = np.empty(10_000_000, dtype=bool)
-        obj._oob_tmp = np.empty(10_000_000, dtype=bool)
+        obj._oob_mask = np.empty(_SDF_BATCH_SIZE, dtype=bool)
+        obj._oob_tmp = np.empty(_SDF_BATCH_SIZE, dtype=bool)
         return obj
 
     def test_precomputed_bounds_vectors_exist(self, sample_cameras, sample_bounds):
@@ -567,8 +567,8 @@ class TestFusedBisectionSDF:
         obj._bounds_min_np = np.array([bounds[0], bounds[2], bounds[4]], dtype=np.float64)
         obj._bounds_max_np = np.array([bounds[1], bounds[3], bounds[5]], dtype=np.float64)
         obj._sdf_pool = None
-        obj._oob_mask = np.empty(10_000_000, dtype=bool)
-        obj._oob_tmp = np.empty(10_000_000, dtype=bool)
+        obj._oob_mask = np.empty(_SDF_BATCH_SIZE, dtype=bool)
+        obj._oob_tmp = np.empty(_SDF_BATCH_SIZE, dtype=bool)
         return obj
 
     def test_fused_eval_matches_separate(self, sample_bounds, sphere_kernel):
@@ -675,8 +675,8 @@ class TestParallelMultiKernel:
         obj._bounds_min_np = np.array([bounds[0], bounds[2], bounds[4]], dtype=np.float64)
         obj._bounds_max_np = np.array([bounds[1], bounds[3], bounds[5]], dtype=np.float64)
         obj._sdf_pool = None
-        obj._oob_mask = np.empty(10_000_000, dtype=bool)
-        obj._oob_tmp = np.empty(10_000_000, dtype=bool)
+        obj._oob_mask = np.empty(_SDF_BATCH_SIZE, dtype=bool)
+        obj._oob_tmp = np.empty(_SDF_BATCH_SIZE, dtype=bool)
         return obj
 
     def test_multi_kernel_matches_single(self, sample_bounds, sphere_kernel, plane_kernel):
@@ -731,8 +731,8 @@ class TestPreallocatedBisectionBuffer:
         obj._bounds_min_np = np.array([bounds[0], bounds[2], bounds[4]], dtype=np.float64)
         obj._bounds_max_np = np.array([bounds[1], bounds[3], bounds[5]], dtype=np.float64)
         obj._sdf_pool = None
-        obj._oob_mask = np.empty(10_000_000, dtype=bool)
-        obj._oob_tmp = np.empty(10_000_000, dtype=bool)
+        obj._oob_mask = np.empty(_SDF_BATCH_SIZE, dtype=bool)
+        obj._oob_tmp = np.empty(_SDF_BATCH_SIZE, dtype=bool)
         return obj
 
     def test_fused_eval_with_preallocated_matches_separate(self, sample_bounds, sphere_kernel):

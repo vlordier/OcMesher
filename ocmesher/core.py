@@ -40,9 +40,12 @@ CAMERA_DATA_STRIDE = 23
 # Keeping this below ~10M avoids exhausting RAM on large octrees.
 _SDF_BATCH_SIZE = 10_000_000
 
+# Default number of SDF worker threads when os.cpu_count() is unavailable.
+_DEFAULT_SDF_WORKERS = 4
+
 # Maximum number of SDF worker threads for multi-kernel evaluation.
 # Defaults to available CPU count but can be capped by OCMESHER_SDF_WORKERS.
-_MAX_SDF_WORKERS: int = int(os.environ.get("OCMESHER_SDF_WORKERS", str(os.cpu_count() or 4)))
+_MAX_SDF_WORKERS: int = int(os.environ.get("OCMESHER_SDF_WORKERS", str(os.cpu_count() or _DEFAULT_SDF_WORKERS)))
 
 
 def _validate_cameras(cameras):
