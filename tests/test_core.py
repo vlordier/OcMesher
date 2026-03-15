@@ -1207,3 +1207,102 @@ class TestBisectionItersLocal:
             mock_load.return_value = MagicMock()
             mesher = OcMesher(sample_cameras, sample_bounds, bisection_iters=10)
         assert mesher.bisection_iters == 10
+
+
+# ---------------------------------------------------------------------------
+# Split enclosed / non-enclosed batch loops in kernel_caller
+# ---------------------------------------------------------------------------
+
+
+class TestSplitEnclosedBatchLoops:
+    """Verify that enclosed/non-enclosed paths in kernel_caller produce identical results."""
+
+    @staticmethod
+    def _make_mesher_stub(bounds, *, enclosed=True):
+        obj = object.__new__(OcMesher)
+        obj.bounds = bounds
+        obj.enclosed = enclosed
+        obj.sdf_np_float_type = np.float32
+        obj._bounds_min_np = np.array([bounds[0], bounds[2], bounds[4]], dtype=np.float64)
+        obj._bounds_max_np = np.array([bounds[1], bounds[3], bounds[5]], dtype=np.float64)
+        obj._sdf_pool = None
+        obj._oob_mask = np.empty(_SDF_BATCH_SIZE, dtype=bool)
+        obj._oob_tmp = np.empty(_SDF_BATCH_SIZE, dtype=bool)
+        return obj
+
+    def test_enclosed_single_kernel_clamps(self, sphere_kernel):
+        """Enclosed=True single-kernel path must clamp out-of-bounds to 1."""
+        bounds = np.array([-1.0, 1.0, -1.0, 1.0, -1.0, 1.0])
+        mesher = self._make_mesher_stub(bounds, enclosed=True)
+        pts = np.array([[0, 0, 0], [1.5, 0, 0]], dtype=np.float64)
+        result = mesher.kernel_caller([sphere_kernel], pts)
+        assert result[1, 0] == pytest.approx(1.0)
+
+    def test_non_enclosed_single_kernel_no_clamp(self, sphere_kernel):
+        """Enclosed=False single-kernel path must not clamp."""
+        bounds = np.array([-1.0, 1.0, -1.0, 1.0, -1.0, 1.0])
+        mesher = self._make_mesher_stub(bounds, enclosed=False)
+        pts = np.array([[1.5, 0, 0]], dtype=np.float64)
+        result = mesher.kernel_caller([sphere_kernel], pts)
+        np.testing.assert_allclose(result[:, 0], [0.5], atol=1e-6)
+
+    def test_enclosed_multi_kernel_clamps(self, sphere_kernel, plane_kernel):
+        """Enclosed=True multi-kernel path must clamp out-of-bounds to 1."""
+        bounds = np.array([-1.0, 1.0, -1.0, 1.0, -1.0, 1.0])
+        mesher = self._make_mesher_stub(bounds, enclosed=True)
+        pts = np.array([[0, 0, 0], [1.5, 0, 0]], dtype=np.float64)
+        result = mesher.kernel_caller([sphere_kernel, plane_kernel], pts)
+        assert result[1, 0] == pytest.approx(1.0)
+        assert result[1, 1] == pytest.approx(1.0)
+
+    def test_non_enclosed_multi_kernel_no_clamp(self, sphere_kernel, plane_kernel):
+        """Enclosed=False multi-kernel path must not clamp."""
+        bounds = np.array([-1.0, 1.0, -1.0, 1.0, -1.0, 1.0])
+        mesher = self._make_mesher_stub(bounds, enclosed=False)
+        pts = np.array([[1.5, 0, 0]], dtype=np.float64)
+        result = mesher.kernel_caller([sphere_kernel, plane_kernel], pts)
+        np.testing.assert_allclose(result[:, 0], [0.5], atol=1e-6)
+        np.testing.assert_allclose(result[:, 1], [0.0], atol=1e-6)
+
+
+# ---------------------------------------------------------------------------
+# Pre-allocated fabs buffer for tolerance checks
+# ---------------------------------------------------------------------------
+
+
+class TestFabsBufferTolerance:
+    """Verify that np.fabs with out= produces same results as np.fabs without out=."""
+
+    def test_fabs_with_out_matches_without(self):
+        """np.fabs(arr, out=buf).max() must match np.fabs(arr).max()."""
+        rng = np.random.default_rng(42)
+        arr = rng.standard_normal((100, 1)).astype(np.float32)
+        buf = np.empty_like(arr)
+        assert np.fabs(arr, out=buf).max() == pytest.approx(np.fabs(arr).max())
+        # buf should be populated
+        np.testing.assert_array_equal(buf, np.fabs(arr))
+
+    def test_fabs_buffer_reuse_across_iterations(self):
+        """Reusing the same out= buffer across iterations must give correct results."""
+        rng = np.random.default_rng(99)
+        buf = np.empty((50, 1), dtype=np.float32)
+        for _ in range(5):
+            arr = rng.standard_normal((50, 1)).astype(np.float32)
+            result = np.fabs(arr, out=buf).max()
+            assert result == pytest.approx(np.fabs(arr).max())
+
+
+# ---------------------------------------------------------------------------
+# Cached sdf_np_float_type in bisection methods
+# ---------------------------------------------------------------------------
+
+
+class TestCachedSdfDtype:
+    """Verify that sdf_np_float_type is properly cached as local."""
+
+    def test_sdf_dtype_attribute_exists(self, sample_cameras, sample_bounds):
+        """sdf_np_float_type must be set during __init__."""
+        with patch("ocmesher.core.load_cdll") as mock_load, patch("ocmesher.core.register_func"):
+            mock_load.return_value = MagicMock()
+            mesher = OcMesher(sample_cameras, sample_bounds)
+        assert mesher.sdf_np_float_type == np.float32

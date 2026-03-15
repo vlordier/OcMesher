@@ -76,6 +76,8 @@ ignore = [
     "FBT002",   # boolean default positional args (API backwards-compat)
     "PLR0913",  # too-many-arguments (ctypes register_func calls)
     "PLR0915",  # too-many-statements (__call__ orchestrates meshing)
+    "C901",     # complex methods (kernel_caller has split enclosed/non-enclosed loops)
+    "PLR0912",  # too-many-branches (kernel_caller has 4 specialised batch paths)
 ]
 # interface.py – ctypes helper with many function params
 "ocmesher/utils/interface.py" = [
