@@ -24,6 +24,10 @@ dev = [
     "pyupgrade>=3.15",
     "ruff>=0.4.0",
 ]
+benchmark = [
+    "numba>=0.60.0",  # JIT-compiled SDF (Opt-numba tier)
+    "mlx>=0.22.0",    # Apple Metal GPU SDF (Opt-metal tier, macOS-only)
+]
 
 [build-system]
 requires = ["setuptools>=68"]

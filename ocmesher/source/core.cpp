@@ -312,7 +312,7 @@ int vis_filter( // NOLINT(readability-identifier-naming, modernize-use-trailing-
     }
     cubes_set.clear();
 
-    std::vector<bool> visible(cubes.size(), false);
+    std::vector<char> visible(cubes.size(), 0); // char avoids vector<bool> bit-packing data races
     T factor = 10;
     std::vector<T> canvas;
     for (int k = 0; k < n_cams; k++) { // NOLINT(readability-identifier-length)
@@ -320,9 +320,12 @@ int vis_filter( // NOLINT(readability-identifier-naming, modernize-use-trailing-
         int height = static_cast<int>(current_cam[21] / factor),
             width = static_cast<int>(current_cam[22] / factor);
         if (simplify_occluded) {
-            canvas =
-                std::vector<T>(static_cast<std::size_t>(height) * static_cast<std::size_t>(width),
-                               std::numeric_limits<T>::infinity());
+            // Build per-thread depth buffers to avoid omp critical contention,
+            // then reduce with a single sequential min-pass.
+            int nth = omp_get_max_threads();
+            int hw = height * width;
+            std::vector<T> tcanvas(static_cast<std::size_t>(nth) * static_cast<std::size_t>(hw),
+                                   std::numeric_limits<T>::infinity());
             int cubes_n = static_cast<int>(cubes.size());
 #pragma omp parallel for
             for (int i = 0; i < cubes_n; i++) { // NOLINT(modernize-loop-convert)
@@ -332,19 +335,23 @@ int vis_filter( // NOLINT(readability-identifier-naming, modernize-use-trailing-
                     int x = static_cast<int>(std::floor(image_coords[0] / factor));
                     int y = static_cast<int>(std::floor(image_coords[1] / factor));
                     if (x >= 0 && y >= 0 && x < width && y < height) {
-#pragma omp critical
-                        {
-                            if (image_coords[2] <= canvas[static_cast<std::size_t>(x) *
-                                                              static_cast<std::size_t>(height) +
-                                                          static_cast<std::size_t>(y)]) {
-                                canvas[static_cast<std::size_t>(x) *
-                                           static_cast<std::size_t>(height) +
-                                       static_cast<std::size_t>(y)] = image_coords[2];
-                            }
-                        }
+                        T& cell = tcanvas[static_cast<std::size_t>(omp_get_thread_num()) *
+                                              static_cast<std::size_t>(hw) +
+                                          static_cast<std::size_t>(x) *
+                                              static_cast<std::size_t>(height) +
+                                          static_cast<std::size_t>(y)];
+                        if (image_coords[2] < cell)
+                            cell = image_coords[2];
                     }
                 }
             }
+            canvas = std::vector<T>(static_cast<std::size_t>(hw), std::numeric_limits<T>::infinity());
+            for (int t = 0; t < nth; t++)
+                for (int j = 0; j < hw; j++)
+                    if (tcanvas[static_cast<std::size_t>(t) * static_cast<std::size_t>(hw) + j] <
+                        canvas[j])
+                        canvas[j] =
+                            tcanvas[static_cast<std::size_t>(t) * static_cast<std::size_t>(hw) + j];
         }
 #pragma omp parallel for
         for (int i = 0; i < static_cast<int>(cubes.size()); i++) { // NOLINT(modernize-loop-convert)
@@ -1015,14 +1022,18 @@ void finalize_verts( // NOLINT(readability-identifier-length, readability-identi
     for (int i = 0; i < static_cast<int>(becv.size()); i++) {
         T vx[3] = {0};
         int w = 0;
-        for (int j = 0; j < 8; j++) // NOLINT(readability-identifier-length)
-            if ((sdf_l[i * 8 + j] >= 0) != (sdf_r[i * 8 + j] >= 0)) {
+        for (int j = 0; j < 8; j++) { // NOLINT(readability-identifier-length)
+            T sl = static_cast<T>(sdf_l[i * 8 + j]);
+            T sr = static_cast<T>(sdf_r[i * 8 + j]);
+            if ((sl >= 0) != (sr >= 0)) {
                 w++;
+                // Linear interpolation toward zero crossing (more accurate than midpoint)
+                T dist = becv[i].m_l + (sl / (sl - sr)) * (becv[i].m_r - becv[i].m_l);
                 for (int k = 0; k < 3; k++) { // NOLINT(readability-identifier-length)
-                    vx[k] +=
-                        becv[i].m_c[k] + (((j >> k) & 1) * 2 - 1) * (becv[i].m_l + becv[i].m_r) / 2;
+                    vx[k] += becv[i].m_c[k] + (((j >> k) & 1) * 2 - 1) * dist;
                 }
             }
+        }
         if (w == 0) {
             for (int k = 0; k < 3; k++)
                 verts[i * 3 + k] = becv[i].m_c[k]; // NOLINT(readability-identifier-length)
@@ -1041,16 +1052,20 @@ void finalize_extra_verts( // NOLINT(readability-identifier-naming,
     for (int i = 0; i < static_cast<int>(edge_vertices.size()); i++) {
         T vx[3] = {0};
         int w = 0;
-        for (int j = 0; j < 2; j++) // NOLINT(readability-identifier-length)
-            if ((esdf_l[i * 2 + j] >= 0) != (esdf_r[i * 2 + j] >= 0)) {
+        for (int j = 0; j < 2; j++) { // NOLINT(readability-identifier-length)
+            T sl = static_cast<T>(esdf_l[i * 2 + j]);
+            T sr = static_cast<T>(esdf_r[i * 2 + j]);
+            if ((sl >= 0) != (sr >= 0)) {
                 w++;
-                T mid = (edge_vertices[i].second.m_l + edge_vertices[i].second.m_r) / 2;
+                T dist = edge_vertices[i].second.m_l +
+                         (sl / (sl - sr)) * (edge_vertices[i].second.m_r - edge_vertices[i].second.m_l);
                 for (int k = 0; k < 3; k++) { // NOLINT(readability-identifier-length)
                     vx[k] += edge_vertices[i].second.m_c[k];
                     if (k == edge_vertices[i].first)
-                        vx[k] += (j * 2 - 1) * mid;
+                        vx[k] += (j * 2 - 1) * dist;
                 }
             }
+        }
         assert(w != 0);
         for (int k = 0; k < 3; k++)
             everts[i * 3 + k] = vx[k] / w; // NOLINT(readability-identifier-length)
@@ -1059,18 +1074,22 @@ void finalize_extra_verts( // NOLINT(readability-identifier-naming,
     for (int i = 0; i < static_cast<int>(face_vertices.size()); i++) {
         T vx[3] = {0};
         int w = 0;
-        for (int j = 0; j < 4; j++) // NOLINT(readability-identifier-length)
-            if ((fsdf_l[i * 4 + j] >= 0) != (fsdf_r[i * 4 + j] >= 0)) {
+        for (int j = 0; j < 4; j++) { // NOLINT(readability-identifier-length)
+            T sl = static_cast<T>(fsdf_l[i * 4 + j]);
+            T sr = static_cast<T>(fsdf_r[i * 4 + j]);
+            if ((sl >= 0) != (sr >= 0)) {
                 w++;
-                T mid = (face_vertices[i].second.m_l + face_vertices[i].second.m_r) / 2;
+                T dist = face_vertices[i].second.m_l +
+                         (sl / (sl - sr)) * (face_vertices[i].second.m_r - face_vertices[i].second.m_l);
                 for (int k = 0; k < 3; k++) { // NOLINT(readability-identifier-length)
                     vx[k] += face_vertices[i].second.m_c[k];
                     if (k == (face_vertices[i].first + 1) % 3)
-                        vx[k] += (firstDigit(j) * 2 - 1) * mid;
+                        vx[k] += (firstDigit(j) * 2 - 1) * dist;
                     else if (k == (face_vertices[i].first + 2) % 3)
-                        vx[k] += (secondDigit(j) * 2 - 1) * mid;
+                        vx[k] += (secondDigit(j) * 2 - 1) * dist;
                 }
             }
+        }
         if (w == 0) {
             for (int k = 0; k < 3; k++)
                 fverts[i * 3 + k] =
