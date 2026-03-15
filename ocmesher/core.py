@@ -728,8 +728,7 @@ class OcMesher:
         # Fused left/right SDF evaluation: single kernel_caller call instead
         # of two, halving the Python→SDF round-trip overhead.
         # Pre-allocated buffer avoids np.concatenate allocation overhead.
-        _two_cubes = _n_cubes + _n_cubes
-        lr_combined = _empty((_two_cubes, 3), dtype=_np_float)
+        lr_combined = _empty((_n_cubes * 2, 3), dtype=_np_float)
         lr_combined[:_n_cubes] = cubes
         lr_combined[_n_cubes:] = cubes_r
         lr_sdf = _kernel_caller(k_e, lr_combined)
@@ -902,8 +901,7 @@ class OcMesher:
         faces = _empty((nf, 3), dtype=np.int32)
         self.get_faces(AsInt(faces))
         # Pre-allocated final vertex array avoids np.concatenate overhead.
-        # Use len(vertices) for base count (caller may have changed size)
-        # but reuse nve/nvf directly — they match edge/face vertex counts.
+        # Reuse nve/nvf (from construct_faces) instead of .shape[0] lookups.
         n_base = len(vertices)
         off_edge = n_base + nve
         final_vertices = _empty((off_edge + nvf, 3), dtype=_np_float)

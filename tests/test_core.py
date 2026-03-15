@@ -1796,12 +1796,12 @@ class TestPoolSubmitMultiKernel:
 
     def test_multi_kernel_uses_pool_submit(self):
         """Multi-kernel kernel_caller should use pool.submit (no _make_eval_one)."""
-
         source = inspect.getsource(OcMesher.kernel_caller)
         # _make_eval_one closure factory should no longer exist
         assert "_make_eval_one" not in source
-        # pool.submit should be used directly
-        assert "pool.submit" in source or "_submit" in source
+        # pool.submit should be bound as _submit and called
+        assert "_submit = pool.submit" in source
+        assert "_submit(" in source
 
     def test_multi_kernel_correctness(self):
         """Two kernels dispatched via pool.submit must produce correct columns."""
@@ -1912,8 +1912,8 @@ class TestBoundsMaskCachedUfuncs:
         b_min = np.array([0.0, 0.0, 0.0])
         b_max = np.array([1.0, 1.0, 1.0])
         mask = OcMesher._out_of_bounds_mask(xyz, b_min, b_max)
-        # Point 0: inside → False
-        # Point 1: on boundary (0.0 <= 0.0) → True
-        # Point 2: on boundary (1.0 >= 1.0) → True
-        # Point 3: outside (-0.1 <= 0.0) → True
+        # Point 0: strictly inside → False
+        # Point 1: on lower boundary (0.0 <= b_min[0]=0.0 is True) → out-of-bounds
+        # Point 2: on upper boundary (1.0 >= b_max[0]=1.0 is True) → out-of-bounds
+        # Point 3: below lower boundary (-0.1 <= b_min[0]=0.0 is True) → out-of-bounds
         np.testing.assert_array_equal(mask, [False, True, True, True])
