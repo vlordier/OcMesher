@@ -395,13 +395,15 @@ class OcMesher:
                 for k_idx, sdf in pool.map(_eval_one, enumerate(kernels)):
                     result[start:end, k_idx] = sdf
             if out_bound is not None:
-                result[start:end][out_bound] = 1
+                result_slice = result[start:end]
+                result_slice[out_bound] = 1
         else:
             # Single-kernel fast path: no thread-pool overhead.
-            _k_idx, sdf = _eval_one((0, kernels[0]))
-            result[start:end, 0] = sdf
+            _, sdf = _eval_one((0, kernels[0]))
+            result_slice = result[start:end, 0]
+            result_slice[:] = sdf
             if out_bound is not None:
-                result[start:end, 0][out_bound] = 1
+                result_slice[out_bound] = 1
 
     def __call__(self, kernels):
         """Run the full coarse-to-fine meshing pipeline and return meshes."""
