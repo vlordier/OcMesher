@@ -1346,7 +1346,10 @@ class TorchOcMesher:
         if n == 0:
             return np.zeros((0, 3), dtype=np.float64), np.zeros((0, 3), dtype=np.int32)
 
-        device = sdf.device
+        # Use self.device (not sdf.device) because _ensure_mc_cache keys the
+        # cache with self.device.  On MPS, torch.device("mps") != tensor.device
+        # (which adds index=0), so using sdf.device would cause a KeyError.
+        device = self.device
         cache = TorchOcMesher._mc_cache[device]
         edge_table_t = cache["edge_table"]
         tri_table_t = cache["tri_table"]
