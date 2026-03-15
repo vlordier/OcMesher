@@ -756,7 +756,7 @@ class TorchOcMesher:
 
         # Pre-compute reciprocal for _projected_sizes: replaces a division
         # with a multiplication on every call in the 30-iteration hot loop.
-        self._inv_pix_ang_ppc = (1.0 / self._pix_ang_ppc)  # (C, 1)
+        self._inv_pix_ang_ppc = 1.0 / self._pix_ang_ppc  # (C, 1)
 
         # Pre-compute combined K @ inv_pose for visibility filter -------------
         # This avoids two separate matmuls per camera in _visibility_filter.
@@ -1118,7 +1118,7 @@ class TorchOcMesher:
         # Consecutive rows that differ mark new unique groups.
         diff = (sorted_q[1:] != sorted_q[:-1]).any(dim=1)
         group_starts = torch.cat([
-            torch.ones(1, device=flat.device, dtype=torch.bool), diff,
+            torch.tensor([True], device=flat.device, dtype=torch.bool), diff,
         ])
         group_ids = group_starts.cumsum(0) - 1  # 0-based unique-group ID
 

@@ -54,6 +54,7 @@ class TestVectorisedInit:
         expected = (single_cam_mesher._pix_ang * single_cam_mesher.pixels_per_cube).unsqueeze(1)
         torch.testing.assert_close(single_cam_mesher._pix_ang_ppc, expected)
         # Shape must be (C, 1) — pre-expanded to avoid unsqueeze in hot loop.
+        # C=1 for single-camera fixture.
         assert single_cam_mesher._pix_ang_ppc.shape == (1, 1)
 
 
