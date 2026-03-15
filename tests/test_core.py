@@ -418,6 +418,7 @@ class TestOcMesherReprAndContextManager:
         assert "OcMesher(" in r
         assert "n_cameras=1" in r
         assert "bisection_iters=15" in r
+        assert "bisection_tol=0.0" in r
         assert "enclosed=True" in r
 
     @patch("ocmesher.core.load_cdll")
@@ -738,3 +739,36 @@ class TestPreallocatedBisectionBuffer:
 
         np.testing.assert_array_equal(e_sdf, result[:n_edge])
         np.testing.assert_array_equal(f_sdf, result[n_edge:])
+
+
+# ---------------------------------------------------------------------------
+# Early-exit bisection tolerance (Refactor 6)
+# ---------------------------------------------------------------------------
+
+
+class TestBisectionTolerance:
+    """Verify the early-exit convergence check in bisection loops."""
+
+    @patch("ocmesher.core.load_cdll")
+    @patch("ocmesher.core.register_func")
+    def test_default_tol_is_zero(self, _mock_register, mock_load, sample_cameras, sample_bounds):
+        """Default bisection_tol must be 0 (no early exit)."""
+        mock_load.return_value = MagicMock()
+        mesher = OcMesher(sample_cameras, sample_bounds)
+        assert mesher.bisection_tol == 0.0
+
+    @patch("ocmesher.core.load_cdll")
+    @patch("ocmesher.core.register_func")
+    def test_custom_tol_stored(self, _mock_register, mock_load, sample_cameras, sample_bounds):
+        """bisection_tol must be stored as a float attribute."""
+        mock_load.return_value = MagicMock()
+        mesher = OcMesher(sample_cameras, sample_bounds, bisection_tol=1e-4)
+        assert mesher.bisection_tol == pytest.approx(1e-4)
+
+    @patch("ocmesher.core.load_cdll")
+    @patch("ocmesher.core.register_func")
+    def test_repr_includes_tol(self, _mock_register, mock_load, sample_cameras, sample_bounds):
+        """__repr__ must include bisection_tol."""
+        mock_load.return_value = MagicMock()
+        mesher = OcMesher(sample_cameras, sample_bounds, bisection_tol=0.001)
+        assert "bisection_tol=0.001" in repr(mesher)

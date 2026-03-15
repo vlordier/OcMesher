@@ -132,12 +132,18 @@ class OcMesher:
         min_dist=1,
         memory_limit_mb=1000,
         bisection_iters=15,
+        bisection_tol=0.0,
         enclosed=True,
         simplify_occluded=True,
         visible_relax_iter=2,
         coarse_count=500000,
     ):
-        """Initialise the mesher with camera intrinsics and bounds."""
+        """Initialise the mesher with camera intrinsics and bounds.
+
+        *bisection_tol*: when ``> 0``, bisection loops exit early once the
+        max absolute SDF residual drops below this value (default ``0``:
+        always run all *bisection_iters* iterations).
+        """
         cam_poses, Ks, Hs, Ws = _validate_cameras(cameras)
         bounds = _validate_bounds(bounds)
 
@@ -174,6 +180,7 @@ class OcMesher:
         self.size = self.np_float_type(max(bounds[1] - bounds[0], bounds[3] - bounds[2], bounds[5] - bounds[4]) * 1.1)
 
         self.bisection_iters = bisection_iters
+        self.bisection_tol = float(bisection_tol)
         self.enclosed = enclosed
         self.simplify_occluded = simplify_occluded
         self.visible_relax_iter = visible_relax_iter
@@ -270,6 +277,7 @@ class OcMesher:
             f"n_cameras={self.n_cameras}, "
             f"bounds={self.bounds.tolist()}, "
             f"bisection_iters={self.bisection_iters}, "
+            f"bisection_tol={self.bisection_tol}, "
             f"enclosed={self.enclosed})"
         )
 
@@ -465,9 +473,14 @@ class OcMesher:
         cubes = np.empty((num_verts * 8, 3), dtype=self.np_float_type)
         self.update_verts(e, POINTER(self.sdf_float_type)(), POINTER(self.sdf_float_type)(), self.AF(cubes))
         center_sdf_ptr = self.sdf_AF(center_sdf)
+        tol = self.bisection_tol
         for _ in tqdm(range(self.bisection_iters)):
             sdf = self.kernel_caller(k_e, cubes)
             self.update_verts(e, self.sdf_AF(sdf), center_sdf_ptr, self.AF(cubes))
+            # Early-exit: if all SDF residuals are below tolerance the
+            # surface has been located to sufficient accuracy.
+            if tol > 0 and np.max(np.abs(sdf)) < tol:
+                break
         cubes_r = np.empty((num_verts * 8, 3), dtype=self.np_float_type)
         self.get_lr_verts(e, self.AF(cubes), self.AF(cubes_r))
         # Fused left/right SDF evaluation: single kernel_caller call instead
@@ -499,6 +512,9 @@ class OcMesher:
         - Pre-allocated combined buffer outside the bisection loop: each
           iteration fills slices instead of allocating via ``np.concatenate``,
           eliminating ~15 allocations + copies per element.
+        - Early-exit convergence: when ``bisection_tol > 0``, the loop
+          terminates as soon as the maximum absolute SDF residual drops
+          below the tolerance, skipping unnecessary iterations.
         - Fused left/right SDF evaluation after bisection: 4 calls → 1.
         """
         cnts = np.zeros(3, dtype=np.int32)
@@ -526,11 +542,10 @@ class OcMesher:
             self.AF(face_vertices_lr),
         )
         n_edge_lr = len(edge_vertices_lr)
-        # Pre-allocate combined buffer outside the loop so each iteration
-        # only copies slices instead of allocating a fresh array.
+        # Pre-allocate combined buffer once; fill slices each iteration.
         bisection_buf = np.empty((n_edge_lr + len(face_vertices_lr), 3), dtype=self.np_float_type)
+        tol = self.bisection_tol
         for _ in range(self.bisection_iters):
-            # Fill combined buffer from the two sub-arrays (avoids np.concatenate alloc).
             bisection_buf[:n_edge_lr] = edge_vertices_lr
             bisection_buf[n_edge_lr:] = face_vertices_lr
             ef_sdf = self.kernel_caller(k_e, bisection_buf)
@@ -544,7 +559,9 @@ class OcMesher:
                 self.AF(edge_vertices_lr),
                 self.AF(face_vertices_lr),
             )
-        del edge_vertices_c, face_vertices_c, ecenter_sdf, fcenter_sdf
+            if tol > 0 and np.max(np.abs(ef_sdf)) < tol:
+                break
+        del edge_vertices_c, face_vertices_c, ecenter_sdf, fcenter_sdf, bisection_buf
         edge_vertices_r = np.empty((nve * 2, 3), dtype=self.np_float_type)
         face_vertices_r = np.empty((nvf * 4, 3), dtype=self.np_float_type)
         self.get_lr_extra_verts(
@@ -553,17 +570,17 @@ class OcMesher:
             self.AF(face_vertices_lr),
             self.AF(face_vertices_r),
         )
-        # Fused left/right SDF: 1 call instead of 4.
+        # Fused left/right SDF: 1 call instead of 4 — all 4 vertex arrays
+        # are concatenated into a single kernel_caller invocation.
         n_elr = len(edge_vertices_lr)
         n_flr = len(face_vertices_lr)
         all_lr = np.concatenate([edge_vertices_lr, edge_vertices_r, face_vertices_lr, face_vertices_r])
         all_lr_sdf = self.kernel_caller(k_e, all_lr)
-        n_edge_total = n_elr * 2
         esdf_l = all_lr_sdf[:n_elr]
-        esdf_r = all_lr_sdf[n_elr:n_edge_total]
-        fsdf_l = all_lr_sdf[n_edge_total : n_edge_total + n_flr]
-        fsdf_r = all_lr_sdf[n_edge_total + n_flr :]
-        del edge_vertices_lr, edge_vertices_r, face_vertices_lr, face_vertices_r
+        esdf_r = all_lr_sdf[n_elr : 2 * n_elr]
+        fsdf_l = all_lr_sdf[2 * n_elr : 2 * n_elr + n_flr]
+        fsdf_r = all_lr_sdf[2 * n_elr + n_flr :]
+        del edge_vertices_lr, edge_vertices_r, face_vertices_lr, face_vertices_r, all_lr, all_lr_sdf
         edge_vertices = np.empty((nve, 3), dtype=self.np_float_type)
         face_vertices = np.empty((nvf, 3), dtype=self.np_float_type)
         self.finalize_extra_verts(
