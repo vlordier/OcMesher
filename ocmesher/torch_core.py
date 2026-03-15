@@ -1100,21 +1100,37 @@ class TorchOcMesher:
         n = corners.shape[0]
         flat = corners.reshape(-1, 3)
 
-        # --- shared-corner deduplication ---
-        # Quantise positions to int64 triples and find unique rows.
-        # torch.unique(dim=0) is collision-free (unlike single-int hashing)
-        # and fast enough for the typical corner count.
+        # --- shared-corner deduplication via hash-sort + exact compare ---
+        # Sort corners by a 1D prime hash (fast radix sort on a single int64),
+        # then detect unique rows by comparing adjacent quantised triples.
+        # This is collision-free (exact row comparison) and significantly
+        # faster than ``torch.unique(dim=0)`` which performs an O(N log N)
+        # lexicographic sort with 3-column comparisons per step.
         quantized = (flat * _CORNER_QUANT_SCALE).round().long()
-        _unique_rows, inverse = torch.unique(quantized, dim=0, return_inverse=True)
-        # Pick one representative position per unique quantised triple.
-        # Writing indices in reverse order ensures the smallest (first)
-        # index wins for each unique bucket — this is deterministic and
-        # mirrors the dedup strategy used in _marching_cubes.
-        n_flat = flat.shape[0]
-        n_unique = _unique_rows.shape[0]
-        rep_idx = torch.zeros(n_unique, dtype=torch.long, device=flat.device)
-        rev_arange = torch.arange(n_flat - 1, -1, -1, device=flat.device)
-        rep_idx.scatter_(0, inverse[rev_arange], rev_arange)
+        hash_vals = (
+            quantized[:, 0] * 1000000007
+            + quantized[:, 1] * 1000000009
+            + quantized[:, 2] * 1000000021
+        )
+        sort_idx = torch.argsort(hash_vals)
+        sorted_q = quantized[sort_idx]
+
+        # Consecutive rows that differ mark new unique groups.
+        diff = (sorted_q[1:] != sorted_q[:-1]).any(dim=1)
+        group_starts = torch.cat([
+            torch.ones(1, device=flat.device, dtype=torch.bool), diff,
+        ])
+        group_ids = group_starts.cumsum(0) - 1  # 0-based unique-group ID
+
+        # Map back to original (unsorted) order.
+        inverse = torch.empty_like(group_ids)
+        inverse[sort_idx] = group_ids
+        # Pick one representative position per unique group.  The first
+        # element in each sorted group (where group_starts is True) is the
+        # canonical representative — deterministic and consistent with the
+        # dedup strategy used in _marching_cubes.
+        rep_sorted_idx = torch.where(group_starts)[0]  # indices into sort_idx
+        rep_idx = sort_idx[rep_sorted_idx]  # map back to original flat indices
         unique_pts = flat[rep_idx]
 
         # Evaluate SDF only at unique positions, then scatter back.

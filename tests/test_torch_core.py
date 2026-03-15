@@ -675,3 +675,106 @@ class TestRefineSkipKeptCubes:
         assert r_sdf is not None
         assert r_sdf.shape[1] == 8
         assert r_sdf.shape[2] == len(kernels)
+
+
+# ---------------------------------------------------------------------------
+# Tests for speed-optimisation refactors
+# ---------------------------------------------------------------------------
+class TestPrecomputedConstants:
+    """Verify that pre-computed constants in __init__ are correct."""
+
+    def test_origin_matches_center_minus_half_size(self, single_cam_mesher):
+        """_origin must equal center - size/2."""
+        expected = single_cam_mesher.center - single_cam_mesher.size / 2
+        torch.testing.assert_close(single_cam_mesher._origin, expected)
+
+    def test_inv_pix_ang_ppc_is_reciprocal(self, single_cam_mesher):
+        """_inv_pix_ang_ppc must be 1 / _pix_ang_ppc."""
+        expected = 1.0 / single_cam_mesher._pix_ang_ppc
+        torch.testing.assert_close(single_cam_mesher._inv_pix_ang_ppc, expected)
+
+    def test_pix_ang_ppc_shape_is_c1(self, multi_cam_mesher):
+        """_pix_ang_ppc must be (C, 1) for broadcast in _projected_sizes."""
+        assert multi_cam_mesher._pix_ang_ppc.shape == (4, 1)
+
+    def test_inv_pix_ang_ppc_shape_is_c1(self, multi_cam_mesher):
+        """_inv_pix_ang_ppc must be (C, 1)."""
+        assert multi_cam_mesher._inv_pix_ang_ppc.shape == (4, 1)
+
+
+class TestCubeScalesFusion:
+    """Verify _cube_scales and fused scale passing produce consistent results."""
+
+    def test_cube_scales_matches_exp2(self, single_cam_mesher):
+        """_cube_scales must return size / 2^levels."""
+        levels = torch.tensor([0, 1, 2, 3], dtype=torch.int64, device=single_cam_mesher.device)
+        scales = single_cam_mesher._cube_scales(levels)
+        expected = single_cam_mesher.size / torch.exp2(levels.to(single_cam_mesher._fdtype))
+        torch.testing.assert_close(scales, expected)
+
+    def test_cube_centers_with_precomputed_scales(self, single_cam_mesher):
+        """_cube_centers with cube_scales kwarg must match default path."""
+        coords = torch.tensor([[0, 0, 0], [1, 2, 3]], dtype=torch.int64, device=single_cam_mesher.device)
+        levels = torch.tensor([1, 2], dtype=torch.int64, device=single_cam_mesher.device)
+        centers_default = single_cam_mesher._cube_centers(coords, levels)
+        scales = single_cam_mesher._cube_scales(levels)
+        centers_fused = single_cam_mesher._cube_centers(coords, levels, cube_scales=scales)
+        torch.testing.assert_close(centers_fused, centers_default)
+
+    def test_projected_sizes_with_precomputed_scales(self, single_cam_mesher):
+        """_projected_sizes with cube_scales kwarg must match default path."""
+        coords = torch.tensor([[0, 0, 0]], dtype=torch.int64, device=single_cam_mesher.device)
+        levels = torch.tensor([1], dtype=torch.int64, device=single_cam_mesher.device)
+        positions = single_cam_mesher._cube_centers(coords, levels)
+        proj_default = single_cam_mesher._projected_sizes(positions, levels)
+        scales = single_cam_mesher._cube_scales(levels)
+        proj_fused = single_cam_mesher._projected_sizes(positions, levels, cube_scales=scales)
+        torch.testing.assert_close(proj_fused, proj_default)
+
+
+class TestBatchedVisibility:
+    """Verify the batched visibility filter matches expected behaviour."""
+
+    def test_vis_hb_wb_precomputed(self, single_cam_mesher):
+        """Pre-computed bin dimensions must match per-camera calculations."""
+        factor = 10.0
+        for k in range(single_cam_mesher.n_cameras):
+            h, w = single_cam_mesher.cam_heights[k], single_cam_mesher.cam_widths[k]
+            expected_hb = max(1, int(h / factor))
+            expected_wb = max(1, int(w / factor))
+            assert single_cam_mesher._vis_hb[k].item() == expected_hb
+            assert single_cam_mesher._vis_wb[k].item() == expected_wb
+
+    def test_multi_cam_visibility_batched(self, multi_cam_mesher):
+        """Batched visibility must return correct shape for multiple cameras."""
+        positions = torch.zeros(10, 3, dtype=torch.float64, device=multi_cam_mesher.device)
+        result = multi_cam_mesher._visibility_filter(positions)
+        assert result.shape == (10,)
+        assert result.dtype == torch.bool
+
+    def test_depth_bufs_shape(self, multi_cam_mesher):
+        """Batched depth buffer must be (C, max_buf)."""
+        assert multi_cam_mesher._depth_bufs.shape[0] == multi_cam_mesher.n_cameras
+        assert multi_cam_mesher._depth_bufs.shape[1] == multi_cam_mesher._vis_max_buf
+
+
+class TestHashSortDedup:
+    """Verify hash-sort-based corner dedup in _find_surface_cubes."""
+
+    def test_dedup_still_reduces_sdf_calls(self, single_cam_mesher, sphere_kernel):
+        """Hash-sort dedup must still identify shared corners."""
+        coords, levels = single_cam_mesher._build_coarse_octree()
+        mask, corner_sdf = single_cam_mesher._find_surface_cubes([sphere_kernel], coords, levels)
+        assert mask.any(), "Should find surface cubes"
+        assert corner_sdf.shape[0] == coords.shape[0]
+        assert corner_sdf.shape[1] == 8
+
+    def test_dedup_exact_match_with_direct_eval(self, single_cam_mesher, sphere_kernel):
+        """SDF via hash-sort dedup must exactly match direct evaluation."""
+        coords, levels = single_cam_mesher._build_coarse_octree()
+        corners = single_cam_mesher._cube_corner_positions(coords, levels)
+        flat = corners.reshape(-1, 3)
+        sdf_direct = single_cam_mesher._evaluate_sdf([sphere_kernel], flat)
+        _, corner_sdf = single_cam_mesher._find_surface_cubes([sphere_kernel], coords, levels)
+        sdf_dedup = corner_sdf.reshape(-1, 1)
+        torch.testing.assert_close(sdf_dedup, sdf_direct, atol=0, rtol=0)
