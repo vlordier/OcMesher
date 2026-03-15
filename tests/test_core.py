@@ -1402,3 +1402,136 @@ class TestNpFabsCachedLocal:
         local_result = _np_fabs(arr, out=buf).max()
         module_result = np.fabs(arr, out=np.empty_like(arr)).max()
         assert local_result == module_result
+
+
+# ---------------------------------------------------------------------------
+# OcMesher __slots__ optimisation
+# ---------------------------------------------------------------------------
+
+
+class TestOcMesherSlots:
+    """Verify __slots__ is defined and prevents arbitrary attribute assignment."""
+
+    def test_has_slots(self):
+        """OcMesher class defines __slots__."""
+        assert hasattr(OcMesher, "__slots__")
+
+    def test_no_instance_dict(self):
+        """Instances with __slots__ should not have __dict__."""
+        obj = object.__new__(OcMesher)
+        assert not hasattr(obj, "__dict__")
+
+    def test_slots_contain_expected_attrs(self):
+        """__slots__ includes core attributes used in hot paths."""
+        slots = OcMesher.__slots__
+        for attr in (
+            "AF",
+            "sdf_AF",
+            "bounds",
+            "enclosed",
+            "bisection_iters",
+            "bisection_tol",
+            "_sdf_pool",
+            "_oob_mask",
+            "_oob_tmp",
+            "_sdf_null",
+            "_bounds_min_np",
+            "_bounds_max_np",
+            "kernel_caller",  # should NOT be in slots (it's a method)
+        ):
+            if attr == "kernel_caller":
+                # kernel_caller is a method, not a slot
+                continue
+            assert attr in slots, f"{attr} missing from __slots__"
+
+    def test_cannot_set_arbitrary_attribute(self):
+        """Setting a non-slot attribute should raise AttributeError."""
+        obj = object.__new__(OcMesher)
+        with pytest.raises(AttributeError):
+            obj._nonexistent_attribute_xyz = 42
+
+    def test_registered_c_functions_in_slots(self):
+        """C DLL function names must be present in __slots__."""
+        slots = OcMesher.__slots__
+        c_funcs = [
+            "run_coarse",
+            "fine_group",
+            "fine_iteration",
+            "fine_iteration_output",
+            "final_iteration",
+            "final_iteration2",
+            "final_iteration3",
+            "get_verts_center",
+            "update_verts",
+            "get_faces",
+            "get_in_view_tag",
+        ]
+        for func_name in c_funcs:
+            assert func_name in slots, f"C function '{func_name}' missing from __slots__"
+
+
+# ---------------------------------------------------------------------------
+# Tuple kernel wrapping (avoids list-slice copy)
+# ---------------------------------------------------------------------------
+
+
+class TestTupleKernelWrapping:
+    """Verify tuple wrapping of single kernels matches slice behaviour."""
+
+    def test_tuple_single_kernel_matches_slice(self):
+        """(kernel,) tuple behaves identically to kernels[0:1] slice."""
+        kernels = [lambda x: np.zeros(len(x), dtype=np.float32)]
+        # Slice produces a list
+        sliced = kernels[0:1]
+        # Tuple wrap produces a tuple
+        wrapped = (kernels[0],)
+        assert len(sliced) == len(wrapped) == 1
+        assert sliced[0] is wrapped[0]
+
+    def test_tuple_kernel_works_with_kernel_caller(self):
+        """kernel_caller accepts tuple kernels correctly."""
+        bounds = np.array([-5.0, 5.0, -5.0, 5.0, -5.0, 5.0])
+        obj = object.__new__(OcMesher)
+        obj.bounds = bounds
+        obj.enclosed = False
+        obj.sdf_np_float_type = np.float32
+        obj._bounds_min_np = np.array([bounds[0], bounds[2], bounds[4]], dtype=np.float64)
+        obj._bounds_max_np = np.array([bounds[1], bounds[3], bounds[5]], dtype=np.float64)
+        obj._sdf_pool = None
+        obj._oob_mask = np.empty(_SDF_BATCH_SIZE, dtype=bool)
+        obj._oob_tmp = np.empty(_SDF_BATCH_SIZE, dtype=bool)
+        kernel = lambda x: np.ones(len(x), dtype=np.float32)  # noqa: E731
+        pts = np.array([[0.0, 0.0, 0.0], [1.0, 1.0, 1.0]])
+        # Call with tuple
+        result = obj.kernel_caller((kernel,), pts)
+        assert result.shape == (2, 1)
+        np.testing.assert_array_equal(result[:, 0], 1.0)
+
+
+# ---------------------------------------------------------------------------
+# Inlined multi-kernel evaluation
+# ---------------------------------------------------------------------------
+
+
+class TestInlinedMultiKernelEval:
+    """Verify inlined multi-kernel evaluation produces correct results."""
+
+    def test_multi_kernel_inlined(self):
+        """Multi-kernel path produces correct per-kernel columns."""
+        bounds = np.array([-10.0, 10.0, -10.0, 10.0, -10.0, 10.0])
+        obj = object.__new__(OcMesher)
+        obj.bounds = bounds
+        obj.enclosed = False
+        obj.sdf_np_float_type = np.float32
+        obj._bounds_min_np = np.array([bounds[0], bounds[2], bounds[4]], dtype=np.float64)
+        obj._bounds_max_np = np.array([bounds[1], bounds[3], bounds[5]], dtype=np.float64)
+        obj._sdf_pool = None
+        obj._oob_mask = np.empty(_SDF_BATCH_SIZE, dtype=bool)
+        obj._oob_tmp = np.empty(_SDF_BATCH_SIZE, dtype=bool)
+        k0 = lambda x: np.full(len(x), 1.0, dtype=np.float32)  # noqa: E731
+        k1 = lambda x: np.full(len(x), 2.0, dtype=np.float32)  # noqa: E731
+        pts = np.array([[0.0, 0.0, 0.0], [1.0, 2.0, 3.0], [4.0, 5.0, 6.0]])
+        result = obj.kernel_caller([k0, k1], pts)
+        assert result.shape == (3, 2)
+        np.testing.assert_array_almost_equal(result[:, 0], 1.0)
+        np.testing.assert_array_almost_equal(result[:, 1], 2.0)

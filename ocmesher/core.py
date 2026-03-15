@@ -133,6 +133,63 @@ def _validate_kernels(kernels):
 class OcMesher:
     """Octree-based mesher that extracts surfaces from SDF kernels."""
 
+    __slots__ = (
+        "AF",
+        "_bounds_max_np",
+        # Pre-computed bounds vectors
+        "_bounds_min_np",
+        "_oob_mask",
+        "_oob_tmp",
+        "_sdf_null",
+        # Thread pool and reusable buffers
+        "_sdf_pool",
+        "bisection_iters",
+        "bisection_tol",
+        # Configuration
+        "bounds",
+        "cameras",
+        "center",
+        "coarse_count",
+        "construct_faces",
+        "enclosed",
+        "final_iteration",
+        "final_iteration2",
+        "final_iteration3",
+        "final_iteration3_occluded",
+        "final_iteration_occluded",
+        "final_remaining",
+        "finalize_extra_verts",
+        "finalize_verts",
+        "fine_group",
+        "fine_iteration",
+        "fine_iteration_output",
+        # Core numeric types and converters
+        "float_type",
+        "get_extra_verts_center",
+        "get_faces",
+        "get_in_view_tag",
+        "get_lr_extra_verts",
+        "get_lr_verts",
+        "get_verts_center",
+        "inv_scale",
+        "inview_pixels_per_cube",
+        "memory_limit_mb",
+        "min_dist",
+        "n_cameras",
+        "np_float_type",
+        # C DLL functions (set via register_func / setattr)
+        "run_coarse",
+        "sdf_AF",
+        "sdf_float_type",
+        "sdf_np_float_type",
+        "simplify_occluded",
+        "size",
+        "update_extra_verts",
+        "update_verts",
+        "vis_filter",
+        "visible_relax_iter",
+    )
+
     def __init__(
         self,
         cameras,
@@ -480,7 +537,8 @@ class OcMesher:
         else:
             # ---- Multi-kernel path: dispatch via persistent thread pool ----
             pool = self._get_pool(n_kernels)
-            _eval_batch = self._eval_kernels_batch
+            _pool_map = pool.map
+            _enumerate = enumerate
             if self.enclosed:
                 _mask_into = self._out_of_bounds_mask_into
                 b_min = self._bounds_min_np
@@ -489,7 +547,18 @@ class OcMesher:
                     end = _min(i + _batch, n_XYZ)
                     XYZ = XYZ_all[i:end]
                     n = end - i
-                    _eval_batch(kernels, XYZ, n, pool, result, i, end)
+
+                    def _eval_one(k_idx_kernel, _xyz=XYZ, _n=n):
+                        k_idx, kernel = k_idx_kernel
+                        raw = kernel(_xyz)
+                        sdf = raw if _isinstance(raw, _ndarray) else np.asarray(raw)
+                        if sdf.shape != (_n,):
+                            msg = f"kernels[{k_idx}] returned shape {sdf.shape} for {_n} query points; expected ({_n},)"
+                            raise ValueError(msg)
+                        return k_idx, sdf
+
+                    for k_idx, sdf in _pool_map(_eval_one, _enumerate(kernels)):
+                        result[i:end, k_idx] = sdf
                     out_bound = _mask_into(XYZ, b_min, b_max)
                     result[i:end][out_bound] = 1
             else:
@@ -497,38 +566,20 @@ class OcMesher:
                     end = _min(i + _batch, n_XYZ)
                     XYZ = XYZ_all[i:end]
                     n = end - i
-                    _eval_batch(kernels, XYZ, n, pool, result, i, end)
+
+                    def _eval_one(k_idx_kernel, _xyz=XYZ, _n=n):
+                        k_idx, kernel = k_idx_kernel
+                        raw = kernel(_xyz)
+                        sdf = raw if _isinstance(raw, _ndarray) else np.asarray(raw)
+                        if sdf.shape != (_n,):
+                            msg = f"kernels[{k_idx}] returned shape {sdf.shape} for {_n} query points; expected ({_n},)"
+                            raise ValueError(msg)
+                        return k_idx, sdf
+
+                    for k_idx, sdf in _pool_map(_eval_one, _enumerate(kernels)):
+                        result[i:end, k_idx] = sdf
 
         return result
-
-    def _eval_kernels_batch(self, kernels, xyz, batch_size, pool, result, start, end):
-        """Evaluate all *kernels* on *xyz* and write into *result[start:end]*.
-
-        Uses the provided ``pool`` (persistent ``ThreadPoolExecutor``)
-        to dispatch each kernel to a separate thread.  ctypes /
-        C-extension SDF calls release the GIL, enabling true multi-core
-        parallelism.
-
-        SDF values are written directly into the pre-allocated *result*
-        buffer, avoiding an intermediate copy.
-        """
-        _isinstance = isinstance
-        _ndarray = np.ndarray
-
-        def _eval_one(k_idx_kernel):
-            k_idx, kernel = k_idx_kernel
-            raw = kernel(xyz)
-            sdf = raw if _isinstance(raw, _ndarray) else np.asarray(raw)
-            if sdf.shape != (batch_size,):
-                msg = (
-                    f"kernels[{k_idx}] returned shape {sdf.shape} "
-                    f"for {batch_size} query points; expected ({batch_size},)"
-                )
-                raise ValueError(msg)
-            return k_idx, sdf
-
-        for k_idx, sdf in pool.map(_eval_one, enumerate(kernels)):
-            result[start:end, k_idx] = sdf
 
     def __call__(self, kernels):
         """Run the full coarse-to-fine meshing pipeline and return meshes."""
@@ -604,15 +655,14 @@ class OcMesher:
                 self.final_iteration3_occluded(_sdf_af(sdf))
             nv = np.zeros(n_elements, dtype=np.int32)
             self.final_remaining(AsInt(nv))
-            del positions, sdf
-
         with Timer("construct mesh"):
-            meshes = []
-            in_view_tags = []
+            meshes = [None] * n_elements
+            in_view_tags = [None] * n_elements
             for e in range(n_elements):
-                mesh, in_view_tag = self._construct_element_mesh(e, kernels[e : e + 1], nv[e])
-                meshes.append(mesh)
-                in_view_tags.append(in_view_tag)
+                k_e = (kernels[e],)  # tuple avoids list-slice copy
+                mesh, in_view_tag = self._construct_element_mesh(e, k_e, nv[e])
+                meshes[e] = mesh
+                in_view_tags[e] = in_view_tag
                 logger.info(
                     "element %d: %d vertices, %d faces",
                     e,
@@ -675,11 +725,9 @@ class OcMesher:
         lr_sdf = _kernel_caller(k_e, lr_combined)
         sdf_l = lr_sdf[:_n_cubes]
         sdf_r = lr_sdf[_n_cubes:]
-        del cubes, cubes_r, centers, center_sdf, lr_combined, lr_sdf
         # np.empty is safe: finalize_verts writes every element before use.
         vertices = np.empty((num_verts, 3), dtype=_np_float)
         self.finalize_verts(e, _sdf_af(sdf_l), _sdf_af(sdf_r), _af(vertices))
-        del sdf_l, sdf_r
 
         vertices, faces = self._refine_extra_vertices(e, k_e, vertices)
 
@@ -742,7 +790,6 @@ class OcMesher:
         ef_center_sdf = _kernel_caller(k_e, ef_centers)
         ecenter_sdf = ef_center_sdf[:n_edge_c]
         fcenter_sdf = ef_center_sdf[n_edge_c:]
-        del ef_centers, ef_center_sdf
         edge_vertices_lr = np.empty((nve * 2, 3), dtype=_np_float)
         face_vertices_lr = np.empty((nvf * 4, 3), dtype=_np_float)
         _update_extra_verts = self.update_extra_verts
@@ -797,7 +844,6 @@ class OcMesher:
             )
             if check_tol and _np_fabs(_sdf_buf, out=_fabs_buf).max() < tol:
                 break
-        del edge_vertices_c, face_vertices_c, ecenter_sdf, fcenter_sdf, bisection_buf
         edge_vertices_r = np.empty((nve * 2, 3), dtype=_np_float)
         face_vertices_r = np.empty((nvf * 4, 3), dtype=_np_float)
         self.get_lr_extra_verts(
@@ -826,7 +872,6 @@ class OcMesher:
         esdf_r = all_lr_sdf[off1:off2]
         fsdf_l = all_lr_sdf[off2:off3]
         fsdf_r = all_lr_sdf[off3:]
-        del edge_vertices_lr, edge_vertices_r, face_vertices_lr, face_vertices_r, all_lr, all_lr_sdf
         edge_vertices = np.empty((nve, 3), dtype=_np_float)
         face_vertices = np.empty((nvf, 3), dtype=_np_float)
         self.finalize_extra_verts(
@@ -837,7 +882,6 @@ class OcMesher:
             _sdf_af(fsdf_r),
             _af(face_vertices),
         )
-        del esdf_l, esdf_r, fsdf_l, fsdf_r
         faces = np.empty((nf, 3), dtype=np.int32)
         self.get_faces(AsInt(faces))
         # Pre-allocated final vertex array avoids np.concatenate overhead.
