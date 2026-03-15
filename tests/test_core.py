@@ -518,20 +518,20 @@ class TestVectorisedBoundsCheck:
         # Mix of in-bounds and out-of-bounds points on all 3 axes.
         pts = np.array(
             [
-                [0, 0, 0],        # inside
-                [3, 0, 0],        # out: x > 2
-                [0, -3, 0],       # out: y < -2
-                [0, 0, 2.5],      # out: z > 2
-                [-2.0, 0, 0],     # boundary: x == x_min
+                [0, 0, 0],  # inside
+                [3, 0, 0],  # out: x > 2
+                [0, -3, 0],  # out: y < -2
+                [0, 0, 2.5],  # out: z > 2
+                [-2.0, 0, 0],  # boundary: x == x_min
             ],
             dtype=np.float64,
         )
         result = mesher.kernel_caller([sphere_kernel], pts)
         assert result[0, 0] == pytest.approx(-1.0, abs=1e-6)  # inside → natural SDF
-        assert result[1, 0] == pytest.approx(1.0)              # clamped
-        assert result[2, 0] == pytest.approx(1.0)              # clamped
-        assert result[3, 0] == pytest.approx(1.0)              # clamped
-        assert result[4, 0] == pytest.approx(1.0)              # boundary → clamped
+        assert result[1, 0] == pytest.approx(1.0)  # clamped
+        assert result[2, 0] == pytest.approx(1.0)  # clamped
+        assert result[3, 0] == pytest.approx(1.0)  # clamped
+        assert result[4, 0] == pytest.approx(1.0)  # boundary → clamped
 
     def test_not_enclosed_ignores_bounds(self, sphere_kernel):
         bounds = np.array([-1.0, 1.0, -1.0, 1.0, -1.0, 1.0])
@@ -596,3 +596,145 @@ class TestFusedBisectionSDF:
         # b[0] inside: natural, b[1] outside: 1.0
         np.testing.assert_allclose(sdf[2, 0], np.linalg.norm([0.5, 0, 0]) - 1, atol=1e-6)
         assert sdf[3, 0] == pytest.approx(1.0)
+
+
+# ---------------------------------------------------------------------------
+# In-place bounds mask (Refactor 3)
+# ---------------------------------------------------------------------------
+
+
+class TestInPlaceBoundsMask:
+    """Verify _out_of_bounds_mask produces correct masks without (N,3) temporaries."""
+
+    def test_all_inside(self):
+        b_min = np.array([-1.0, -1.0, -1.0])
+        b_max = np.array([1.0, 1.0, 1.0])
+        xyz = np.array([[0, 0, 0], [0.5, -0.5, 0.5]], dtype=np.float64)
+        mask = OcMesher._out_of_bounds_mask(xyz, b_min, b_max)
+        assert mask.shape == (2,)
+        assert not mask.any()
+
+    def test_all_outside(self):
+        b_min = np.array([-1.0, -1.0, -1.0])
+        b_max = np.array([1.0, 1.0, 1.0])
+        xyz = np.array([[2, 0, 0], [0, -2, 0], [0, 0, 2]], dtype=np.float64)
+        mask = OcMesher._out_of_bounds_mask(xyz, b_min, b_max)
+        assert mask.all()
+
+    def test_boundary_points_are_out(self):
+        b_min = np.array([-1.0, -1.0, -1.0])
+        b_max = np.array([1.0, 1.0, 1.0])
+        # Points exactly on the boundary are treated as out-of-bounds.
+        xyz = np.array([[-1.0, 0, 0], [0, 1.0, 0], [0, 0, -1.0]], dtype=np.float64)
+        mask = OcMesher._out_of_bounds_mask(xyz, b_min, b_max)
+        assert mask.all()
+
+    def test_mixed_inside_outside(self):
+        b_min = np.array([-2.0, -2.0, -2.0])
+        b_max = np.array([2.0, 2.0, 2.0])
+        xyz = np.array(
+            [
+                [0, 0, 0],  # inside
+                [3, 0, 0],  # out x
+                [0, -3, 0],  # out y
+                [0, 0, 2.5],  # out z
+                [-0.5, 0.5, 0],  # inside
+            ],
+            dtype=np.float64,
+        )
+        mask = OcMesher._out_of_bounds_mask(xyz, b_min, b_max)
+        expected = np.array([False, True, True, True, False])
+        np.testing.assert_array_equal(mask, expected)
+
+
+# ---------------------------------------------------------------------------
+# Thread-pool parallel multi-kernel evaluation (Refactor 4)
+# ---------------------------------------------------------------------------
+
+
+class TestParallelMultiKernel:
+    """Verify that multi-kernel evaluation uses threading and produces correct results."""
+
+    @staticmethod
+    def _make_mesher_stub(bounds, *, enclosed=True):
+        obj = object.__new__(OcMesher)
+        obj.bounds = bounds
+        obj.enclosed = enclosed
+        obj.sdf_np_float_type = np.float32
+        obj._bounds_min_np = np.array([bounds[0], bounds[2], bounds[4]], dtype=np.float64)
+        obj._bounds_max_np = np.array([bounds[1], bounds[3], bounds[5]], dtype=np.float64)
+        return obj
+
+    def test_multi_kernel_matches_single(self, sample_bounds, sphere_kernel, plane_kernel):
+        """Two-kernel call must match two separate single-kernel calls."""
+        mesher = self._make_mesher_stub(sample_bounds, enclosed=False)
+        pts = np.array([[0, 0, 0], [1, 0, 0], [0, 2, 0]], dtype=np.float64)
+
+        separate_sphere = mesher.kernel_caller([sphere_kernel], pts)
+        separate_plane = mesher.kernel_caller([plane_kernel], pts)
+
+        combined = mesher.kernel_caller([sphere_kernel, plane_kernel], pts)
+        np.testing.assert_allclose(combined[:, 0], separate_sphere[:, 0], atol=1e-6)
+        np.testing.assert_allclose(combined[:, 1], separate_plane[:, 0], atol=1e-6)
+
+    def test_multi_kernel_enclosed_clamp(self, sphere_kernel, plane_kernel):
+        """Out-of-bounds clamping must apply to all kernels in multi-kernel mode."""
+        bounds = np.array([-1.0, 1.0, -1.0, 1.0, -1.0, 1.0])
+        mesher = self._make_mesher_stub(bounds, enclosed=True)
+        pts = np.array([[0, 0, 0], [5, 0, 0]], dtype=np.float64)
+
+        result = mesher.kernel_caller([sphere_kernel, plane_kernel], pts)
+        # Inside point: natural SDF values
+        assert result[0, 0] == pytest.approx(-1.0, abs=1e-6)  # sphere at origin
+        assert result[0, 1] == pytest.approx(0.0, abs=1e-6)  # plane z=0
+        # Outside point: both clamped to 1.0
+        assert result[1, 0] == pytest.approx(1.0)
+        assert result[1, 1] == pytest.approx(1.0)
+
+    def test_multi_kernel_shape_and_dtype(self, sample_bounds, sphere_kernel, plane_kernel):
+        """Multi-kernel result must have shape (N, K) and float32 dtype."""
+        mesher = self._make_mesher_stub(sample_bounds, enclosed=False)
+        pts = np.zeros((5, 3), dtype=np.float64)
+        result = mesher.kernel_caller([sphere_kernel, plane_kernel], pts)
+        assert result.shape == (5, 2)
+        assert result.dtype == np.float32
+
+
+# ---------------------------------------------------------------------------
+# Pre-allocated bisection buffer (Refactor 5)
+# ---------------------------------------------------------------------------
+
+
+class TestPreallocatedBisectionBuffer:
+    """Verify that _refine_extra_vertices works with pre-allocated combined buffer."""
+
+    @staticmethod
+    def _make_mesher_stub(bounds, *, enclosed=True):
+        obj = object.__new__(OcMesher)
+        obj.bounds = bounds
+        obj.enclosed = enclosed
+        obj.sdf_np_float_type = np.float32
+        obj._bounds_min_np = np.array([bounds[0], bounds[2], bounds[4]], dtype=np.float64)
+        obj._bounds_max_np = np.array([bounds[1], bounds[3], bounds[5]], dtype=np.float64)
+        return obj
+
+    def test_fused_eval_with_preallocated_matches_separate(self, sample_bounds, sphere_kernel):
+        """Pre-allocated buffer path must produce identical results to concatenation."""
+        mesher = self._make_mesher_stub(sample_bounds)
+        rng = np.random.default_rng(99)
+        edge_pts = rng.standard_normal((15, 3))
+        face_pts = rng.standard_normal((25, 3))
+
+        # Separate calls
+        e_sdf = mesher.kernel_caller([sphere_kernel], edge_pts)
+        f_sdf = mesher.kernel_caller([sphere_kernel], face_pts)
+
+        # Simulate pre-allocated buffer fill (as done in _refine_extra_vertices)
+        n_edge = len(edge_pts)
+        combined = np.empty((n_edge + len(face_pts), 3), dtype=edge_pts.dtype)
+        combined[:n_edge] = edge_pts
+        combined[n_edge:] = face_pts
+        result = mesher.kernel_caller([sphere_kernel], combined)
+
+        np.testing.assert_array_equal(e_sdf, result[:n_edge])
+        np.testing.assert_array_equal(f_sdf, result[n_edge:])

@@ -6,6 +6,7 @@
 """Octree-based hierarchical 3D mesher driven by signed-distance functions."""
 
 import logging
+from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 
 import gin
@@ -280,15 +281,50 @@ class OcMesher:
         """No-op exit; provided so OcMesher can be used as a context manager."""
         return False
 
+    @staticmethod
+    def _out_of_bounds_mask(xyz, b_min, b_max):
+        """Build a 1-D boolean mask indicating out-of-bounds points.
+
+        Uses per-axis ufunc calls with ``out=`` to accumulate into two
+        ``(N,)`` boolean buffers, avoiding the ``(N, 3)`` temporaries that
+        ``np.any((XYZ <= lo) | (XYZ >= hi), axis=1)`` would allocate.
+
+        Returns:
+            Boolean array of shape ``(N,)`` where ``True`` means the point
+            is on or outside the boundary.
+        """
+        n = len(xyz)
+        _tmp = np.empty(n, dtype=bool)
+        # Seed with first axis: xyz[:,0] <= b_min[0]
+        np.less_equal(xyz[:, 0], b_min[0], out=_tmp)
+        out_bound = _tmp.copy()
+        # OR with xyz[:,0] >= b_max[0]
+        np.greater_equal(xyz[:, 0], b_max[0], out=_tmp)
+        np.logical_or(out_bound, _tmp, out=out_bound)
+        # Remaining axes
+        for ax in range(1, 3):
+            np.less_equal(xyz[:, ax], b_min[ax], out=_tmp)
+            np.logical_or(out_bound, _tmp, out=out_bound)
+            np.greater_equal(xyz[:, ax], b_max[ax], out=_tmp)
+            np.logical_or(out_bound, _tmp, out=out_bound)
+        return out_bound
+
     def kernel_caller(self, kernels, XYZ_all):
         """Evaluate SDF *kernels* at the given *XYZ_all* positions.
 
         Optimisations over the naïve implementation:
-        - Pre-allocated output buffer filled in-place (no list accumulation,
-          no ``np.stack`` / ``np.concatenate`` per batch).
-        - Vectorised out-of-bounds check using pre-computed bound vectors
-          with a single broadcast comparison per batch (replaces 6 temporary
-          boolean arrays + 6 in-place ORs with 2 broadcasts + 2 reductions).
+
+        - **In-place 1-D bounds mask** — per-axis ``np.less_equal`` /
+          ``np.greater_equal`` with ``out=`` accumulates a single ``(N,)``
+          boolean mask, avoiding the two ``(N, 3)`` temporary arrays that
+          ``np.any((XYZ <= lo) | (XYZ >= hi), axis=1)`` would allocate.
+        - **Release-GIL thread pool** — when ``len(kernels) > 1`` each SDF
+          kernel is dispatched to a separate thread via
+          ``ThreadPoolExecutor``.  Because ctypes / C-extension calls
+          release the GIL, this enables true multi-core parallelism for the
+          compute-heavy SDF evaluations.
+        - **Pre-allocated output buffer** filled in-place (no list
+          accumulation, no ``np.stack`` / ``np.concatenate`` per batch).
         """
         for kernel in kernels:
             if not callable(kernel):
@@ -308,23 +344,45 @@ class OcMesher:
             XYZ = XYZ_all[i:end]
             batch_size = end - i
 
-            # Vectorised bounds check: 2 broadcasts + 2 any-reductions.
-            if self.enclosed:
-                out_bound = np.any(b_min >= XYZ, axis=1) | np.any(b_max <= XYZ, axis=1)
+            out_bound = self._out_of_bounds_mask(XYZ, b_min, b_max) if self.enclosed else None
 
-            for k_idx, kernel in enumerate(kernels):
-                sdf = np.asarray(kernel(XYZ))
-                if sdf.shape != (batch_size,):
-                    msg = (
-                        f"kernels[{k_idx}] returned shape {sdf.shape} "
-                        f"for {batch_size} query points; expected ({batch_size},)"
-                    )
-                    raise ValueError(msg)
-                if self.enclosed:
-                    sdf[out_bound] = 1
-                result[i:end, k_idx] = sdf
+            self._eval_kernels_batch(kernels, XYZ, batch_size, out_bound, result, i, end)
 
         return result
+
+    def _eval_kernels_batch(self, kernels, xyz, batch_size, out_bound, result, start, end):
+        """Evaluate all *kernels* on *xyz* and write into *result[start:end]*.
+
+        When multiple kernels are present, they are dispatched in parallel
+        using a ``ThreadPoolExecutor``.  ctypes / C-extension SDF calls
+        release the GIL, enabling true multi-core parallelism.
+        """
+        n_kernels = len(kernels)
+
+        def _eval_one(k_idx_kernel):
+            k_idx, kernel = k_idx_kernel
+            sdf = np.asarray(kernel(xyz))
+            if sdf.shape != (batch_size,):
+                msg = (
+                    f"kernels[{k_idx}] returned shape {sdf.shape} "
+                    f"for {batch_size} query points; expected ({batch_size},)"
+                )
+                raise ValueError(msg)
+            return k_idx, sdf
+
+        if n_kernels > 1:
+            # Multi-kernel: dispatch in parallel threads.
+            with ThreadPoolExecutor(max_workers=n_kernels) as pool:
+                for k_idx, sdf in pool.map(_eval_one, enumerate(kernels)):
+                    if out_bound is not None:
+                        sdf[out_bound] = 1
+                    result[start:end, k_idx] = sdf
+        else:
+            # Single-kernel fast path: no thread-pool overhead.
+            k_idx, sdf = _eval_one((0, kernels[0]))
+            if out_bound is not None:
+                sdf[out_bound] = 1
+            result[start:end, k_idx] = sdf
 
     def __call__(self, kernels):
         """Run the full coarse-to-fine meshing pipeline and return meshes."""
@@ -438,6 +496,9 @@ class OcMesher:
         - Fused edge + face SDF evaluation per bisection iteration: a single
           ``kernel_caller`` call replaces two, halving Python→SDF round trips
           in the inner loop (30 calls → 15 for the default 15 iterations).
+        - Pre-allocated combined buffer outside the bisection loop: each
+          iteration fills slices instead of allocating via ``np.concatenate``,
+          eliminating ~15 allocations + copies per element.
         - Fused left/right SDF evaluation after bisection: 4 calls → 1.
         """
         cnts = np.zeros(3, dtype=np.int32)
@@ -465,9 +526,13 @@ class OcMesher:
             self.AF(face_vertices_lr),
         )
         n_edge_lr = len(edge_vertices_lr)
+        # Pre-allocate combined buffer outside the loop so each iteration
+        # only copies slices instead of allocating a fresh array.
+        ef_combined = np.empty((n_edge_lr + len(face_vertices_lr), 3), dtype=self.np_float_type)
         for _ in range(self.bisection_iters):
-            # Fused edge + face SDF: one call instead of two per iteration.
-            ef_combined = np.concatenate([edge_vertices_lr, face_vertices_lr])
+            # Fill combined buffer from the two sub-arrays (avoids np.concatenate alloc).
+            ef_combined[:n_edge_lr] = edge_vertices_lr
+            ef_combined[n_edge_lr:] = face_vertices_lr
             ef_sdf = self.kernel_caller(k_e, ef_combined)
             e_sdf = ef_sdf[:n_edge_lr]
             f_sdf = ef_sdf[n_edge_lr:]
