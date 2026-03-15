@@ -33,6 +33,9 @@ benchmark = [
 requires = ["setuptools>=68"]
 build-backend = "setuptools.build_meta"
 
+[tool.setuptools.packages.find]
+include = ["ocmesher*"]
+
 [tool.setuptools.package-data]
 ocmesher = ["py.typed"]
 
@@ -109,6 +112,23 @@ ignore = [
     "C901",     # complex functions (benchmark main)
     "PLR0912",  # too-many-branches (benchmark main)
     "PLR0913",  # too-many-arguments (benchmark functions mirror mesher API)
+]
+# top-level benchmark runner
+"benchmark.py" = [
+    "INP001",   # implicit namespace package
+    "T201",     # print statements (benchmark output)
+    "S603",     # subprocess calls are intentional in benchmark harness
+    "S607",     # partial executable path (uses system bash intentionally)
+    "PLW1510",  # subprocess.run check handling is explicit
+    "TRY003",   # benchmark exceptions keep contextual messages inline
+    "EM101",    # same rationale as TRY003
+    "EM102",    # same rationale as TRY003
+    "PLW2901",  # loop variable reuse is local and readable here
+    "D",        # no docstring enforcement in benchmark script
+    "EXE001",   # shebang is informational; script may be launched via python
+    "PLW3301",  # nested max is clear in table width calculation
+    "C416",     # dict comprehension retained for readability with tuple input
+    "PTH123",   # simple CLI file writing via open()
 ]
 # Python overhead micro-benchmark
 "benchmarks/bench_python_overhead.py" = [

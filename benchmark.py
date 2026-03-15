@@ -27,9 +27,9 @@ BASELINE_BUILD = "./install.sh"
 OPTIMISED_BUILD = "./install_optimized.sh"
 
 DEMO_CONFIGS = [
-    {"label": "small (ppc=32)",  "pixels_per_cube": 32, "coarse_count": 100_000},
+    {"label": "small (ppc=32)", "pixels_per_cube": 32, "coarse_count": 100_000},
     {"label": "medium (ppc=16)", "pixels_per_cube": 16, "coarse_count": 500_000},
-    {"label": "large (ppc=8)",   "pixels_per_cube":  8, "coarse_count": 500_000},
+    {"label": "large (ppc=8)", "pixels_per_cube": 8, "coarse_count": 500_000},
 ]
 
 PYTHON = sys.executable
@@ -157,7 +157,8 @@ def run_mesher_subprocess(pixels_per_cube: int, coarse_count: int, sdf_type: str
     )
     result = subprocess.run(
         [PYTHON, "-c", script],
-        capture_output=True, text=True,
+        capture_output=True,
+        text=True,
         cwd=str(Path(__file__).parent),
     )
     if result.returncode != 0:
@@ -171,9 +172,9 @@ def run_mesher_subprocess(pixels_per_cube: int, coarse_count: int, sdf_type: str
 
 
 def run_tier(label: str, build_script: str, sdf_type: str, configs: list, runs: int) -> list:
-    print(f"\n{'='*62}")
+    print(f"\n{'=' * 62}")
     print(f"  {label}")
-    print(f"{'='*62}")
+    print(f"{'=' * 62}")
     build_time = build(build_script)
     print(f"  Build time: {build_time:.2f}s")
     results = []
@@ -186,24 +187,26 @@ def run_tier(label: str, build_script: str, sdf_type: str, configs: list, runs: 
             times.append(r["elapsed_s"])
             verts = r["n_verts"]
             faces = r["n_faces"]
-            print(f"    Run {i+1}/{runs}: {r['elapsed_s']:.3f}s  ({verts} verts, {faces} faces)")
-        results.append({
-            "config":  cfg["label"],
-            "times":   times,
-            "mean":    statistics.mean(times),
-            "median":  statistics.median(times),
-            "stdev":   statistics.stdev(times) if runs > 1 else 0.0,
-            "min":     min(times),
-            "max":     max(times),
-            "n_verts": verts,
-            "n_faces": faces,
-        })
+            print(f"    Run {i + 1}/{runs}: {r['elapsed_s']:.3f}s  ({verts} verts, {faces} faces)")
+        results.append(
+            {
+                "config": cfg["label"],
+                "times": times,
+                "mean": statistics.mean(times),
+                "median": statistics.median(times),
+                "stdev": statistics.stdev(times) if runs > 1 else 0.0,
+                "min": min(times),
+                "max": max(times),
+                "n_verts": verts,
+                "n_faces": faces,
+            }
+        )
     return results
 
 
 def print_comparison(tiers: list):
     """tiers: list of (label, results)"""
-    names  = [t[0] for t in tiers]
+    names = [t[0] for t in tiers]
     tables = [t[1] for t in tiers]
     n_cols = len(tiers)
     # Short names: text before first '(' or full name
@@ -212,7 +215,7 @@ def print_comparison(tiers: list):
 
     line_w = 20 + (cw + 3) * n_cols + 7 * max(0, n_cols - 1)
     print(f"\n{'=' * line_w}")
-    print(f"  COMPARISON  (median wall-clock per config)")
+    print("  COMPARISON  (median wall-clock per config)")
     print(f"{'=' * line_w}")
 
     header = f"{'Config':<20}"
@@ -237,12 +240,9 @@ def print_comparison(tiers: list):
 
 
 def main():
-    parser = argparse.ArgumentParser(
-        description="Benchmark OcMesher: baseline vs opt-C++ vs opt+numba-SDF")
-    parser.add_argument("--runs", type=int, default=3,
-                        help="Runs per configuration (default: 3)")
-    parser.add_argument("--configs", default="all",
-                        choices=["small", "medium", "large", "all"])
+    parser = argparse.ArgumentParser(description="Benchmark OcMesher: baseline vs opt-C++ vs opt+numba-SDF")
+    parser.add_argument("--runs", type=int, default=3, help="Runs per configuration (default: 3)")
+    parser.add_argument("--configs", default="all", choices=["small", "medium", "large", "all"])
     parser.add_argument("--json", help="Write results to JSON file")
     args = parser.parse_args()
 
@@ -253,10 +253,10 @@ def main():
         configs = [c for c in DEMO_CONFIGS if c["label"].startswith(args.configs)]
 
     tiers_spec = [
-        ("Baseline(-O3+vnoise)", BASELINE_BUILD,  "vnoise"),
+        ("Baseline(-O3+vnoise)", BASELINE_BUILD, "vnoise"),
         ("Opt-C++(M4+unordered)", OPTIMISED_BUILD, "vnoise"),
         ("Opt-numba(+numba-SDF)", OPTIMISED_BUILD, "numba"),
-        ("Opt-metal(+MLX-SDF)",  OPTIMISED_BUILD, "mlx"),
+        ("Opt-metal(+MLX-SDF)", OPTIMISED_BUILD, "mlx"),
     ]
 
     all_results = []
