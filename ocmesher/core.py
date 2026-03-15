@@ -703,9 +703,10 @@ class OcMesher:
         with Timer("construct mesh"):
             meshes = [None] * n_elements
             in_view_tags = [None] * n_elements
+            _construct = self._construct_element_mesh
             for e in range(n_elements):
                 k_e = (kernels[e],)  # tuple avoids list-slice copy
-                mesh, in_view_tag = self._construct_element_mesh(e, k_e, nv[e])
+                mesh, in_view_tag = _construct(e, k_e, nv[e])
                 meshes[e] = mesh
                 in_view_tags[e] = in_view_tag
                 logger.info(

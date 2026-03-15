@@ -353,12 +353,12 @@ def bench_bisection_simulation(sizes: list[int], repeats: int) -> dict:
             if has_out:
                 out_buf = np.empty((n, 1), dtype=np.float32)
                 for _ in range(n_iters):
-                    sdf = stub.kernel_caller([_sdf_sphere], pts, out=out_buf)
+                    stub.kernel_caller([_sdf_sphere], pts, out=out_buf)  # result used via out=
                     # simulate vertex update (midpoint)
                     pts[:] += np.random.default_rng(0).standard_normal((n, 3)) * 0.01
             else:
                 for _ in range(n_iters):
-                    sdf = stub.kernel_caller([_sdf_sphere], pts)
+                    stub.kernel_caller([_sdf_sphere], pts)  # timing the call itself
                     pts[:] += np.random.default_rng(0).standard_normal((n, 3)) * 0.01
 
         results[str(n)] = _time_fn(_bisection, repeats=repeats)
@@ -380,7 +380,7 @@ def bench_multi_kernel_bisection(sizes: list[int], repeats: int) -> dict:
 
         def _bisection():
             for _ in range(n_iters):
-                sdf = stub.kernel_caller(kernels, pts)
+                stub.kernel_caller(kernels, pts)  # timing the call itself
                 pts[:] += np.random.default_rng(0).standard_normal((n, 3)) * 0.01
 
         results[str(n)] = _time_fn(_bisection, repeats=repeats)
@@ -515,7 +515,7 @@ def compare_results(file_a: str, file_b: str):
 # ---------------------------------------------------------------------------
 # Registry
 # ---------------------------------------------------------------------------
-_BENCHMARKS: dict[str, callable] = {
+_BENCHMARKS: dict = {
     "kernel_single_enclosed": bench_kernel_caller_single_enclosed,
     "kernel_single_open": bench_kernel_caller_single_open,
     "kernel_multi_3k": bench_kernel_caller_multi_3k,

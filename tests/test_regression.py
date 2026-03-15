@@ -339,7 +339,7 @@ class TestCameraPackingRegression:
         rng = np.random.default_rng(42)
 
         cam_poses = []
-        for _i in range(n_cameras):
+        for _ in range(n_cameras):
             p = np.eye(4, dtype=np.float64) + rng.standard_normal((4, 4)) * 0.1
             p[3, :] = [0, 0, 0, 1]
             cam_poses.append(p)
