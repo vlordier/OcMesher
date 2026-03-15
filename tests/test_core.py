@@ -8,6 +8,7 @@ import numpy as np
 import pytest
 
 from ocmesher.core import (
+    _SDF_BATCH_SIZE,
     CAMERA_DATA_STRIDE,
     OcMesher,
     _validate_bounds,
@@ -158,6 +159,9 @@ class TestKernelCaller:
         obj.sdf_np_float_type = np.float32
         obj._bounds_min_np = np.array([bounds[0], bounds[2], bounds[4]], dtype=np.float64)
         obj._bounds_max_np = np.array([bounds[1], bounds[3], bounds[5]], dtype=np.float64)
+        obj._sdf_pool = None
+        obj._oob_mask = np.empty(10_000_000, dtype=bool)
+        obj._oob_tmp = np.empty(10_000_000, dtype=bool)
         return obj
 
     def test_empty_points_returns_empty(self, sample_bounds, sphere_kernel):
@@ -503,6 +507,9 @@ class TestVectorisedBoundsCheck:
         obj.sdf_np_float_type = np.float32
         obj._bounds_min_np = np.array([bounds[0], bounds[2], bounds[4]], dtype=np.float64)
         obj._bounds_max_np = np.array([bounds[1], bounds[3], bounds[5]], dtype=np.float64)
+        obj._sdf_pool = None
+        obj._oob_mask = np.empty(10_000_000, dtype=bool)
+        obj._oob_tmp = np.empty(10_000_000, dtype=bool)
         return obj
 
     def test_precomputed_bounds_vectors_exist(self, sample_cameras, sample_bounds):
@@ -559,6 +566,9 @@ class TestFusedBisectionSDF:
         obj.sdf_np_float_type = np.float32
         obj._bounds_min_np = np.array([bounds[0], bounds[2], bounds[4]], dtype=np.float64)
         obj._bounds_max_np = np.array([bounds[1], bounds[3], bounds[5]], dtype=np.float64)
+        obj._sdf_pool = None
+        obj._oob_mask = np.empty(10_000_000, dtype=bool)
+        obj._oob_tmp = np.empty(10_000_000, dtype=bool)
         return obj
 
     def test_fused_eval_matches_separate(self, sample_bounds, sphere_kernel):
@@ -664,6 +674,9 @@ class TestParallelMultiKernel:
         obj.sdf_np_float_type = np.float32
         obj._bounds_min_np = np.array([bounds[0], bounds[2], bounds[4]], dtype=np.float64)
         obj._bounds_max_np = np.array([bounds[1], bounds[3], bounds[5]], dtype=np.float64)
+        obj._sdf_pool = None
+        obj._oob_mask = np.empty(10_000_000, dtype=bool)
+        obj._oob_tmp = np.empty(10_000_000, dtype=bool)
         return obj
 
     def test_multi_kernel_matches_single(self, sample_bounds, sphere_kernel, plane_kernel):
@@ -717,6 +730,9 @@ class TestPreallocatedBisectionBuffer:
         obj.sdf_np_float_type = np.float32
         obj._bounds_min_np = np.array([bounds[0], bounds[2], bounds[4]], dtype=np.float64)
         obj._bounds_max_np = np.array([bounds[1], bounds[3], bounds[5]], dtype=np.float64)
+        obj._sdf_pool = None
+        obj._oob_mask = np.empty(10_000_000, dtype=bool)
+        obj._oob_tmp = np.empty(10_000_000, dtype=bool)
         return obj
 
     def test_fused_eval_with_preallocated_matches_separate(self, sample_bounds, sphere_kernel):
@@ -829,3 +845,128 @@ class TestSliceFillReplacesConcat:
         buf[na + nb + nc :] = d
 
         np.testing.assert_array_equal(buf, concat_result)
+
+
+# ---------------------------------------------------------------------------
+# Persistent thread pool
+# ---------------------------------------------------------------------------
+
+
+class TestPersistentThreadPool:
+    """Verify the persistent ThreadPoolExecutor lifecycle."""
+
+    def test_pool_is_none_initially(self, sample_cameras, sample_bounds):
+        """_sdf_pool must be None immediately after construction."""
+        with patch("ocmesher.core.load_cdll") as mock_load:
+            mock_load.return_value = MagicMock()
+            mesher = OcMesher(sample_cameras, sample_bounds)
+        assert mesher._sdf_pool is None
+
+    def test_pool_created_on_multi_kernel(self, sample_bounds, sphere_kernel, plane_kernel):
+        """Calling kernel_caller with >1 kernel must create the persistent pool."""
+        obj = object.__new__(OcMesher)
+        obj.bounds = sample_bounds
+        obj.enclosed = False
+        obj.sdf_np_float_type = np.float32
+        obj._bounds_min_np = np.array([sample_bounds[0], sample_bounds[2], sample_bounds[4]], dtype=np.float64)
+        obj._bounds_max_np = np.array([sample_bounds[1], sample_bounds[3], sample_bounds[5]], dtype=np.float64)
+        obj._sdf_pool = None
+        obj._oob_mask = np.empty(_SDF_BATCH_SIZE, dtype=bool)
+        obj._oob_tmp = np.empty(_SDF_BATCH_SIZE, dtype=bool)
+        pts = np.array([[0, 0, 0], [1, 1, 1]], dtype=np.float64)
+        obj.kernel_caller([sphere_kernel, plane_kernel], pts)
+        assert obj._sdf_pool is not None
+
+    def test_pool_not_created_for_single_kernel(self, sample_bounds, sphere_kernel):
+        """Single-kernel fast path must not create a thread pool."""
+        obj = object.__new__(OcMesher)
+        obj.bounds = sample_bounds
+        obj.enclosed = False
+        obj.sdf_np_float_type = np.float32
+        obj._bounds_min_np = np.array([sample_bounds[0], sample_bounds[2], sample_bounds[4]], dtype=np.float64)
+        obj._bounds_max_np = np.array([sample_bounds[1], sample_bounds[3], sample_bounds[5]], dtype=np.float64)
+        obj._sdf_pool = None
+        obj._oob_mask = np.empty(_SDF_BATCH_SIZE, dtype=bool)
+        obj._oob_tmp = np.empty(_SDF_BATCH_SIZE, dtype=bool)
+        pts = np.array([[0, 0, 0], [1, 1, 1]], dtype=np.float64)
+        obj.kernel_caller([sphere_kernel], pts)
+        assert obj._sdf_pool is None
+
+    def test_context_manager_shuts_down_pool(self, sample_cameras, sample_bounds, sphere_kernel, plane_kernel):
+        """Exiting the context manager must shut down the pool."""
+        with patch("ocmesher.core.load_cdll") as mock_load:
+            mock_load.return_value = MagicMock()
+            with OcMesher(sample_cameras, sample_bounds) as mesher:
+                pts = np.array([[0, 0, 0]], dtype=np.float64)
+                mesher.kernel_caller([sphere_kernel, plane_kernel], pts)
+                assert mesher._sdf_pool is not None
+        assert mesher._sdf_pool is None
+
+
+# ---------------------------------------------------------------------------
+# Reusable bounds-mask buffers
+# ---------------------------------------------------------------------------
+
+
+class TestReusableMaskBuffers:
+    """Verify that _out_of_bounds_mask_into reuses pre-allocated buffers."""
+
+    def test_mask_buffer_size_matches_batch(self, sample_cameras, sample_bounds):
+        """Pre-allocated mask buffers must be sized to _SDF_BATCH_SIZE."""
+        with patch("ocmesher.core.load_cdll") as mock_load:
+            mock_load.return_value = MagicMock()
+            mesher = OcMesher(sample_cameras, sample_bounds)
+        assert mesher._oob_mask.shape == (_SDF_BATCH_SIZE,)
+        assert mesher._oob_tmp.shape == (_SDF_BATCH_SIZE,)
+
+    def test_mask_into_matches_static(self, sample_bounds):
+        """_out_of_bounds_mask_into must produce identical results to _out_of_bounds_mask."""
+        obj = object.__new__(OcMesher)
+        obj.bounds = sample_bounds
+        obj.enclosed = True
+        obj.sdf_np_float_type = np.float32
+        b_min = np.array([sample_bounds[0], sample_bounds[2], sample_bounds[4]], dtype=np.float64)
+        b_max = np.array([sample_bounds[1], sample_bounds[3], sample_bounds[5]], dtype=np.float64)
+        obj._bounds_min_np = b_min
+        obj._bounds_max_np = b_max
+        obj._sdf_pool = None
+        obj._oob_mask = np.empty(_SDF_BATCH_SIZE, dtype=bool)
+        obj._oob_tmp = np.empty(_SDF_BATCH_SIZE, dtype=bool)
+
+        rng = np.random.default_rng(42)
+        pts = rng.uniform(-5, 5, size=(100, 3))
+        static_mask = OcMesher._out_of_bounds_mask(pts, b_min, b_max)
+        reused_mask = obj._out_of_bounds_mask_into(pts, b_min, b_max)
+        np.testing.assert_array_equal(static_mask, reused_mask)
+
+
+# ---------------------------------------------------------------------------
+# Vectorised camera packing
+# ---------------------------------------------------------------------------
+
+
+class TestVectorisedCameraPacking:
+    """Verify that batch camera packing matches per-camera packing."""
+
+    def test_camera_data_shape(self, sample_cameras, sample_bounds):
+        """Camera data must have correct total length."""
+        with patch("ocmesher.core.load_cdll") as mock_load:
+            mock_load.return_value = MagicMock()
+            mesher = OcMesher(sample_cameras, sample_bounds)
+        assert len(mesher.cameras) == CAMERA_DATA_STRIDE * mesher.n_cameras
+
+    def test_multi_camera_data_packed_correctly(self, sample_camera_pose, sample_intrinsics, sample_bounds):
+        """Each camera stride must contain inv_pose[:3,:4], K, H, W."""
+        cameras = (
+            [sample_camera_pose, sample_camera_pose],
+            [sample_intrinsics, sample_intrinsics],
+            [480, 480],
+            [640, 640],
+        )
+        with patch("ocmesher.core.load_cdll") as mock_load:
+            mock_load.return_value = MagicMock()
+            mesher = OcMesher(cameras, sample_bounds)
+        # Both cameras should have identical packed data
+        cam0 = mesher.cameras[:CAMERA_DATA_STRIDE]
+        cam1 = mesher.cameras[CAMERA_DATA_STRIDE : 2 * CAMERA_DATA_STRIDE]
+        np.testing.assert_array_equal(cam0, cam1)

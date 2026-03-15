@@ -5,7 +5,10 @@
 
 """Octree-based hierarchical 3D mesher driven by signed-distance functions."""
 
+from __future__ import annotations
+
 import logging
+import os
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 
@@ -36,6 +39,10 @@ CAMERA_DATA_STRIDE = 23
 # Maximum number of SDF query points evaluated in a single vectorised batch.
 # Keeping this below ~10M avoids exhausting RAM on large octrees.
 _SDF_BATCH_SIZE = 10_000_000
+
+# Maximum number of SDF worker threads for multi-kernel evaluation.
+# Defaults to available CPU count but can be capped by OCMESHER_SDF_WORKERS.
+_MAX_SDF_WORKERS: int = int(os.environ.get("OCMESHER_SDF_WORKERS", str(os.cpu_count() or 4)))
 
 
 def _validate_cameras(cameras):
@@ -159,15 +166,16 @@ class OcMesher:
 
         self.n_cameras = len(cam_poses)
         self.cameras = np.zeros(CAMERA_DATA_STRIDE * self.n_cameras, dtype=self.np_float_type)
+        # Vectorised camera packing: batch all cameras in one numpy pass
+        # instead of per-camera Python loop + np.concatenate + .astype().
+        _inv_poses = np.linalg.inv(np.asarray(cam_poses, dtype=np.float64))  # (C, 4, 4)
+        _intrinsics = np.asarray(Ks, dtype=np.float64)  # (C, 3, 3)
         for i in range(self.n_cameras):
-            self.cameras[CAMERA_DATA_STRIDE * i : CAMERA_DATA_STRIDE * (i + 1)] = np.concatenate(
-                [
-                    np.linalg.inv(cam_poses[i])[:3, :4].reshape(-1),
-                    Ks[i].reshape(-1),
-                    [Hs[i]],
-                    [Ws[i]],
-                ]
-            ).astype(self.np_float_type)
+            offset = CAMERA_DATA_STRIDE * i
+            self.cameras[offset : offset + 12] = _inv_poses[i, :3, :4].ravel()
+            self.cameras[offset + 12 : offset + 21] = _intrinsics[i].ravel()
+            self.cameras[offset + 21] = Hs[i]
+            self.cameras[offset + 22] = Ws[i]
 
         self.inview_pixels_per_cube = self.np_float_type(pixels_per_cube)
         self.inv_scale = self.np_float_type(inv_scale)
@@ -190,6 +198,19 @@ class OcMesher:
         # Avoids per-axis Python loop in kernel_caller (6 temps → 2 broadcasts).
         self._bounds_min_np = np.array([bounds[0], bounds[2], bounds[4]], dtype=np.float64)
         self._bounds_max_np = np.array([bounds[1], bounds[3], bounds[5]], dtype=np.float64)
+
+        # Persistent thread pool for multi-kernel SDF evaluation.
+        # Avoids the overhead of constructing + tearing down a ThreadPool per
+        # batch (each batch in the bisection inner loop).  Lazy-initialised:
+        # only created when more than one kernel is actually used.
+        self._sdf_pool: ThreadPoolExecutor | None = None
+
+        # Reusable boolean buffers for out-of-bounds masking.
+        # Pre-allocated to _SDF_BATCH_SIZE (the maximum batch slice), so
+        # _out_of_bounds_mask_into() can write directly into these instead
+        # of allocating fresh (N,) arrays on every batch.
+        self._oob_mask: np.ndarray = np.empty(_SDF_BATCH_SIZE, dtype=bool)
+        self._oob_tmp: np.ndarray = np.empty(_SDF_BATCH_SIZE, dtype=bool)
 
         register_func(
             self,
@@ -286,8 +307,26 @@ class OcMesher:
         return self
 
     def __exit__(self, exc_type, exc_val, exc_tb):
-        """No-op exit; provided so OcMesher can be used as a context manager."""
+        """Shut down the persistent thread pool on context-manager exit."""
+        self._shutdown_pool()
         return False
+
+    def _shutdown_pool(self):
+        """Shut down the persistent SDF thread pool if it exists."""
+        if self._sdf_pool is not None:
+            self._sdf_pool.shutdown(wait=False)
+            self._sdf_pool = None
+
+    def _get_pool(self, n_kernels: int) -> ThreadPoolExecutor:
+        """Return the persistent SDF thread pool, creating it lazily.
+
+        The pool is sized to ``min(n_kernels, _MAX_SDF_WORKERS)`` and
+        reused across all ``kernel_caller`` invocations so that thread
+        creation overhead is incurred only once per mesher lifetime.
+        """
+        if self._sdf_pool is None:
+            self._sdf_pool = ThreadPoolExecutor(max_workers=min(n_kernels, _MAX_SDF_WORKERS))
+        return self._sdf_pool
 
     @staticmethod
     def _out_of_bounds_mask(xyz, b_min, b_max):
@@ -323,6 +362,32 @@ class OcMesher:
         np.logical_or(out_bound, _tmp, out=out_bound)
         return out_bound
 
+    def _out_of_bounds_mask_into(self, xyz, b_min, b_max):
+        """Like ``_out_of_bounds_mask`` but reuses pre-allocated buffers.
+
+        Writes into ``self._oob_mask[:n]`` and ``self._oob_tmp[:n]``,
+        avoiding a per-batch allocation of two ``(N,)`` boolean arrays.
+        Returns a *view* into the pre-allocated mask buffer.
+        """
+        n = len(xyz)
+        out_bound = self._oob_mask[:n]
+        _tmp = self._oob_tmp[:n]
+        # X-axis
+        np.less_equal(xyz[:, 0], b_min[0], out=out_bound)
+        np.greater_equal(xyz[:, 0], b_max[0], out=_tmp)
+        np.logical_or(out_bound, _tmp, out=out_bound)
+        # Y-axis
+        np.less_equal(xyz[:, 1], b_min[1], out=_tmp)
+        np.logical_or(out_bound, _tmp, out=out_bound)
+        np.greater_equal(xyz[:, 1], b_max[1], out=_tmp)
+        np.logical_or(out_bound, _tmp, out=out_bound)
+        # Z-axis
+        np.less_equal(xyz[:, 2], b_min[2], out=_tmp)
+        np.logical_or(out_bound, _tmp, out=out_bound)
+        np.greater_equal(xyz[:, 2], b_max[2], out=_tmp)
+        np.logical_or(out_bound, _tmp, out=out_bound)
+        return out_bound
+
     def kernel_caller(self, kernels, XYZ_all):
         """Evaluate SDF *kernels* at the given *XYZ_all* positions.
 
@@ -332,13 +397,16 @@ class OcMesher:
           ``np.greater_equal`` with ``out=`` accumulates a single ``(N,)``
           boolean mask, avoiding the two ``(N, 3)`` temporary arrays that
           ``np.any((XYZ <= lo) | (XYZ >= hi), axis=1)`` would allocate.
-        - **Release-GIL thread pool** — when ``len(kernels) > 1`` each SDF
-          kernel is dispatched to a separate thread via
-          ``ThreadPoolExecutor``.  Because ctypes / C-extension calls
-          release the GIL, this enables true multi-core parallelism for the
-          compute-heavy SDF evaluations.
+          Mask buffers are pre-allocated once and reused across batches.
+        - **Persistent release-GIL thread pool** — when ``len(kernels) > 1``
+          each SDF kernel is dispatched to a persistent
+          ``ThreadPoolExecutor`` that is shared across all
+          ``kernel_caller`` invocations (lazy-initialised on first use).
         - **Pre-allocated output buffer** filled in-place (no list
           accumulation, no ``np.stack`` / ``np.concatenate`` per batch).
+        - **Single-kernel fast path** — when there is exactly one kernel,
+          bypasses the pool and writes SDF values directly into the result
+          column, avoiding ``_eval_kernels_batch`` dispatch overhead.
         """
         for kernel in kernels:
             if not callable(kernel):
@@ -353,24 +421,37 @@ class OcMesher:
         b_min = self._bounds_min_np
         b_max = self._bounds_max_np
         enclosed = self.enclosed
+        single_kernel = n_kernels == 1
 
         for i in range(0, n_XYZ, _SDF_BATCH_SIZE):
             end = min(i + _SDF_BATCH_SIZE, n_XYZ)
             XYZ = XYZ_all[i:end]
-            batch_size = end - i
+            n = end - i
 
-            out_bound = self._out_of_bounds_mask(XYZ, b_min, b_max) if enclosed else None
+            # Reuse pre-allocated mask buffers; avoid per-batch allocation.
+            out_bound = self._out_of_bounds_mask_into(XYZ, b_min, b_max) if enclosed else None
 
-            self._eval_kernels_batch(kernels, XYZ, batch_size, out_bound, result, i, end)
+            if single_kernel:
+                # Single-kernel fast path: write SDF directly, no pool overhead.
+                sdf = np.asarray(kernels[0](XYZ))
+                if sdf.shape != (n,):
+                    msg = f"kernels[0] returned shape {sdf.shape} for {n} query points; expected ({n},)"
+                    raise ValueError(msg)
+                result_col = result[i:end, 0]
+                result_col[:] = sdf
+                if out_bound is not None:
+                    result_col[out_bound] = 1
+            else:
+                self._eval_kernels_batch(kernels, XYZ, n, out_bound, result, i, end)
 
         return result
 
     def _eval_kernels_batch(self, kernels, xyz, batch_size, out_bound, result, start, end):
         """Evaluate all *kernels* on *xyz* and write into *result[start:end]*.
 
-        When multiple kernels are present, they are dispatched in parallel
-        using a ``ThreadPoolExecutor``.  ctypes / C-extension SDF calls
-        release the GIL, enabling true multi-core parallelism.
+        Uses the persistent ``ThreadPoolExecutor`` to dispatch each kernel
+        to a separate thread.  ctypes / C-extension SDF calls release the
+        GIL, enabling true multi-core parallelism.
 
         SDF values are written directly into the pre-allocated *result*
         buffer; out-of-bounds clamping is applied in-place on the result
@@ -389,21 +470,13 @@ class OcMesher:
                 raise ValueError(msg)
             return k_idx, sdf
 
-        if n_kernels > 1:
-            # Multi-kernel: dispatch in parallel threads.
-            with ThreadPoolExecutor(max_workers=n_kernels) as pool:
-                for k_idx, sdf in pool.map(_eval_one, enumerate(kernels)):
-                    result[start:end, k_idx] = sdf
-            if out_bound is not None:
-                result_slice = result[start:end]
-                result_slice[out_bound] = 1
-        else:
-            # Single-kernel fast path: no thread-pool overhead.
-            _, sdf = _eval_one((0, kernels[0]))
-            result_slice = result[start:end, 0]
-            result_slice[:] = sdf
-            if out_bound is not None:
-                result_slice[out_bound] = 1
+        # Multi-kernel: dispatch via persistent thread pool.
+        pool = self._get_pool(n_kernels)
+        for k_idx, sdf in pool.map(_eval_one, enumerate(kernels)):
+            result[start:end, k_idx] = sdf
+        if out_bound is not None:
+            result_slice = result[start:end]
+            result_slice[out_bound] = 1
 
     def __call__(self, kernels):
         """Run the full coarse-to-fine meshing pipeline and return meshes."""
