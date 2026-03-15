@@ -1,13 +1,37 @@
-__pycache__
-lib
-results
-tests/cpp/test_macros
-tests/cpp/test_data_structures
-tests/cpp/test_int_log
-tests/cpp/test_determinant
-tests/cpp/test_tri_seg_intersect
-tests/cpp/test_coordinates
-tests/cpp/test_projection
-tests/cpp/test_octree
-tests/cpp/test_find_edges
-tests/cpp/test_integration
+# Byte-compiled / optimized / DLL files
+__pycache__/
+*.py[cod]
+*$py.class
+
+# C/C++ build artifacts
+*.o
+*.so
+*.dylib
+
+# Distribution / packaging
+build/
+dist/
+*.egg-info/
+*.egg
+
+# Virtual environments
+.venv/
+venv/
+env/
+
+# IDE / Editor
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# Project-specific
+lib/
+results/
+benchmark_results/
+
+# Test / coverage artifacts
+.pytest_cache/
+htmlcov/
+.coverage

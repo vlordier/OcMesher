@@ -1,0 +1,100 @@
+name: Static Analysis
+
+on:
+  push:
+    branches: ["main", "master"]
+    paths:
+      - "ocmesher/source/**"
+      - ".clang-tidy"
+      - ".clang-format"
+      - ".github/workflows/static-analysis.yml"
+  pull_request:
+    branches: ["main", "master"]
+    paths:
+      - "ocmesher/source/**"
+      - ".clang-tidy"
+      - ".clang-format"
+      - ".github/workflows/static-analysis.yml"
+
+permissions:
+  contents: read
+
+jobs:
+  clang-format:
+    name: clang-format (formatting check)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install clang-format
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y clang-format-18
+
+      - name: Run clang-format
+        run: |
+          find ocmesher/source -name "*.cpp" -o -name "*.h" | \
+            xargs clang-format-18 --dry-run --Werror
+
+  clang-tidy:
+    name: clang-tidy (static analysis + naming)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install dependencies
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y clang-tidy-18 libomp-dev
+
+      - name: Run clang-tidy
+        run: |
+          find ocmesher/source -name "*.cpp" | \
+            xargs clang-tidy-18 \
+              --extra-arg=-std=c++17 \
+              --extra-arg=-fopenmp \
+              --warnings-as-errors='*' \
+              --
+
+  cppcheck:
+    name: cppcheck (extra static analysis)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install cppcheck
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y cppcheck
+
+      - name: Run cppcheck
+        run: |
+          cppcheck \
+            --std=c++17 \
+            --enable=all \
+            --inconclusive \
+            --suppress=missingIncludeSystem \
+            --suppress=unusedFunction \
+            --error-exitcode=1 \
+            ocmesher/source/
+
+  include-what-you-use:
+    name: include-what-you-use (dependency hygiene)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install iwyu
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y iwyu libomp-dev
+
+      - name: Run include-what-you-use
+        run: |
+          for f in ocmesher/source/*.cpp; do
+            include-what-you-use \
+              -std=c++17 \
+              -fopenmp \
+              -I ocmesher/source \
+              "$f" || true
+          done

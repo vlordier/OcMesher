@@ -3,35 +3,64 @@
 
 # Authors: Zeyu Ma
 
-from datetime import datetime
+"""Simple wall-clock timer with memory reporting."""
+
+import logging
 import os
+from datetime import UTC, datetime
+from types import TracebackType
+from typing import Self
 
 import psutil
 
+logger = logging.getLogger(__name__)
+
+__all__ = ["Timer"]
+
 
 class Timer:
+    """Context manager that measures wall-clock duration and reports memory usage.
 
-    def __init__(self, desc, disable_timer=False):
+    Usage::
+
+        with Timer("my step"):
+            do_work()
+        # logs: [my step] finished in 0:00:01.234 with memory usage 0.5 GB
+    """
+
+    __slots__ = ("disable_timer", "duration", "end", "name", "start")
+
+    def __init__(self, desc: str, disable_timer: bool = False) -> None:
+        """Create a timer labelled *desc*."""
         self.disable_timer = disable_timer
-        if self.disable_timer:    
-            return
-        self.name = f'[{desc}]'
-
-    def __enter__(self):
         if self.disable_timer:
             return
-        self.start = datetime.now()
+        self.name = f"[{desc}]"
 
+    def __enter__(self) -> Self:
+        """Record the start time."""
+        if self.disable_timer:
+            return self
+        self.start = datetime.now(tz=UTC)
+        return self
 
-    def __exit__(self, exc_type, exc_val, traceback):
+    def __exit__(
+        self,
+        exc_type: type[BaseException] | None,
+        _exc_val: BaseException | None,
+        _traceback: TracebackType | None,
+    ) -> None:
+        """Log elapsed time and memory on success, or the exception type on failure."""
         if self.disable_timer:
             return
-        self.end = datetime.now()
-        self.duration = self.end - self.start # timedelta
+        self.end = datetime.now(tz=UTC)
+        self.duration = self.end - self.start  # timedelta
         if exc_type is None:
-            process = psutil.Process(os.getpid())
-            print(f'{self.name} finished in {str(self.duration)} with memory usage {process.memory_info().rss / 1024**3} GB')
+            try:
+                process = psutil.Process(os.getpid())
+                mem_gb = process.memory_info().rss / 1024**3
+                logger.info("%s finished in %s with memory usage %.2f GB", self.name, self.duration, mem_gb)
+            except (psutil.NoSuchProcess, psutil.AccessDenied):
+                logger.info("%s finished in %s", self.name, self.duration)
         else:
-            print(f'{self.name} failed with {exc_type}')
-
-
+            logger.warning("%s failed with %s: %s", self.name, exc_type.__name__, _exc_val)
