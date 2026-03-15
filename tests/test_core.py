@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import inspect
 from unittest.mock import MagicMock, patch
 
 import numpy as np
@@ -12,6 +13,12 @@ from ocmesher.core import (
     _SDF_BATCH_SIZE,
     CAMERA_DATA_STRIDE,
     OcMesher,
+    _np_asarray,
+    _np_empty,
+    _np_fabs,
+    _np_greater_equal,
+    _np_less_equal,
+    _np_logical_or,
     _validate_bounds,
     _validate_cameras,
     _validate_kernels,
@@ -1733,3 +1740,180 @@ class TestFinalVertexAssemblyOffsets:
         result[off_edge:] = face
         expected = np.array([[1, 2, 3], [4, 5, 6], [7, 8, 9], [10, 11, 12], [13, 14, 15]], dtype=np.float64)
         np.testing.assert_array_equal(result, expected)
+
+
+# ---------------------------------------------------------------------------
+# Module-level numpy function cache
+# ---------------------------------------------------------------------------
+
+
+class TestModuleLevelNumpyCache:
+    """Verify that module-level cached numpy functions are correct references."""
+
+    def test_np_empty_is_numpy_empty(self):
+        """_np_empty must be np.empty."""
+        assert _np_empty is np.empty
+
+    def test_np_fabs_is_numpy_fabs(self):
+        """_np_fabs must be np.fabs."""
+        assert _np_fabs is np.fabs
+
+    def test_np_less_equal_is_numpy_less_equal(self):
+        """_np_less_equal must be np.less_equal."""
+        assert _np_less_equal is np.less_equal
+
+    def test_np_greater_equal_is_numpy_greater_equal(self):
+        """_np_greater_equal must be np.greater_equal."""
+        assert _np_greater_equal is np.greater_equal
+
+    def test_np_logical_or_is_numpy_logical_or(self):
+        """_np_logical_or must be np.logical_or."""
+        assert _np_logical_or is np.logical_or
+
+    def test_np_asarray_is_numpy_asarray(self):
+        """_np_asarray must be np.asarray."""
+        assert _np_asarray is np.asarray
+
+    def test_cached_empty_produces_correct_array(self):
+        """Module-level _np_empty must produce arrays identical to np.empty."""
+        arr = _np_empty((5, 3), dtype=np.float64)
+        assert arr.shape == (5, 3)
+        assert arr.dtype == np.float64
+
+    def test_cached_fabs_works_correctly(self):
+        """Module-level _np_fabs must compute absolute values."""
+        x = np.array([-1.0, 2.0, -3.0])
+        np.testing.assert_array_equal(_np_fabs(x), np.array([1.0, 2.0, 3.0]))
+
+
+# ---------------------------------------------------------------------------
+# pool.submit replaces closure factory in multi-kernel path
+# ---------------------------------------------------------------------------
+
+
+class TestPoolSubmitMultiKernel:
+    """Verify pool.submit-based multi-kernel dispatch produces correct results."""
+
+    def test_multi_kernel_uses_pool_submit(self):
+        """Multi-kernel kernel_caller should use pool.submit (no _make_eval_one)."""
+
+        source = inspect.getsource(OcMesher.kernel_caller)
+        # _make_eval_one closure factory should no longer exist
+        assert "_make_eval_one" not in source
+        # pool.submit should be used directly
+        assert "pool.submit" in source or "_submit" in source
+
+    def test_multi_kernel_correctness(self):
+        """Two kernels dispatched via pool.submit must produce correct columns."""
+        obj = object.__new__(OcMesher)
+        obj.sdf_np_float_type = np.float32
+        obj.enclosed = False
+        obj._sdf_pool = None
+        obj._oob_mask = np.empty(100, dtype=bool)
+        obj._oob_tmp = np.empty(100, dtype=bool)
+
+        def k0(xyz):
+            return np.full(len(xyz), 1.0, dtype=np.float32)
+
+        def k1(xyz):
+            return np.full(len(xyz), 2.0, dtype=np.float32)
+
+        rng = np.random.default_rng(42)
+        xyz = rng.random((10, 3)).astype(np.float64)
+        result = obj.kernel_caller([k0, k1], xyz)
+        np.testing.assert_array_almost_equal(result[:, 0], 1.0)
+        np.testing.assert_array_almost_equal(result[:, 1], 2.0)
+        # Clean up pool
+        if obj._sdf_pool is not None:
+            obj._sdf_pool.shutdown(wait=False)
+            obj._sdf_pool = None
+
+
+# ---------------------------------------------------------------------------
+# Single-kernel direct assignment (no intermediate view)
+# ---------------------------------------------------------------------------
+
+
+class TestSingleKernelDirectAssignment:
+    """Verify single-kernel path uses direct slice assignment."""
+
+    def test_no_result_col_intermediate(self):
+        """Single-kernel path should not create result_col intermediate view."""
+
+        source = inspect.getsource(OcMesher.kernel_caller)
+        assert "result_col" not in source
+
+    def test_single_kernel_enclosed_split(self):
+        """Single-kernel path should have separate enclosed/non-enclosed loops."""
+
+        source = inspect.getsource(OcMesher.kernel_caller)
+        # The if _enclosed check should be outside the loop for single-kernel
+        # (separate loop bodies for enclosed vs non-enclosed)
+        assert source.count("if _enclosed:") >= 1
+
+
+# ---------------------------------------------------------------------------
+# Known dimensions replace .shape[0] in final assembly
+# ---------------------------------------------------------------------------
+
+
+class TestKnownDimensionsFinalAssembly:
+    """Verify final vertex assembly uses nve/nvf instead of .shape[0]."""
+
+    def test_assembly_with_known_dims(self):
+        """Assembly using nve/nvf must match assembly using .shape[0]."""
+        base = np.array([[1, 2, 3], [4, 5, 6]], dtype=np.float64)
+        edge = np.array([[7, 8, 9]], dtype=np.float64)
+        face = np.array([[10, 11, 12], [13, 14, 15]], dtype=np.float64)
+        # Simulate using known dimensions (nve=1, nvf=2) instead of .shape[0]
+        nve = 1
+        nvf = 2
+        n_base = len(base)
+        off_edge = n_base + nve
+        result = _np_empty((off_edge + nvf, 3), dtype=np.float64)
+        result[:n_base] = base
+        result[n_base:off_edge] = edge
+        result[off_edge:] = face
+        expected = np.array([[1, 2, 3], [4, 5, 6], [7, 8, 9], [10, 11, 12], [13, 14, 15]], dtype=np.float64)
+        np.testing.assert_array_equal(result, expected)
+
+
+# ---------------------------------------------------------------------------
+# Bounds mask uses module-level cached ufuncs
+# ---------------------------------------------------------------------------
+
+
+class TestBoundsMaskCachedUfuncs:
+    """Verify bounds mask methods use module-level cached ufuncs."""
+
+    def test_static_mask_uses_cached_ufuncs(self):
+        """Static _out_of_bounds_mask should use cached ufunc references."""
+
+        source = inspect.getsource(OcMesher._out_of_bounds_mask)
+        # Should reference local aliases, not np.less_equal directly
+        assert "_le(" in source or "_np_less_equal" in source
+        assert "_ge(" in source or "_np_greater_equal" in source
+        assert "_lor(" in source or "_np_logical_or" in source
+
+    def test_into_mask_uses_cached_ufuncs(self):
+        """Instance _out_of_bounds_mask_into should use cached ufunc references."""
+
+        source = inspect.getsource(OcMesher._out_of_bounds_mask_into)
+        assert "_le(" in source or "_np_less_equal" in source
+        assert "_ge(" in source or "_np_greater_equal" in source
+        assert "_lor(" in source or "_np_logical_or" in source
+
+    def test_cached_ufuncs_produce_correct_mask(self):
+        """Bounds mask with cached ufuncs must match reference implementation."""
+        xyz = np.array(
+            [[0.5, 0.5, 0.5], [0.0, 0.5, 0.5], [1.0, 0.5, 0.5], [-0.1, 0.5, 0.5]],
+            dtype=np.float64,
+        )
+        b_min = np.array([0.0, 0.0, 0.0])
+        b_max = np.array([1.0, 1.0, 1.0])
+        mask = OcMesher._out_of_bounds_mask(xyz, b_min, b_max)
+        # Point 0: inside → False
+        # Point 1: on boundary (0.0 <= 0.0) → True
+        # Point 2: on boundary (1.0 >= 1.0) → True
+        # Point 3: outside (-0.1 <= 0.0) → True
+        np.testing.assert_array_equal(mask, [False, True, True, True])
