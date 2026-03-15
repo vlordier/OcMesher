@@ -514,7 +514,7 @@ class OcMesher:
         n_XYZ = len(XYZ_all)
         n_kernels = len(kernels)
         if n_XYZ == 0:
-            return np.zeros((0, n_kernels), dtype=self.sdf_np_float_type)
+            return _np_empty((0, n_kernels), dtype=self.sdf_np_float_type)
 
         _sdf_dtype = self.sdf_np_float_type
         result = out if out is not None else _np_empty((n_XYZ, n_kernels), dtype=_sdf_dtype)
@@ -547,8 +547,10 @@ class OcMesher:
                     if sdf.shape != (n,):
                         msg = f"kernels[0] returned shape {sdf.shape} for {n} query points; expected ({n},)"
                         raise ValueError(msg)
-                    result[i:end, 0] = sdf
-                    result[i:end, 0][_mask_into(XYZ, _b_min, _b_max)] = 1
+                    col = result[i:end, 0]
+                    col[:] = sdf
+                    oob = _mask_into(XYZ, _b_min, _b_max)
+                    col[oob] = 1
             else:
                 for i in range(0, n_XYZ, _batch):
                     end = _min(i + _batch, n_XYZ)
@@ -573,15 +575,16 @@ class OcMesher:
                 XYZ = XYZ_all[i:end]
                 n = end - i
                 futures = [_submit(k, XYZ) for k in kernels]
+                batch_slice = result[i:end]
                 for k_idx, fut in enumerate(futures):
                     raw = fut.result()
                     sdf = raw if _isinstance(raw, _ndarray) else _asarray(raw)
                     if sdf.shape != (n,):
                         msg = f"kernels[{k_idx}] returned shape {sdf.shape} for {n} query points; expected ({n},)"
                         raise ValueError(msg)
-                    result[i:end, k_idx] = sdf
+                    batch_slice[:, k_idx] = sdf
                 if _enclosed:
-                    result[i:end][_mask_into(XYZ, _b_min, _b_max)] = 1
+                    batch_slice[_mask_into(XYZ, _b_min, _b_max)] = 1
 
         return result
 
@@ -776,7 +779,7 @@ class OcMesher:
         vertices, faces = self._refine_extra_vertices(e, k_e, vertices)
 
         # np.empty: get_in_view_tag fills every element before Python reads.
-        in_view_tag = np.empty(vertices.shape[0], dtype=bool)
+        in_view_tag = _empty(vertices.shape[0], dtype=bool)
         self.get_in_view_tag(e, AsBool(in_view_tag))
         return trimesh.Trimesh(vertices=vertices, faces=faces, process=False), in_view_tag
 
@@ -937,7 +940,7 @@ class OcMesher:
         self.get_faces(AsInt(faces))
         # Pre-allocated final vertex array avoids np.concatenate overhead.
         # Reuse nve/nvf (from construct_faces) instead of .shape[0] lookups.
-        n_base = len(vertices)
+        n_base = vertices.shape[0]
         off_edge = n_base + nve
         final_vertices = _empty((off_edge + nvf, 3), dtype=_np_float)
         final_vertices[:n_base] = vertices
