@@ -53,6 +53,12 @@ _DENOM_EPS = 1e-12
 # Whether torch.compile is available (PyTorch ≥ 2.0).
 _HAS_COMPILE = hasattr(torch, "compile")
 
+# Scale factor for quantising corner positions to int64 before deduplication.
+# 1e8 gives 10-nanometre resolution — fine enough to distinguish corners at
+# the deepest practical octree level (2^20 subdivisions of a ~10 m scene
+# yields ~10 µm cubes) while keeping quantised values within int64 range.
+_CORNER_QUANT_SCALE = 1e8
+
 # ---------------------------------------------------------------------------
 # Marching-cubes lookup tables (classic Lorensen & Cline, 1987)
 # ---------------------------------------------------------------------------
@@ -1053,9 +1059,12 @@ class TorchOcMesher:
         # Quantise positions to int64 triples and find unique rows.
         # torch.unique(dim=0) is collision-free (unlike single-int hashing)
         # and fast enough for the typical corner count.
-        quantized = (flat * 1e8).round().long()
+        quantized = (flat * _CORNER_QUANT_SCALE).round().long()
         _unique_rows, inverse = torch.unique(quantized, dim=0, return_inverse=True)
         # Pick one representative position per unique quantised triple.
+        # Writing indices in reverse order ensures the smallest (first)
+        # index wins for each unique bucket — this is deterministic and
+        # mirrors the dedup strategy used in _marching_cubes.
         n_flat = flat.shape[0]
         n_unique = _unique_rows.shape[0]
         rep_idx = torch.zeros(n_unique, dtype=torch.long, device=flat.device)
