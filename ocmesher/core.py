@@ -10,7 +10,7 @@ import numpy as np
 import trimesh
 from tqdm import tqdm
 
-from .utils.interface import AC, POINTER, AsDouble, AsFloat, AsInt, AsBool, c_bool, c_double, c_float, c_int32, load_cdll, register_func
+from .utils.interface import POINTER, AsDouble, AsFloat, AsInt, AsBool, c_bool, c_double, c_float, c_int32, load_cdll, register_func
 from .utils.timer import Timer
 
 @gin.configurable
@@ -144,9 +144,9 @@ class OcMesher:
                 pbar.update(inc)
                 n = self.fine_iteration(POINTER(self.sdf_float_type)())
                 while n > 0:
-                    positions = AC(np.zeros((n, 3), dtype=self.np_float_type))
+                    positions = np.zeros((n, 3), dtype=self.np_float_type)
                     self.fine_iteration_output(self.AF(positions))
-                    sdf = AC(self.kernel_caller(kernels, positions).min(axis=-1))
+                    sdf = self.kernel_caller(kernels, positions).min(axis=-1)
                     n = self.fine_iteration(self.sdf_AF(sdf))
         with Timer("filter visible blocks"):
             n_vis_block = self.vis_filter(self.simplify_occluded, self.visible_relax_iter)
@@ -156,16 +156,16 @@ class OcMesher:
             while True:
                 n = self.final_iteration(AsInt(nv))
                 if n == 0: break
-                positions = AC(np.zeros((n, 3), dtype=self.np_float_type))
+                positions = np.zeros((n, 3), dtype=self.np_float_type)
                 self.final_iteration2(self.AF(positions))
-                sdf = AC(self.kernel_caller(kernels, positions))
+                sdf = self.kernel_caller(kernels, positions)
                 inc = self.final_iteration3(self.sdf_AF(sdf))
                 pbar.update(inc)
             n = self.final_iteration_occluded(AsInt(nv))
             if n != 0:
-                positions = AC(np.zeros((n, 3), dtype=self.np_float_type))
+                positions = np.zeros((n, 3), dtype=self.np_float_type)
                 self.final_iteration2(self.AF(positions))
-                sdf = AC(self.kernel_caller(kernels, positions))
+                sdf = self.kernel_caller(kernels, positions)
                 self.final_iteration3_occluded(self.sdf_AF(sdf))
             nv = np.zeros(n_elements, dtype=np.int32)
             self.final_remaining(AsInt(nv))
@@ -179,12 +179,12 @@ class OcMesher:
                 centers = np.zeros((nv[e], 3), dtype=self.np_float_type)
                 self.get_verts_center(e, self.AF(centers))
                 center_sdf = self.kernel_caller(k_e, centers)
-                cubes = AC(np.zeros((nv[e] * 8, 3), dtype=self.np_float_type))
+                cubes = np.zeros((nv[e] * 8, 3), dtype=self.np_float_type)
                 self.update_verts(e, POINTER(self.sdf_float_type)(), POINTER(self.sdf_float_type)(), self.AF(cubes))
                 for _ in tqdm(range(self.bisection_iters)):
                     sdf = self.kernel_caller(k_e, cubes)
-                    self.update_verts(e, self.sdf_AF(AC(sdf)), self.sdf_AF(AC(center_sdf)), self.AF(cubes))
-                cubes_r = AC(np.zeros((nv[e] * 8, 3), dtype=self.np_float_type))
+                    self.update_verts(e, self.sdf_AF(sdf), self.sdf_AF(center_sdf), self.AF(cubes))
+                cubes_r = np.zeros((nv[e] * 8, 3), dtype=self.np_float_type)
                 self.get_lr_verts(e, self.AF(cubes), self.AF(cubes_r))
                 sdf_l = self.kernel_caller(k_e, cubes)
                 sdf_r = self.kernel_caller(k_e, cubes_r)
@@ -195,13 +195,13 @@ class OcMesher:
                 cnts = np.zeros(3, dtype=np.int32)
                 self.construct_faces(e, self.AF(vertices), AsInt(cnts))
                 nve, nvf, nf = cnts
-                edge_vertices_c = AC(np.zeros((nve, 3), dtype=self.np_float_type))
-                face_vertices_c = AC(np.zeros((nvf, 3), dtype=self.np_float_type))
+                edge_vertices_c = np.zeros((nve, 3), dtype=self.np_float_type)
+                face_vertices_c = np.zeros((nvf, 3), dtype=self.np_float_type)
                 self.get_extra_verts_center(self.AF(edge_vertices_c), self.AF(face_vertices_c))
                 ecenter_sdf = self.kernel_caller(k_e, edge_vertices_c)
                 fcenter_sdf = self.kernel_caller(k_e, face_vertices_c)
-                edge_vertices_lr = AC(np.zeros((nve * 2, 3), dtype=self.np_float_type))
-                face_vertices_lr = AC(np.zeros((nvf * 4, 3), dtype=self.np_float_type))
+                edge_vertices_lr = np.zeros((nve * 2, 3), dtype=self.np_float_type)
+                face_vertices_lr = np.zeros((nvf * 4, 3), dtype=self.np_float_type)
                 self.update_extra_verts(
                     POINTER(self.sdf_float_type)(), POINTER(self.sdf_float_type)(),
                     POINTER(self.sdf_float_type)(), POINTER(self.sdf_float_type)(),
@@ -216,8 +216,8 @@ class OcMesher:
                         self.AF(edge_vertices_lr), self.AF(face_vertices_lr),
                     )
                 del edge_vertices_c, face_vertices_c, ecenter_sdf, fcenter_sdf
-                edge_vertices_r = AC(np.zeros((nve * 2, 3), dtype=self.np_float_type))
-                face_vertices_r = AC(np.zeros((nvf * 4, 3), dtype=self.np_float_type))
+                edge_vertices_r = np.zeros((nve * 2, 3), dtype=self.np_float_type)
+                face_vertices_r = np.zeros((nvf * 4, 3), dtype=self.np_float_type)
                 self.get_lr_extra_verts(self.AF(edge_vertices_lr), self.AF(edge_vertices_r), self.AF(face_vertices_lr), self.AF(face_vertices_r))
                 esdf_l = self.kernel_caller(k_e, edge_vertices_lr)
                 esdf_r = self.kernel_caller(k_e, edge_vertices_r)
@@ -228,7 +228,7 @@ class OcMesher:
                 face_vertices = np.zeros((nvf, 3), dtype=self.np_float_type)
                 self.finalize_extra_verts(self.sdf_AF(esdf_l), self.sdf_AF(esdf_r), self.AF(edge_vertices), self.sdf_AF(fsdf_l), self.sdf_AF(fsdf_r), self.AF(face_vertices))
                 del esdf_l, esdf_r, fsdf_l, fsdf_r
-                faces = AC(np.zeros((nf, 3), dtype=np.int32))
+                faces = np.zeros((nf, 3), dtype=np.int32)
                 self.get_faces(AsInt(faces))
                 vertices = np.concatenate((vertices, edge_vertices, face_vertices))
                 in_view_tag = np.zeros(vertices.shape[0], dtype=bool)
