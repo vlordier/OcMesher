@@ -726,6 +726,11 @@ class TorchOcMesher:
         extent = self.bounds_max - self.bounds_min
         self.size = float(extent.max().item() * 1.1)
 
+        # Pre-compute the world-space origin used in coordinate conversion.
+        # _cube_centers and _cube_corner_positions both need (center - size/2);
+        # computing it once here avoids a subtraction on every call.
+        self._origin = self.center - self.size / 2  # (3,)
+
         # Meshing parameters -------------------------------------------------
         self.pixels_per_cube = pixels_per_cube
         self.inv_scale = inv_scale
@@ -745,7 +750,9 @@ class TorchOcMesher:
 
         # Pre-compute projection angular threshold for _projected_sizes.
         # This avoids recomputing the product every call.
-        self._pix_ang_ppc = self._pix_ang * self.pixels_per_cube  # (C,)
+        # Shape (C, 1): pre-expanded so _projected_sizes skips unsqueeze(1)
+        # on every invocation (called 30+ times in _build_coarse_octree).
+        self._pix_ang_ppc = (self._pix_ang * self.pixels_per_cube).unsqueeze(1)  # (C, 1)
 
         # Pre-compute combined K @ inv_pose for visibility filter -------------
         # This avoids two separate matmuls per camera in _visibility_filter.
@@ -867,7 +874,7 @@ class TorchOcMesher:
         """
         # exp2 computes 2^level directly - avoids temporary ones_like tensor.
         scale = (self.size / torch.exp2(levels.to(self._fdtype))).unsqueeze(1)
-        return self.center.unsqueeze(0) - self.size / 2 + scale * (coords.to(dtype=self._fdtype) + 0.5)
+        return self._origin.unsqueeze(0) + scale * (coords.to(dtype=self._fdtype) + 0.5)
 
     @torch.no_grad()
     def _cube_corner_positions(self, coords: torch.Tensor, levels: torch.Tensor) -> torch.Tensor:
@@ -878,7 +885,7 @@ class TorchOcMesher:
         """
         corner_coords = coords.unsqueeze(1) + self._corner_offsets.unsqueeze(0)
         scale = (self.size / torch.exp2(levels.to(self._fdtype))).unsqueeze(1).unsqueeze(2)
-        return self.center.unsqueeze(0).unsqueeze(0) - self.size / 2 + scale * corner_coords.to(dtype=self._fdtype)
+        return self._origin.unsqueeze(0).unsqueeze(0) + scale * corner_coords.to(dtype=self._fdtype)
 
     # ------------------------------------------------------------------
     # Batched projection (all cameras at once)
@@ -902,8 +909,7 @@ class TorchOcMesher:
         cam_coords = torch.einsum("cij,nj->cni", self._inv_pose_R, positions) + self._inv_pose_t
 
         r = cam_coords.norm(dim=2).clamp(min=self.min_dist)  # (C, N)
-        ang = self._pix_ang_ppc.unsqueeze(1)  # (C, 1) pre-computed
-        proj = cube_sizes.unsqueeze(0) / r / ang  # (C, N)
+        proj = cube_sizes.unsqueeze(0) / r / self._pix_ang_ppc  # (C, N) — already (C, 1)
         return proj.max(dim=0).values  # (N,)
 
     # ------------------------------------------------------------------
