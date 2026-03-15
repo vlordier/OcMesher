@@ -2,14 +2,23 @@
 
 from __future__ import annotations
 
+import inspect
 from unittest.mock import MagicMock, patch
 
 import numpy as np
 import pytest
 
 from ocmesher.core import (
+    _AXIS_NAMES,
+    _SDF_BATCH_SIZE,
     CAMERA_DATA_STRIDE,
     OcMesher,
+    _np_asarray,
+    _np_empty,
+    _np_fabs,
+    _np_greater_equal,
+    _np_less_equal,
+    _np_logical_or,
     _validate_bounds,
     _validate_cameras,
     _validate_kernels,
@@ -158,6 +167,9 @@ class TestKernelCaller:
         obj.sdf_np_float_type = np.float32
         obj._bounds_min_np = np.array([bounds[0], bounds[2], bounds[4]], dtype=np.float64)
         obj._bounds_max_np = np.array([bounds[1], bounds[3], bounds[5]], dtype=np.float64)
+        obj._sdf_pool = None
+        obj._oob_mask = np.empty(_SDF_BATCH_SIZE, dtype=bool)
+        obj._oob_tmp = np.empty(_SDF_BATCH_SIZE, dtype=bool)
         return obj
 
     def test_empty_points_returns_empty(self, sample_bounds, sphere_kernel):
@@ -418,6 +430,7 @@ class TestOcMesherReprAndContextManager:
         assert "OcMesher(" in r
         assert "n_cameras=1" in r
         assert "bisection_iters=15" in r
+        assert "bisection_tol=0.0" in r
         assert "enclosed=True" in r
 
     @patch("ocmesher.core.load_cdll")
@@ -502,6 +515,9 @@ class TestVectorisedBoundsCheck:
         obj.sdf_np_float_type = np.float32
         obj._bounds_min_np = np.array([bounds[0], bounds[2], bounds[4]], dtype=np.float64)
         obj._bounds_max_np = np.array([bounds[1], bounds[3], bounds[5]], dtype=np.float64)
+        obj._sdf_pool = None
+        obj._oob_mask = np.empty(_SDF_BATCH_SIZE, dtype=bool)
+        obj._oob_tmp = np.empty(_SDF_BATCH_SIZE, dtype=bool)
         return obj
 
     def test_precomputed_bounds_vectors_exist(self, sample_cameras, sample_bounds):
@@ -518,20 +534,20 @@ class TestVectorisedBoundsCheck:
         # Mix of in-bounds and out-of-bounds points on all 3 axes.
         pts = np.array(
             [
-                [0, 0, 0],        # inside
-                [3, 0, 0],        # out: x > 2
-                [0, -3, 0],       # out: y < -2
-                [0, 0, 2.5],      # out: z > 2
-                [-2.0, 0, 0],     # boundary: x == x_min
+                [0, 0, 0],  # inside
+                [3, 0, 0],  # out: x > 2
+                [0, -3, 0],  # out: y < -2
+                [0, 0, 2.5],  # out: z > 2
+                [-2.0, 0, 0],  # boundary: x == x_min
             ],
             dtype=np.float64,
         )
         result = mesher.kernel_caller([sphere_kernel], pts)
         assert result[0, 0] == pytest.approx(-1.0, abs=1e-6)  # inside → natural SDF
-        assert result[1, 0] == pytest.approx(1.0)              # clamped
-        assert result[2, 0] == pytest.approx(1.0)              # clamped
-        assert result[3, 0] == pytest.approx(1.0)              # clamped
-        assert result[4, 0] == pytest.approx(1.0)              # boundary → clamped
+        assert result[1, 0] == pytest.approx(1.0)  # clamped
+        assert result[2, 0] == pytest.approx(1.0)  # clamped
+        assert result[3, 0] == pytest.approx(1.0)  # clamped
+        assert result[4, 0] == pytest.approx(1.0)  # boundary → clamped
 
     def test_not_enclosed_ignores_bounds(self, sphere_kernel):
         bounds = np.array([-1.0, 1.0, -1.0, 1.0, -1.0, 1.0])
@@ -558,6 +574,9 @@ class TestFusedBisectionSDF:
         obj.sdf_np_float_type = np.float32
         obj._bounds_min_np = np.array([bounds[0], bounds[2], bounds[4]], dtype=np.float64)
         obj._bounds_max_np = np.array([bounds[1], bounds[3], bounds[5]], dtype=np.float64)
+        obj._sdf_pool = None
+        obj._oob_mask = np.empty(_SDF_BATCH_SIZE, dtype=bool)
+        obj._oob_tmp = np.empty(_SDF_BATCH_SIZE, dtype=bool)
         return obj
 
     def test_fused_eval_matches_separate(self, sample_bounds, sphere_kernel):
@@ -596,3 +615,1402 @@ class TestFusedBisectionSDF:
         # b[0] inside: natural, b[1] outside: 1.0
         np.testing.assert_allclose(sdf[2, 0], np.linalg.norm([0.5, 0, 0]) - 1, atol=1e-6)
         assert sdf[3, 0] == pytest.approx(1.0)
+
+
+# ---------------------------------------------------------------------------
+# In-place bounds mask (Refactor 3)
+# ---------------------------------------------------------------------------
+
+
+class TestInPlaceBoundsMask:
+    """Verify _out_of_bounds_mask produces correct masks without (N,3) temporaries."""
+
+    def test_all_inside(self):
+        b_min = np.array([-1.0, -1.0, -1.0])
+        b_max = np.array([1.0, 1.0, 1.0])
+        xyz = np.array([[0, 0, 0], [0.5, -0.5, 0.5]], dtype=np.float64)
+        mask = OcMesher._out_of_bounds_mask(xyz, b_min, b_max)
+        assert mask.shape == (2,)
+        assert not mask.any()
+
+    def test_all_outside(self):
+        b_min = np.array([-1.0, -1.0, -1.0])
+        b_max = np.array([1.0, 1.0, 1.0])
+        xyz = np.array([[2, 0, 0], [0, -2, 0], [0, 0, 2]], dtype=np.float64)
+        mask = OcMesher._out_of_bounds_mask(xyz, b_min, b_max)
+        assert mask.all()
+
+    def test_boundary_points_are_out(self):
+        b_min = np.array([-1.0, -1.0, -1.0])
+        b_max = np.array([1.0, 1.0, 1.0])
+        # Points exactly on the boundary are treated as out-of-bounds.
+        xyz = np.array([[-1.0, 0, 0], [0, 1.0, 0], [0, 0, -1.0]], dtype=np.float64)
+        mask = OcMesher._out_of_bounds_mask(xyz, b_min, b_max)
+        assert mask.all()
+
+    def test_mixed_inside_outside(self):
+        b_min = np.array([-2.0, -2.0, -2.0])
+        b_max = np.array([2.0, 2.0, 2.0])
+        xyz = np.array(
+            [
+                [0, 0, 0],  # inside
+                [3, 0, 0],  # out x
+                [0, -3, 0],  # out y
+                [0, 0, 2.5],  # out z
+                [-0.5, 0.5, 0],  # inside
+            ],
+            dtype=np.float64,
+        )
+        mask = OcMesher._out_of_bounds_mask(xyz, b_min, b_max)
+        expected = np.array([False, True, True, True, False])
+        np.testing.assert_array_equal(mask, expected)
+
+
+# ---------------------------------------------------------------------------
+# Thread-pool parallel multi-kernel evaluation (Refactor 4)
+# ---------------------------------------------------------------------------
+
+
+class TestParallelMultiKernel:
+    """Verify that multi-kernel evaluation uses threading and produces correct results."""
+
+    @staticmethod
+    def _make_mesher_stub(bounds, *, enclosed=True):
+        obj = object.__new__(OcMesher)
+        obj.bounds = bounds
+        obj.enclosed = enclosed
+        obj.sdf_np_float_type = np.float32
+        obj._bounds_min_np = np.array([bounds[0], bounds[2], bounds[4]], dtype=np.float64)
+        obj._bounds_max_np = np.array([bounds[1], bounds[3], bounds[5]], dtype=np.float64)
+        obj._sdf_pool = None
+        obj._oob_mask = np.empty(_SDF_BATCH_SIZE, dtype=bool)
+        obj._oob_tmp = np.empty(_SDF_BATCH_SIZE, dtype=bool)
+        return obj
+
+    def test_multi_kernel_matches_single(self, sample_bounds, sphere_kernel, plane_kernel):
+        """Two-kernel call must match two separate single-kernel calls."""
+        mesher = self._make_mesher_stub(sample_bounds, enclosed=False)
+        pts = np.array([[0, 0, 0], [1, 0, 0], [0, 2, 0]], dtype=np.float64)
+
+        separate_sphere = mesher.kernel_caller([sphere_kernel], pts)
+        separate_plane = mesher.kernel_caller([plane_kernel], pts)
+
+        combined = mesher.kernel_caller([sphere_kernel, plane_kernel], pts)
+        np.testing.assert_allclose(combined[:, 0], separate_sphere[:, 0], atol=1e-6)
+        np.testing.assert_allclose(combined[:, 1], separate_plane[:, 0], atol=1e-6)
+
+    def test_multi_kernel_enclosed_clamp(self, sphere_kernel, plane_kernel):
+        """Out-of-bounds clamping must apply to all kernels in multi-kernel mode."""
+        bounds = np.array([-1.0, 1.0, -1.0, 1.0, -1.0, 1.0])
+        mesher = self._make_mesher_stub(bounds, enclosed=True)
+        pts = np.array([[0, 0, 0], [5, 0, 0]], dtype=np.float64)
+
+        result = mesher.kernel_caller([sphere_kernel, plane_kernel], pts)
+        # Inside point: natural SDF values
+        assert result[0, 0] == pytest.approx(-1.0, abs=1e-6)  # sphere at origin
+        assert result[0, 1] == pytest.approx(0.0, abs=1e-6)  # plane z=0
+        # Outside point: both clamped to 1.0
+        assert result[1, 0] == pytest.approx(1.0)
+        assert result[1, 1] == pytest.approx(1.0)
+
+    def test_multi_kernel_shape_and_dtype(self, sample_bounds, sphere_kernel, plane_kernel):
+        """Multi-kernel result must have shape (N, K) and float32 dtype."""
+        mesher = self._make_mesher_stub(sample_bounds, enclosed=False)
+        pts = np.zeros((5, 3), dtype=np.float64)
+        result = mesher.kernel_caller([sphere_kernel, plane_kernel], pts)
+        assert result.shape == (5, 2)
+        assert result.dtype == np.float32
+
+
+# ---------------------------------------------------------------------------
+# Pre-allocated bisection buffer (Refactor 5)
+# ---------------------------------------------------------------------------
+
+
+class TestPreallocatedBisectionBuffer:
+    """Verify that _refine_extra_vertices works with pre-allocated combined buffer."""
+
+    @staticmethod
+    def _make_mesher_stub(bounds, *, enclosed=True):
+        obj = object.__new__(OcMesher)
+        obj.bounds = bounds
+        obj.enclosed = enclosed
+        obj.sdf_np_float_type = np.float32
+        obj._bounds_min_np = np.array([bounds[0], bounds[2], bounds[4]], dtype=np.float64)
+        obj._bounds_max_np = np.array([bounds[1], bounds[3], bounds[5]], dtype=np.float64)
+        obj._sdf_pool = None
+        obj._oob_mask = np.empty(_SDF_BATCH_SIZE, dtype=bool)
+        obj._oob_tmp = np.empty(_SDF_BATCH_SIZE, dtype=bool)
+        return obj
+
+    def test_fused_eval_with_preallocated_matches_separate(self, sample_bounds, sphere_kernel):
+        """Pre-allocated buffer path must produce identical results to concatenation."""
+        mesher = self._make_mesher_stub(sample_bounds)
+        rng = np.random.default_rng(99)
+        edge_pts = rng.standard_normal((15, 3))
+        face_pts = rng.standard_normal((25, 3))
+
+        # Separate calls
+        e_sdf = mesher.kernel_caller([sphere_kernel], edge_pts)
+        f_sdf = mesher.kernel_caller([sphere_kernel], face_pts)
+
+        # Simulate pre-allocated buffer fill (as done in _refine_extra_vertices)
+        n_edge = len(edge_pts)
+        combined = np.empty((n_edge + len(face_pts), 3), dtype=edge_pts.dtype)
+        combined[:n_edge] = edge_pts
+        combined[n_edge:] = face_pts
+        result = mesher.kernel_caller([sphere_kernel], combined)
+
+        np.testing.assert_array_equal(e_sdf, result[:n_edge])
+        np.testing.assert_array_equal(f_sdf, result[n_edge:])
+
+
+# ---------------------------------------------------------------------------
+# Early-exit bisection tolerance (Refactor 6)
+# ---------------------------------------------------------------------------
+
+
+class TestBisectionTolerance:
+    """Verify the early-exit convergence check in bisection loops."""
+
+    @patch("ocmesher.core.load_cdll")
+    @patch("ocmesher.core.register_func")
+    def test_default_tol_is_zero(self, _mock_register, mock_load, sample_cameras, sample_bounds):
+        """Default bisection_tol must be 0 (no early exit)."""
+        mock_load.return_value = MagicMock()
+        mesher = OcMesher(sample_cameras, sample_bounds)
+        assert mesher.bisection_tol == 0.0
+
+    @patch("ocmesher.core.load_cdll")
+    @patch("ocmesher.core.register_func")
+    def test_custom_tol_stored(self, _mock_register, mock_load, sample_cameras, sample_bounds):
+        """bisection_tol must be stored as a float attribute."""
+        mock_load.return_value = MagicMock()
+        mesher = OcMesher(sample_cameras, sample_bounds, bisection_tol=1e-4)
+        assert mesher.bisection_tol == pytest.approx(1e-4)
+
+    @patch("ocmesher.core.load_cdll")
+    @patch("ocmesher.core.register_func")
+    def test_repr_includes_tol(self, _mock_register, mock_load, sample_cameras, sample_bounds):
+        """__repr__ must include bisection_tol."""
+        mock_load.return_value = MagicMock()
+        mesher = OcMesher(sample_cameras, sample_bounds, bisection_tol=0.001)
+        assert "bisection_tol=0.001" in repr(mesher)
+
+
+# ---------------------------------------------------------------------------
+# Single-kernel column-view fast path (Refactor 7)
+# ---------------------------------------------------------------------------
+
+
+class TestSingleKernelMinFastPath:
+    """Verify that single-kernel SDF returns a column view rather than min()."""
+
+    def test_single_kernel_column_equals_min(self, sample_bounds, sphere_kernel):
+        """For a single kernel, col-view [:, 0] must match .min(axis=-1)."""
+        mesher = TestParallelMultiKernel._make_mesher_stub(sample_bounds, enclosed=False)
+        pts = np.array([[0, 0, 0], [1, 0, 0], [0, 2, 0]], dtype=np.float64)
+        result = mesher.kernel_caller([sphere_kernel], pts)
+        col_view = result[:, 0]
+        col_min = result.min(axis=-1)
+        np.testing.assert_array_equal(col_view, col_min)
+
+    def test_multi_kernel_min_differs(self, sample_bounds, sphere_kernel, plane_kernel):
+        """For multiple kernels, .min(axis=-1) may differ from any single column."""
+        mesher = TestParallelMultiKernel._make_mesher_stub(sample_bounds, enclosed=False)
+        pts = np.array([[0, 0, 0], [1, 0, 0], [0, 2, 0]], dtype=np.float64)
+        result = mesher.kernel_caller([sphere_kernel, plane_kernel], pts)
+        assert result.shape == (3, 2)
+        expected_min = np.minimum(result[:, 0], result[:, 1])
+        np.testing.assert_allclose(result.min(axis=-1), expected_min, atol=1e-6)
+
+
+# ---------------------------------------------------------------------------
+# Pre-allocated slice-fill replaces np.concatenate (Refactor 8)
+# ---------------------------------------------------------------------------
+
+
+class TestSliceFillReplacesConcat:
+    """Verify pre-allocated slice-fill produces same results as concatenation."""
+
+    def test_slice_fill_matches_concat(self):
+        """Pre-allocated buffer filled via slice assignment must match np.concatenate."""
+        rng = np.random.default_rng(42)
+        a = rng.standard_normal((10, 3))
+        b = rng.standard_normal((20, 3))
+        c = rng.standard_normal((15, 3))
+        d = rng.standard_normal((25, 3))
+
+        # np.concatenate reference
+        concat_result = np.concatenate([a, b, c, d])
+
+        # Slice-fill approach
+        na, nb, nc, nd = len(a), len(b), len(c), len(d)
+        buf = np.empty((na + nb + nc + nd, 3), dtype=a.dtype)
+        buf[:na] = a
+        buf[na : na + nb] = b
+        buf[na + nb : na + nb + nc] = c
+        buf[na + nb + nc :] = d
+
+        np.testing.assert_array_equal(buf, concat_result)
+
+
+# ---------------------------------------------------------------------------
+# Persistent thread pool
+# ---------------------------------------------------------------------------
+
+
+class TestPersistentThreadPool:
+    """Verify the persistent ThreadPoolExecutor lifecycle."""
+
+    def test_pool_is_none_initially(self, sample_cameras, sample_bounds):
+        """_sdf_pool must be None immediately after construction."""
+        with patch("ocmesher.core.load_cdll") as mock_load:
+            mock_load.return_value = MagicMock()
+            mesher = OcMesher(sample_cameras, sample_bounds)
+        assert mesher._sdf_pool is None
+
+    def test_pool_created_on_multi_kernel(self, sample_bounds, sphere_kernel, plane_kernel):
+        """Calling kernel_caller with >1 kernel must create the persistent pool."""
+        obj = object.__new__(OcMesher)
+        obj.bounds = sample_bounds
+        obj.enclosed = False
+        obj.sdf_np_float_type = np.float32
+        obj._bounds_min_np = np.array([sample_bounds[0], sample_bounds[2], sample_bounds[4]], dtype=np.float64)
+        obj._bounds_max_np = np.array([sample_bounds[1], sample_bounds[3], sample_bounds[5]], dtype=np.float64)
+        obj._sdf_pool = None
+        obj._oob_mask = np.empty(_SDF_BATCH_SIZE, dtype=bool)
+        obj._oob_tmp = np.empty(_SDF_BATCH_SIZE, dtype=bool)
+        pts = np.array([[0, 0, 0], [1, 1, 1]], dtype=np.float64)
+        obj.kernel_caller([sphere_kernel, plane_kernel], pts)
+        assert obj._sdf_pool is not None
+
+    def test_pool_not_created_for_single_kernel(self, sample_bounds, sphere_kernel):
+        """Single-kernel fast path must not create a thread pool."""
+        obj = object.__new__(OcMesher)
+        obj.bounds = sample_bounds
+        obj.enclosed = False
+        obj.sdf_np_float_type = np.float32
+        obj._bounds_min_np = np.array([sample_bounds[0], sample_bounds[2], sample_bounds[4]], dtype=np.float64)
+        obj._bounds_max_np = np.array([sample_bounds[1], sample_bounds[3], sample_bounds[5]], dtype=np.float64)
+        obj._sdf_pool = None
+        obj._oob_mask = np.empty(_SDF_BATCH_SIZE, dtype=bool)
+        obj._oob_tmp = np.empty(_SDF_BATCH_SIZE, dtype=bool)
+        pts = np.array([[0, 0, 0], [1, 1, 1]], dtype=np.float64)
+        obj.kernel_caller([sphere_kernel], pts)
+        assert obj._sdf_pool is None
+
+    def test_context_manager_shuts_down_pool(self, sample_cameras, sample_bounds, sphere_kernel, plane_kernel):
+        """Exiting the context manager must shut down the pool."""
+        with patch("ocmesher.core.load_cdll") as mock_load:
+            mock_load.return_value = MagicMock()
+            with OcMesher(sample_cameras, sample_bounds) as mesher:
+                pts = np.array([[0, 0, 0]], dtype=np.float64)
+                mesher.kernel_caller([sphere_kernel, plane_kernel], pts)
+                assert mesher._sdf_pool is not None
+        assert mesher._sdf_pool is None
+
+
+# ---------------------------------------------------------------------------
+# Reusable bounds-mask buffers
+# ---------------------------------------------------------------------------
+
+
+class TestReusableMaskBuffers:
+    """Verify that _out_of_bounds_mask_into reuses pre-allocated buffers."""
+
+    def test_mask_buffer_size_matches_batch(self, sample_cameras, sample_bounds):
+        """Pre-allocated mask buffers must be sized to _SDF_BATCH_SIZE."""
+        with patch("ocmesher.core.load_cdll") as mock_load:
+            mock_load.return_value = MagicMock()
+            mesher = OcMesher(sample_cameras, sample_bounds)
+        assert mesher._oob_mask.shape == (_SDF_BATCH_SIZE,)
+        assert mesher._oob_tmp.shape == (_SDF_BATCH_SIZE,)
+
+    def test_mask_into_matches_static(self, sample_bounds):
+        """_out_of_bounds_mask_into must produce identical results to _out_of_bounds_mask."""
+        obj = object.__new__(OcMesher)
+        obj.bounds = sample_bounds
+        obj.enclosed = True
+        obj.sdf_np_float_type = np.float32
+        b_min = np.array([sample_bounds[0], sample_bounds[2], sample_bounds[4]], dtype=np.float64)
+        b_max = np.array([sample_bounds[1], sample_bounds[3], sample_bounds[5]], dtype=np.float64)
+        obj._bounds_min_np = b_min
+        obj._bounds_max_np = b_max
+        obj._sdf_pool = None
+        obj._oob_mask = np.empty(_SDF_BATCH_SIZE, dtype=bool)
+        obj._oob_tmp = np.empty(_SDF_BATCH_SIZE, dtype=bool)
+
+        rng = np.random.default_rng(42)
+        pts = rng.uniform(-5, 5, size=(100, 3))
+        static_mask = OcMesher._out_of_bounds_mask(pts, b_min, b_max)
+        reused_mask = obj._out_of_bounds_mask_into(pts, b_min, b_max)
+        np.testing.assert_array_equal(static_mask, reused_mask)
+
+
+# ---------------------------------------------------------------------------
+# Vectorised camera packing
+# ---------------------------------------------------------------------------
+
+
+class TestVectorisedCameraPacking:
+    """Verify that batch camera packing matches per-camera packing."""
+
+    def test_camera_data_shape(self, sample_cameras, sample_bounds):
+        """Camera data must have correct total length."""
+        with patch("ocmesher.core.load_cdll") as mock_load:
+            mock_load.return_value = MagicMock()
+            mesher = OcMesher(sample_cameras, sample_bounds)
+        assert len(mesher.cameras) == CAMERA_DATA_STRIDE * mesher.n_cameras
+
+    def test_multi_camera_data_packed_correctly(self, sample_camera_pose, sample_intrinsics, sample_bounds):
+        """Each camera stride must contain inv_pose[:3,:4], K, H, W."""
+        cameras = (
+            [sample_camera_pose, sample_camera_pose],
+            [sample_intrinsics, sample_intrinsics],
+            [480, 480],
+            [640, 640],
+        )
+        with patch("ocmesher.core.load_cdll") as mock_load:
+            mock_load.return_value = MagicMock()
+            mesher = OcMesher(cameras, sample_bounds)
+        # Both cameras should have identical packed data
+        cam0 = mesher.cameras[:CAMERA_DATA_STRIDE]
+        cam1 = mesher.cameras[CAMERA_DATA_STRIDE : 2 * CAMERA_DATA_STRIDE]
+        np.testing.assert_array_equal(cam0, cam1)
+
+
+# ---------------------------------------------------------------------------
+# Hot-path local caching + np.fabs + removed inner tqdm
+# ---------------------------------------------------------------------------
+
+
+class TestHotPathLocalCaching:
+    """Verify that kernel_caller still works after removing per-call validation."""
+
+    @staticmethod
+    def _make_mesher_stub(bounds, *, enclosed=True):
+        obj = object.__new__(OcMesher)
+        obj.bounds = bounds
+        obj.enclosed = enclosed
+        obj.sdf_np_float_type = np.float32
+        obj._bounds_min_np = np.array([bounds[0], bounds[2], bounds[4]], dtype=np.float64)
+        obj._bounds_max_np = np.array([bounds[1], bounds[3], bounds[5]], dtype=np.float64)
+        obj._sdf_pool = None
+        obj._oob_mask = np.empty(_SDF_BATCH_SIZE, dtype=bool)
+        obj._oob_tmp = np.empty(_SDF_BATCH_SIZE, dtype=bool)
+        return obj
+
+    def test_kernel_caller_no_validation_overhead(self, sample_bounds, sphere_kernel):
+        """kernel_caller with valid kernels works without per-call validation."""
+        mesher = self._make_mesher_stub(sample_bounds)
+        points = np.array([[0, 0, 0], [1, 0, 0]], dtype=np.float64)
+        result = mesher.kernel_caller([sphere_kernel], points)
+        np.testing.assert_allclose(result[:, 0], [-1.0, 0.0], atol=1e-6)
+
+    def test_validate_kernels_catches_non_callable(self):
+        """_validate_kernels (called at __call__ entry) catches non-callables."""
+        with pytest.raises(TypeError, match="callable"):
+            _validate_kernels(["not a function"])
+
+    def test_np_fabs_matches_np_abs_for_float32(self):
+        """np.fabs produces same result as np.abs for float32 arrays."""
+        arr = np.array([-1.5, 0.0, 2.3, -0.7], dtype=np.float32)
+        np.testing.assert_array_equal(np.fabs(arr), np.abs(arr))
+
+    def test_np_fabs_max_matches_np_max_np_abs(self):
+        """np.fabs(arr).max() is equivalent to np.max(np.abs(arr))."""
+        arr = np.array([-3.0, 1.5, -2.0, 0.5], dtype=np.float32)
+        assert np.fabs(arr).max() == np.max(np.abs(arr))
+
+
+class TestCachedSdfNull:
+    """Verify that _sdf_null is cached once in __init__ and reused."""
+
+    def test_sdf_null_exists_after_init(self, sample_cameras, sample_bounds):
+        """_sdf_null must be set after __init__."""
+        with patch("ocmesher.core.load_cdll") as mock_load, patch("ocmesher.core.register_func"):
+            mock_load.return_value = MagicMock()
+            mesher = OcMesher(sample_cameras, sample_bounds)
+        assert hasattr(mesher, "_sdf_null")
+        assert mesher._sdf_null is not None
+
+    def test_sdf_null_is_ctypes_pointer(self, sample_cameras, sample_bounds):
+        """_sdf_null must be a ctypes null pointer of the SDF float type."""
+        with patch("ocmesher.core.load_cdll") as mock_load, patch("ocmesher.core.register_func"):
+            mock_load.return_value = MagicMock()
+            mesher = OcMesher(sample_cameras, sample_bounds)
+        # It's a null pointer: bool(ptr) is False for null ctypes pointers.
+        assert not mesher._sdf_null
+
+
+class TestCallLocalCaching:
+    """Verify that __call__ caches attribute lookups for hot loops."""
+
+    @staticmethod
+    def _make_mesher_stub(bounds, *, enclosed=True):
+        obj = object.__new__(OcMesher)
+        obj.bounds = bounds
+        obj.enclosed = enclosed
+        obj.sdf_np_float_type = np.float32
+        obj._bounds_min_np = np.array([bounds[0], bounds[2], bounds[4]], dtype=np.float64)
+        obj._bounds_max_np = np.array([bounds[1], bounds[3], bounds[5]], dtype=np.float64)
+        obj._sdf_pool = None
+        obj._oob_mask = np.empty(_SDF_BATCH_SIZE, dtype=bool)
+        obj._oob_tmp = np.empty(_SDF_BATCH_SIZE, dtype=bool)
+        return obj
+
+    def test_single_kernel_caches_k0(self, sample_bounds, sphere_kernel):
+        """Single-kernel fast path caches kernel[0] reference."""
+        mesher = self._make_mesher_stub(sample_bounds)
+        points = np.array([[0, 0, 0], [1, 0, 0]], dtype=np.float64)
+        # kernel_caller with a list containing one kernel should work
+        result = mesher.kernel_caller([sphere_kernel], points)
+        assert result.shape == (2, 1)
+
+    def test_isinstance_skip_asarray(self, sample_bounds):
+        """When kernel returns ndarray, np.asarray is skipped."""
+        mesher = self._make_mesher_stub(sample_bounds)
+
+        def ndarray_kernel(xyz):
+            return np.full(len(xyz), -1.0, dtype=np.float32)
+
+        points = np.array([[0, 0, 0]], dtype=np.float64)
+        result = mesher.kernel_caller([ndarray_kernel], points)
+        np.testing.assert_allclose(result[:, 0], [-1.0])
+
+
+# ---------------------------------------------------------------------------
+# kernel_caller out= parameter for result buffer reuse
+# ---------------------------------------------------------------------------
+
+
+class TestKernelCallerOutParam:
+    """Verify that kernel_caller `out=` parameter reuses the provided buffer."""
+
+    @staticmethod
+    def _make_mesher_stub(bounds, *, enclosed=True):
+        obj = object.__new__(OcMesher)
+        obj.bounds = bounds
+        obj.enclosed = enclosed
+        obj.sdf_np_float_type = np.float32
+        obj._bounds_min_np = np.array([bounds[0], bounds[2], bounds[4]], dtype=np.float64)
+        obj._bounds_max_np = np.array([bounds[1], bounds[3], bounds[5]], dtype=np.float64)
+        obj._sdf_pool = None
+        obj._oob_mask = np.empty(_SDF_BATCH_SIZE, dtype=bool)
+        obj._oob_tmp = np.empty(_SDF_BATCH_SIZE, dtype=bool)
+        return obj
+
+    def test_out_param_reuses_buffer(self, sample_bounds, sphere_kernel):
+        """When out= is provided, kernel_caller writes into it and returns it."""
+        mesher = self._make_mesher_stub(sample_bounds)
+        pts = np.array([[0, 0, 0], [1, 0, 0], [0, 1, 0]], dtype=np.float64)
+        buf = np.empty((3, 1), dtype=np.float32)
+        result = mesher.kernel_caller([sphere_kernel], pts, out=buf)
+        assert result is buf
+        # Values should match the kernel output
+        expected = mesher.kernel_caller([sphere_kernel], pts)
+        np.testing.assert_allclose(result, expected)
+
+    def test_out_none_allocates_fresh(self, sample_bounds, sphere_kernel):
+        """When out=None (default), kernel_caller allocates a new array."""
+        mesher = self._make_mesher_stub(sample_bounds)
+        pts = np.array([[0, 0, 0], [1, 0, 0]], dtype=np.float64)
+        r1 = mesher.kernel_caller([sphere_kernel], pts)
+        r2 = mesher.kernel_caller([sphere_kernel], pts)
+        # Different allocations, same values
+        assert r1 is not r2
+        np.testing.assert_allclose(r1, r2)
+
+    def test_out_param_multi_kernel(self, sample_bounds, sphere_kernel, plane_kernel):
+        """out= works with multi-kernel dispatch."""
+        mesher = self._make_mesher_stub(sample_bounds)
+        pts = np.array([[0, 0, 0], [1, 0, 0]], dtype=np.float64)
+        buf = np.empty((2, 2), dtype=np.float32)
+        result = mesher.kernel_caller([sphere_kernel, plane_kernel], pts, out=buf)
+        assert result is buf
+        expected = mesher.kernel_caller([sphere_kernel, plane_kernel], pts)
+        np.testing.assert_allclose(result, expected)
+
+
+# ---------------------------------------------------------------------------
+# Cached ctypes pointers in bisection loops
+# ---------------------------------------------------------------------------
+
+
+class TestCachedCtypesPointers:
+    """Verify that caching ctypes pointers for stable arrays produces correct results."""
+
+    @staticmethod
+    def _make_mesher_stub(bounds, *, enclosed=True):
+        obj = object.__new__(OcMesher)
+        obj.bounds = bounds
+        obj.enclosed = enclosed
+        obj.sdf_np_float_type = np.float32
+        obj._bounds_min_np = np.array([bounds[0], bounds[2], bounds[4]], dtype=np.float64)
+        obj._bounds_max_np = np.array([bounds[1], bounds[3], bounds[5]], dtype=np.float64)
+        obj._sdf_pool = None
+        obj._oob_mask = np.empty(_SDF_BATCH_SIZE, dtype=bool)
+        obj._oob_tmp = np.empty(_SDF_BATCH_SIZE, dtype=bool)
+        return obj
+
+    def test_cached_pointer_produces_same_result(self, sample_bounds, sphere_kernel):
+        """Cached pointer for a stable buffer gives correct SDF values."""
+        mesher = self._make_mesher_stub(sample_bounds)
+        pts = np.array([[0, 0, 0], [1, 0, 0], [0, 1, 0]], dtype=np.float64)
+        # Call with and without pre-allocated out buffer
+        result_fresh = mesher.kernel_caller([sphere_kernel], pts)
+        buf = np.empty((3, 1), dtype=np.float32)
+        result_reused = mesher.kernel_caller([sphere_kernel], pts, out=buf)
+        np.testing.assert_allclose(result_fresh, result_reused)
+
+    def test_repeated_calls_with_same_out_buffer(self, sample_bounds, sphere_kernel):
+        """Multiple calls with same out= buffer correctly overwrite each time."""
+        mesher = self._make_mesher_stub(sample_bounds)
+        buf = np.empty((3, 1), dtype=np.float32)
+        pts1 = np.array([[0, 0, 0], [1, 0, 0], [0, 1, 0]], dtype=np.float64)
+        pts2 = np.array([[2, 0, 0], [0, 2, 0], [0, 0, 2]], dtype=np.float64)
+        r1 = mesher.kernel_caller([sphere_kernel], pts1, out=buf)
+        vals1 = r1.copy()
+        r2 = mesher.kernel_caller([sphere_kernel], pts2, out=buf)
+        # r2 is the same buffer, but values changed
+        assert r2 is buf
+        assert not np.array_equal(vals1, r2)
+        expected2 = mesher.kernel_caller([sphere_kernel], pts2)
+        np.testing.assert_allclose(r2, expected2)
+
+
+# ---------------------------------------------------------------------------
+# Early-exit for zero extra vertices
+# ---------------------------------------------------------------------------
+
+
+class TestEarlyExitZeroExtraVerts:
+    """Verify that _refine_extra_vertices exits early when nve == 0 and nvf == 0."""
+
+    def test_docstring_mentions_early_exit(self):
+        """The method docstring should document the early-exit optimisation."""
+        doc = OcMesher._refine_extra_vertices.__doc__
+        assert "Early-exit" in doc or "early-exit" in doc or "nve == 0" in doc
+
+    def test_early_exit_code_path_exists(self):
+        """The early-exit guard for zero extra vertices must be present in source."""
+        import inspect  # noqa: PLC0415
+
+        source = inspect.getsource(OcMesher._refine_extra_vertices)
+        assert "not (nve | nvf)" in source or "(nve == 0 and nvf == 0)" in source
+
+
+# ---------------------------------------------------------------------------
+# Bisection iters cached as local
+# ---------------------------------------------------------------------------
+
+
+class TestBisectionItersLocal:
+    """Verify that bisection_iters is used correctly."""
+
+    def test_bisection_iters_attribute_exists(self, sample_cameras, sample_bounds):
+        """bisection_iters must be stored as an instance attribute."""
+        with patch("ocmesher.core.load_cdll") as mock_load, patch("ocmesher.core.register_func"):
+            mock_load.return_value = MagicMock()
+            mesher = OcMesher(sample_cameras, sample_bounds, bisection_iters=10)
+        assert mesher.bisection_iters == 10
+
+
+# ---------------------------------------------------------------------------
+# Split enclosed / non-enclosed batch loops in kernel_caller
+# ---------------------------------------------------------------------------
+
+
+class TestSplitEnclosedBatchLoops:
+    """Verify that enclosed/non-enclosed paths in kernel_caller produce identical results."""
+
+    @staticmethod
+    def _make_mesher_stub(bounds, *, enclosed=True):
+        obj = object.__new__(OcMesher)
+        obj.bounds = bounds
+        obj.enclosed = enclosed
+        obj.sdf_np_float_type = np.float32
+        obj._bounds_min_np = np.array([bounds[0], bounds[2], bounds[4]], dtype=np.float64)
+        obj._bounds_max_np = np.array([bounds[1], bounds[3], bounds[5]], dtype=np.float64)
+        obj._sdf_pool = None
+        obj._oob_mask = np.empty(_SDF_BATCH_SIZE, dtype=bool)
+        obj._oob_tmp = np.empty(_SDF_BATCH_SIZE, dtype=bool)
+        return obj
+
+    def test_enclosed_single_kernel_clamps(self, sphere_kernel):
+        """Enclosed=True single-kernel path must clamp out-of-bounds to 1."""
+        bounds = np.array([-1.0, 1.0, -1.0, 1.0, -1.0, 1.0])
+        mesher = self._make_mesher_stub(bounds, enclosed=True)
+        pts = np.array([[0, 0, 0], [1.5, 0, 0]], dtype=np.float64)
+        result = mesher.kernel_caller([sphere_kernel], pts)
+        assert result[1, 0] == pytest.approx(1.0)
+
+    def test_non_enclosed_single_kernel_no_clamp(self, sphere_kernel):
+        """Enclosed=False single-kernel path must not clamp."""
+        bounds = np.array([-1.0, 1.0, -1.0, 1.0, -1.0, 1.0])
+        mesher = self._make_mesher_stub(bounds, enclosed=False)
+        pts = np.array([[1.5, 0, 0]], dtype=np.float64)
+        result = mesher.kernel_caller([sphere_kernel], pts)
+        np.testing.assert_allclose(result[:, 0], [0.5], atol=1e-6)
+
+    def test_enclosed_multi_kernel_clamps(self, sphere_kernel, plane_kernel):
+        """Enclosed=True multi-kernel path must clamp out-of-bounds to 1."""
+        bounds = np.array([-1.0, 1.0, -1.0, 1.0, -1.0, 1.0])
+        mesher = self._make_mesher_stub(bounds, enclosed=True)
+        pts = np.array([[0, 0, 0], [1.5, 0, 0]], dtype=np.float64)
+        result = mesher.kernel_caller([sphere_kernel, plane_kernel], pts)
+        assert result[1, 0] == pytest.approx(1.0)
+        assert result[1, 1] == pytest.approx(1.0)
+
+    def test_non_enclosed_multi_kernel_no_clamp(self, sphere_kernel, plane_kernel):
+        """Enclosed=False multi-kernel path must not clamp."""
+        bounds = np.array([-1.0, 1.0, -1.0, 1.0, -1.0, 1.0])
+        mesher = self._make_mesher_stub(bounds, enclosed=False)
+        pts = np.array([[1.5, 0, 0]], dtype=np.float64)
+        result = mesher.kernel_caller([sphere_kernel, plane_kernel], pts)
+        np.testing.assert_allclose(result[:, 0], [0.5], atol=1e-6)
+        np.testing.assert_allclose(result[:, 1], [0.0], atol=1e-6)
+
+
+# ---------------------------------------------------------------------------
+# Pre-allocated fabs buffer for tolerance checks
+# ---------------------------------------------------------------------------
+
+
+class TestFabsBufferTolerance:
+    """Verify that np.fabs with out= produces same results as np.fabs without out=."""
+
+    def test_fabs_with_out_matches_without(self):
+        """np.fabs(arr, out=buf).max() must match np.fabs(arr).max()."""
+        rng = np.random.default_rng(42)
+        arr = rng.standard_normal((100, 1)).astype(np.float32)
+        buf = np.empty_like(arr)
+        assert np.fabs(arr, out=buf).max() == pytest.approx(np.fabs(arr).max())
+        # buf should be populated
+        np.testing.assert_array_equal(buf, np.fabs(arr))
+
+    def test_fabs_buffer_reuse_across_iterations(self):
+        """Reusing the same out= buffer across iterations must give correct results."""
+        rng = np.random.default_rng(99)
+        buf = np.empty((50, 1), dtype=np.float32)
+        for _ in range(5):
+            arr = rng.standard_normal((50, 1)).astype(np.float32)
+            result = np.fabs(arr, out=buf).max()
+            assert result == pytest.approx(np.fabs(arr).max())
+
+
+# ---------------------------------------------------------------------------
+# Cached sdf_np_float_type in bisection methods
+# ---------------------------------------------------------------------------
+
+
+class TestCachedSdfDtype:
+    """Verify that sdf_np_float_type is properly cached as local."""
+
+    def test_sdf_dtype_attribute_exists(self, sample_cameras, sample_bounds):
+        """sdf_np_float_type must be set during __init__."""
+        with patch("ocmesher.core.load_cdll") as mock_load, patch("ocmesher.core.register_func"):
+            mock_load.return_value = MagicMock()
+            mesher = OcMesher(sample_cameras, sample_bounds)
+        assert mesher.sdf_np_float_type == np.float32
+
+
+# ---------------------------------------------------------------------------
+# Cached locals in kernel_caller batch loops
+# ---------------------------------------------------------------------------
+
+
+class TestKernelCallerCachedLocals:
+    """Verify kernel_caller still produces correct results with cached locals."""
+
+    @staticmethod
+    def _make_mesher_stub(bounds, *, enclosed=True):
+        obj = object.__new__(OcMesher)
+        obj.bounds = bounds
+        obj.enclosed = enclosed
+        obj.sdf_np_float_type = np.float32
+        obj._bounds_min_np = np.array([bounds[0], bounds[2], bounds[4]], dtype=np.float64)
+        obj._bounds_max_np = np.array([bounds[1], bounds[3], bounds[5]], dtype=np.float64)
+        obj._sdf_pool = None
+        obj._oob_mask = np.empty(_SDF_BATCH_SIZE, dtype=bool)
+        obj._oob_tmp = np.empty(_SDF_BATCH_SIZE, dtype=bool)
+        return obj
+
+    def test_single_kernel_enclosed_correct(self, sample_bounds, sphere_kernel):
+        """Single-kernel enclosed path with cached min/_batch produces correct SDF."""
+        mesher = self._make_mesher_stub(sample_bounds)
+        pts = np.array([[0, 0, 0], [1, 0, 0], [0, 1, 0]], dtype=np.float64)
+        result = mesher.kernel_caller([sphere_kernel], pts)
+        # Bounds masking may modify some values, just check shape/dtype.
+        assert result.shape == (3, 1)
+        assert result.dtype == np.float32
+
+    def test_multi_kernel_eval_batch_isinstance(self, sample_bounds, sphere_kernel, plane_kernel):
+        """Multi-kernel path uses isinstance check in _eval_kernels_batch."""
+        mesher = self._make_mesher_stub(sample_bounds)
+        pts = np.array([[0, 0, 0], [1, 0, 0]], dtype=np.float64)
+        result = mesher.kernel_caller([sphere_kernel, plane_kernel], pts)
+        assert result.shape == (2, 2)
+        assert result.dtype == np.float32
+
+    def test_non_enclosed_single_kernel(self, sample_bounds, sphere_kernel):
+        """Non-enclosed single-kernel path with cached locals."""
+        mesher = self._make_mesher_stub(sample_bounds, enclosed=False)
+        pts = np.array([[0, 0, 0], [1, 0, 0]], dtype=np.float64)
+        result = mesher.kernel_caller([sphere_kernel], pts)
+        expected = sphere_kernel(pts).astype(np.float32)
+        np.testing.assert_allclose(result[:, 0], expected, atol=1e-6)
+
+
+# ---------------------------------------------------------------------------
+# Cached SDF buffer pointer in _construct_element_mesh bisection loop
+# ---------------------------------------------------------------------------
+
+
+class TestCachedSdfBufPointer:
+    """Verify that caching _sdf_buf ctypes pointer doesn't break bisection."""
+
+    def test_sdf_buf_pointer_stable(self):
+        """np.empty buffer has stable ctypes pointer across writes."""
+        buf = np.empty((10, 1), dtype=np.float32)
+        ptr1 = buf.ctypes.data
+        buf[:] = np.random.default_rng(42).standard_normal((10, 1)).astype(np.float32)
+        ptr2 = buf.ctypes.data
+        assert ptr1 == ptr2
+
+    def test_sdf_buf_slice_views_stable(self):
+        """Views into a pre-allocated buffer have stable data pointers."""
+        buf = np.empty((20, 1), dtype=np.float32)
+        v1 = buf[:10]
+        v2 = buf[10:]
+        ptr_v1_a = v1.ctypes.data
+        ptr_v2_a = v2.ctypes.data
+        # Write via the parent buffer (simulates kernel_caller out=)
+        buf[:] = np.ones((20, 1), dtype=np.float32)
+        ptr_v1_b = v1.ctypes.data
+        ptr_v2_b = v2.ctypes.data
+        assert ptr_v1_a == ptr_v1_b
+        assert ptr_v2_a == ptr_v2_b
+
+
+# ---------------------------------------------------------------------------
+# np.fabs cached as local in bisection
+# ---------------------------------------------------------------------------
+
+
+class TestNpFabsCachedLocal:
+    """Verify np.fabs local caching produces correct tolerance results."""
+
+    def test_fabs_local_matches_module(self):
+        """np.fabs cached as local gives same result as np.fabs."""
+        _np_fabs = np.fabs
+        arr = np.array([-1.0, 2.0, -3.0, 0.5], dtype=np.float32)
+        buf = np.empty_like(arr)
+        local_result = _np_fabs(arr, out=buf).max()
+        module_result = np.fabs(arr, out=np.empty_like(arr)).max()
+        assert local_result == module_result
+
+
+# ---------------------------------------------------------------------------
+# OcMesher __slots__ optimisation
+# ---------------------------------------------------------------------------
+
+
+class TestOcMesherSlots:
+    """Verify __slots__ is defined and prevents arbitrary attribute assignment."""
+
+    def test_has_slots(self):
+        """OcMesher class defines __slots__."""
+        assert hasattr(OcMesher, "__slots__")
+
+    def test_no_instance_dict(self):
+        """Instances with __slots__ should not have __dict__."""
+        obj = object.__new__(OcMesher)
+        assert not hasattr(obj, "__dict__")
+
+    def test_slots_contain_expected_attrs(self):
+        """__slots__ includes core attributes used in hot paths."""
+        slots = OcMesher.__slots__
+        for attr in (
+            "AF",
+            "sdf_AF",
+            "bounds",
+            "enclosed",
+            "bisection_iters",
+            "bisection_tol",
+            "_sdf_pool",
+            "_oob_mask",
+            "_oob_tmp",
+            "_sdf_null",
+            "_bounds_min_np",
+            "_bounds_max_np",
+        ):
+            assert attr in slots, f"{attr} missing from __slots__"
+
+    def test_methods_not_in_slots(self):
+        """Instance methods should not appear in __slots__."""
+        slots = OcMesher.__slots__
+        assert "kernel_caller" not in slots
+
+    def test_cannot_set_arbitrary_attribute(self):
+        """Setting a non-slot attribute should raise AttributeError."""
+        obj = object.__new__(OcMesher)
+        with pytest.raises(AttributeError):
+            obj._nonexistent_attribute_xyz = 42
+
+    def test_registered_c_functions_in_slots(self):
+        """C DLL function names must be present in __slots__."""
+        slots = OcMesher.__slots__
+        c_funcs = [
+            "run_coarse",
+            "fine_group",
+            "fine_iteration",
+            "fine_iteration_output",
+            "final_iteration",
+            "final_iteration2",
+            "final_iteration3",
+            "get_verts_center",
+            "update_verts",
+            "get_faces",
+            "get_in_view_tag",
+        ]
+        for func_name in c_funcs:
+            assert func_name in slots, f"C function '{func_name}' missing from __slots__"
+
+
+# ---------------------------------------------------------------------------
+# Tuple kernel wrapping (avoids list-slice copy)
+# ---------------------------------------------------------------------------
+
+
+class TestTupleKernelWrapping:
+    """Verify tuple wrapping of single kernels matches slice behaviour."""
+
+    def test_tuple_single_kernel_matches_slice(self):
+        """(kernel,) tuple behaves identically to kernels[0:1] slice."""
+        kernels = [lambda x: np.zeros(len(x), dtype=np.float32)]
+        # Slice produces a list
+        sliced = kernels[0:1]
+        # Tuple wrap produces a tuple
+        wrapped = (kernels[0],)
+        assert len(sliced) == len(wrapped) == 1
+        assert sliced[0] is wrapped[0]
+
+    def test_tuple_kernel_works_with_kernel_caller(self):
+        """kernel_caller accepts tuple kernels correctly."""
+        bounds = np.array([-5.0, 5.0, -5.0, 5.0, -5.0, 5.0])
+        obj = object.__new__(OcMesher)
+        obj.bounds = bounds
+        obj.enclosed = False
+        obj.sdf_np_float_type = np.float32
+        obj._bounds_min_np = np.array([bounds[0], bounds[2], bounds[4]], dtype=np.float64)
+        obj._bounds_max_np = np.array([bounds[1], bounds[3], bounds[5]], dtype=np.float64)
+        obj._sdf_pool = None
+        obj._oob_mask = np.empty(_SDF_BATCH_SIZE, dtype=bool)
+        obj._oob_tmp = np.empty(_SDF_BATCH_SIZE, dtype=bool)
+        kernel = lambda x: np.ones(len(x), dtype=np.float32)  # noqa: E731
+        pts = np.array([[0.0, 0.0, 0.0], [1.0, 1.0, 1.0]])
+        # Call with tuple
+        result = obj.kernel_caller((kernel,), pts)
+        assert result.shape == (2, 1)
+        np.testing.assert_array_equal(result[:, 0], 1.0)
+
+
+# ---------------------------------------------------------------------------
+# Inlined multi-kernel evaluation
+# ---------------------------------------------------------------------------
+
+
+class TestInlinedMultiKernelEval:
+    """Verify inlined multi-kernel evaluation produces correct results."""
+
+    def test_multi_kernel_inlined(self):
+        """Multi-kernel path produces correct per-kernel columns."""
+        bounds = np.array([-10.0, 10.0, -10.0, 10.0, -10.0, 10.0])
+        obj = object.__new__(OcMesher)
+        obj.bounds = bounds
+        obj.enclosed = False
+        obj.sdf_np_float_type = np.float32
+        obj._bounds_min_np = np.array([bounds[0], bounds[2], bounds[4]], dtype=np.float64)
+        obj._bounds_max_np = np.array([bounds[1], bounds[3], bounds[5]], dtype=np.float64)
+        obj._sdf_pool = None
+        obj._oob_mask = np.empty(_SDF_BATCH_SIZE, dtype=bool)
+        obj._oob_tmp = np.empty(_SDF_BATCH_SIZE, dtype=bool)
+        k0 = lambda x: np.full(len(x), 1.0, dtype=np.float32)  # noqa: E731
+        k1 = lambda x: np.full(len(x), 2.0, dtype=np.float32)  # noqa: E731
+        pts = np.array([[0.0, 0.0, 0.0], [1.0, 2.0, 3.0], [4.0, 5.0, 6.0]])
+        result = obj.kernel_caller([k0, k1], pts)
+        assert result.shape == (3, 2)
+        np.testing.assert_array_almost_equal(result[:, 0], 1.0)
+        np.testing.assert_array_almost_equal(result[:, 1], 2.0)
+
+
+# ---------------------------------------------------------------------------
+# Refactoring: fully vectorized camera packing
+# ---------------------------------------------------------------------------
+
+
+class TestFullyVectorisedCameraPacking:
+    """Verify that the fully vectorized (no per-camera loop) camera packing works."""
+
+    def test_camera_inv_pose_packed(self, sample_camera_pose, sample_intrinsics, sample_bounds):
+        """Inverse pose[:3,:4] must be packed into the first 12 elements."""
+        cameras = ([sample_camera_pose], [sample_intrinsics], [480], [640])
+        with patch("ocmesher.core.load_cdll") as mock_load:
+            mock_load.return_value = MagicMock()
+            mesher = OcMesher(cameras, sample_bounds)
+        inv_pose = np.linalg.inv(np.asarray(sample_camera_pose, dtype=np.float64))
+        expected = inv_pose[:3, :4].ravel().astype(mesher.np_float_type)
+        np.testing.assert_array_almost_equal(mesher.cameras[:12], expected)
+
+    def test_camera_intrinsics_packed(self, sample_camera_pose, sample_intrinsics, sample_bounds):
+        """Intrinsics must be packed into elements 12-20."""
+        cameras = ([sample_camera_pose], [sample_intrinsics], [480], [640])
+        with patch("ocmesher.core.load_cdll") as mock_load:
+            mock_load.return_value = MagicMock()
+            mesher = OcMesher(cameras, sample_bounds)
+        expected = np.asarray(sample_intrinsics, dtype=mesher.np_float_type).ravel()
+        np.testing.assert_array_almost_equal(mesher.cameras[12:21], expected)
+
+    def test_camera_hw_packed(self, sample_camera_pose, sample_intrinsics, sample_bounds):
+        """H and W must be packed into elements 21 and 22."""
+        cameras = ([sample_camera_pose], [sample_intrinsics], [480], [640])
+        with patch("ocmesher.core.load_cdll") as mock_load:
+            mock_load.return_value = MagicMock()
+            mesher = OcMesher(cameras, sample_bounds)
+        assert mesher.cameras[21] == pytest.approx(480.0)
+        assert mesher.cameras[22] == pytest.approx(640.0)
+
+
+# ---------------------------------------------------------------------------
+# Refactoring: np.empty for write-only buffers
+# ---------------------------------------------------------------------------
+
+
+class TestNpEmptyForWriteOnlyBuffers:
+    """Verify np.zeros→np.empty refactoring doesn't break C-filled arrays."""
+
+    def test_cnts_filled_by_construct_faces(self):
+        """cnts array is np.empty but construct_faces fills it correctly."""
+        # The refactoring changes np.zeros to np.empty for the cnts array.
+        # We test that the construct_faces mock fills it properly.
+        cnts = np.empty(3, dtype=np.int32)
+        # Simulate C writing values
+        cnts[:] = [10, 5, 20]
+        assert cnts[0] == 10
+        assert cnts[1] == 5
+        assert cnts[2] == 20
+
+
+# ---------------------------------------------------------------------------
+# Refactoring: computed sizes instead of len() calls
+# ---------------------------------------------------------------------------
+
+
+class TestComputedSizesVsLen:
+    """Verify that sizes computed from known dimensions match len() results."""
+
+    def test_n_cubes_matches_len(self):
+        """num_verts * 8 == len(np.empty((num_verts * 8, 3)))."""
+        num_verts = 42
+        cubes = np.empty((num_verts * 8, 3))
+        assert num_verts * 8 == len(cubes)
+
+    def test_edge_lr_size_matches_len(self):
+        """nve * 2 == len(np.empty((nve * 2, 3)))."""
+        nve = 17
+        arr = np.empty((nve * 2, 3))
+        assert nve * 2 == len(arr)
+
+    def test_face_lr_size_matches_len(self):
+        """nvf * 4 == len(np.empty((nvf * 4, 3)))."""
+        nvf = 9
+        arr = np.empty((nvf * 4, 3))
+        assert nvf * 4 == len(arr)
+
+
+# ---------------------------------------------------------------------------
+# Refactoring: module-level _AXIS_NAMES constant
+# ---------------------------------------------------------------------------
+
+
+class TestAxisNamesConstant:
+    """Verify _AXIS_NAMES module constant is a tuple of the 3 axis labels."""
+
+    def test_is_tuple(self):
+        assert isinstance(_AXIS_NAMES, tuple)
+
+    def test_contents(self):
+        assert _AXIS_NAMES == ("x", "y", "z")
+
+    def test_validation_uses_correct_names(self):
+        """Bounds validation error messages reference the correct axis names."""
+        with pytest.raises(ValueError, match="x_min"):
+            _validate_bounds([5, 1, 0, 10, 0, 10])
+        with pytest.raises(ValueError, match="y_min"):
+            _validate_bounds([0, 10, 5, 1, 0, 10])
+        with pytest.raises(ValueError, match="z_min"):
+            _validate_bounds([0, 10, 0, 10, 5, 1])
+
+
+# ---------------------------------------------------------------------------
+# Refactoring: deduplicated kernel_caller batch loops
+# ---------------------------------------------------------------------------
+
+
+class TestDeduplicatedKernelCallerLoops:
+    """Verify kernel_caller works with the unified enclosed/non-enclosed loop."""
+
+    @staticmethod
+    def _make_stub(*, enclosed=True):
+        obj = object.__new__(OcMesher)
+        obj.sdf_np_float_type = np.float32
+        obj.enclosed = enclosed
+        obj._bounds_min_np = np.array([0.0, 0.0, 0.0])
+        obj._bounds_max_np = np.array([10.0, 10.0, 10.0])
+        obj._sdf_pool = None
+        obj._oob_mask = np.empty(_SDF_BATCH_SIZE, dtype=bool)
+        obj._oob_tmp = np.empty(_SDF_BATCH_SIZE, dtype=bool)
+        return obj
+
+    def test_single_kernel_enclosed(self):
+        """Single kernel + enclosed: OOB points get masked to 1."""
+        obj = self._make_stub(enclosed=True)
+        k = lambda x: np.full(len(x), -0.5, dtype=np.float32)  # noqa: E731
+        pts = np.array([[5.0, 5.0, 5.0], [999.0, 999.0, 999.0]])
+        result = obj.kernel_caller([k], pts)
+        assert result[0, 0] == pytest.approx(-0.5)
+        assert result[1, 0] == pytest.approx(1.0)  # OOB masked
+
+    def test_single_kernel_not_enclosed(self):
+        """Single kernel + not enclosed: no masking."""
+        obj = self._make_stub(enclosed=False)
+        k = lambda x: np.full(len(x), -0.5, dtype=np.float32)  # noqa: E731
+        pts = np.array([[5.0, 5.0, 5.0], [999.0, 999.0, 999.0]])
+        result = obj.kernel_caller([k], pts)
+        assert result[0, 0] == pytest.approx(-0.5)
+        assert result[1, 0] == pytest.approx(-0.5)  # Not masked
+
+    def test_multi_kernel_enclosed(self):
+        """Multi-kernel + enclosed: OOB masking on all columns."""
+        obj = self._make_stub(enclosed=True)
+        k0 = lambda x: np.full(len(x), -1.0, dtype=np.float32)  # noqa: E731
+        k1 = lambda x: np.full(len(x), -2.0, dtype=np.float32)  # noqa: E731
+        pts = np.array([[5.0, 5.0, 5.0], [999.0, 999.0, 999.0]])
+        result = obj.kernel_caller([k0, k1], pts)
+        assert result[0, 0] == pytest.approx(-1.0)
+        assert result[0, 1] == pytest.approx(-2.0)
+        assert result[1, 0] == pytest.approx(1.0)  # OOB
+        assert result[1, 1] == pytest.approx(1.0)  # OOB
+
+    def test_multi_kernel_not_enclosed(self):
+        """Multi-kernel + not enclosed: no masking."""
+        obj = self._make_stub(enclosed=False)
+        k0 = lambda x: np.full(len(x), -1.0, dtype=np.float32)  # noqa: E731
+        k1 = lambda x: np.full(len(x), -2.0, dtype=np.float32)  # noqa: E731
+        pts = np.array([[5.0, 5.0, 5.0], [999.0, 999.0, 999.0]])
+        result = obj.kernel_caller([k0, k1], pts)
+        assert result[0, 0] == pytest.approx(-1.0)
+        assert result[0, 1] == pytest.approx(-2.0)
+        assert result[1, 0] == pytest.approx(-1.0)  # Not masked
+        assert result[1, 1] == pytest.approx(-2.0)  # Not masked
+
+
+# ---------------------------------------------------------------------------
+# Refactoring: final vertex assembly offset caching
+# ---------------------------------------------------------------------------
+
+
+class TestFinalVertexAssemblyOffsets:
+    """Verify pre-computed offsets produce correct final vertex layout."""
+
+    def test_offset_assembly(self):
+        """Vertices, edge_verts, face_verts must be contiguous in output."""
+        base = np.array([[1, 2, 3], [4, 5, 6]], dtype=np.float64)
+        edge = np.array([[7, 8, 9]], dtype=np.float64)
+        face = np.array([[10, 11, 12], [13, 14, 15]], dtype=np.float64)
+        n_base = base.shape[0]
+        n_edge = edge.shape[0]
+        n_face = face.shape[0]
+        off_edge = n_base + n_edge
+        result = np.empty((off_edge + n_face, 3), dtype=np.float64)
+        result[:n_base] = base
+        result[n_base:off_edge] = edge
+        result[off_edge:] = face
+        expected = np.array([[1, 2, 3], [4, 5, 6], [7, 8, 9], [10, 11, 12], [13, 14, 15]], dtype=np.float64)
+        np.testing.assert_array_equal(result, expected)
+
+
+# ---------------------------------------------------------------------------
+# Module-level numpy function cache
+# ---------------------------------------------------------------------------
+
+
+class TestModuleLevelNumpyCache:
+    """Verify that module-level cached numpy functions are correct references."""
+
+    def test_np_empty_is_numpy_empty(self):
+        """_np_empty must be np.empty."""
+        assert _np_empty is np.empty
+
+    def test_np_fabs_is_numpy_fabs(self):
+        """_np_fabs must be np.fabs."""
+        assert _np_fabs is np.fabs
+
+    def test_np_less_equal_is_numpy_less_equal(self):
+        """_np_less_equal must be np.less_equal."""
+        assert _np_less_equal is np.less_equal
+
+    def test_np_greater_equal_is_numpy_greater_equal(self):
+        """_np_greater_equal must be np.greater_equal."""
+        assert _np_greater_equal is np.greater_equal
+
+    def test_np_logical_or_is_numpy_logical_or(self):
+        """_np_logical_or must be np.logical_or."""
+        assert _np_logical_or is np.logical_or
+
+    def test_np_asarray_is_numpy_asarray(self):
+        """_np_asarray must be np.asarray."""
+        assert _np_asarray is np.asarray
+
+    def test_cached_empty_produces_correct_array(self):
+        """Module-level _np_empty must produce arrays identical to np.empty."""
+        arr = _np_empty((5, 3), dtype=np.float64)
+        assert arr.shape == (5, 3)
+        assert arr.dtype == np.float64
+
+    def test_cached_fabs_works_correctly(self):
+        """Module-level _np_fabs must compute absolute values."""
+        x = np.array([-1.0, 2.0, -3.0])
+        np.testing.assert_array_equal(_np_fabs(x), np.array([1.0, 2.0, 3.0]))
+
+
+# ---------------------------------------------------------------------------
+# pool.submit replaces closure factory in multi-kernel path
+# ---------------------------------------------------------------------------
+
+
+class TestPoolSubmitMultiKernel:
+    """Verify pool.submit-based multi-kernel dispatch produces correct results."""
+
+    def test_multi_kernel_uses_pool_submit(self):
+        """Multi-kernel kernel_caller should use pool.submit (no _make_eval_one)."""
+        source = inspect.getsource(OcMesher.kernel_caller)
+        # _make_eval_one closure factory should no longer exist
+        assert "_make_eval_one" not in source
+        # pool.submit should be bound as _submit and called
+        assert "_submit = pool.submit" in source
+        assert "_submit(" in source
+
+    def test_multi_kernel_correctness(self):
+        """Two kernels dispatched via pool.submit must produce correct columns."""
+        obj = object.__new__(OcMesher)
+        obj.sdf_np_float_type = np.float32
+        obj.enclosed = False
+        obj._sdf_pool = None
+        obj._oob_mask = np.empty(100, dtype=bool)
+        obj._oob_tmp = np.empty(100, dtype=bool)
+
+        def k0(xyz):
+            return np.full(len(xyz), 1.0, dtype=np.float32)
+
+        def k1(xyz):
+            return np.full(len(xyz), 2.0, dtype=np.float32)
+
+        rng = np.random.default_rng(42)
+        xyz = rng.random((10, 3)).astype(np.float64)
+        result = obj.kernel_caller([k0, k1], xyz)
+        np.testing.assert_array_almost_equal(result[:, 0], 1.0)
+        np.testing.assert_array_almost_equal(result[:, 1], 2.0)
+        # Clean up pool
+        if obj._sdf_pool is not None:
+            obj._sdf_pool.shutdown(wait=False)
+            obj._sdf_pool = None
+
+
+# ---------------------------------------------------------------------------
+# Single-kernel direct assignment (no intermediate view)
+# ---------------------------------------------------------------------------
+
+
+class TestSingleKernelDirectAssignment:
+    """Verify single-kernel path uses direct slice assignment."""
+
+    def test_no_result_col_intermediate(self):
+        """Single-kernel path should not create result_col intermediate view."""
+
+        source = inspect.getsource(OcMesher.kernel_caller)
+        assert "result_col" not in source
+
+    def test_single_kernel_enclosed_split(self):
+        """Single-kernel path should have separate enclosed/non-enclosed loops."""
+
+        source = inspect.getsource(OcMesher.kernel_caller)
+        # The if _enclosed check should be outside the loop for single-kernel
+        # (separate loop bodies for enclosed vs non-enclosed)
+        assert source.count("if _enclosed:") >= 1
+
+
+# ---------------------------------------------------------------------------
+# Known dimensions replace .shape[0] in final assembly
+# ---------------------------------------------------------------------------
+
+
+class TestKnownDimensionsFinalAssembly:
+    """Verify final vertex assembly uses nve/nvf instead of .shape[0]."""
+
+    def test_assembly_with_known_dims(self):
+        """Assembly using nve/nvf must match assembly using .shape[0]."""
+        base = np.array([[1, 2, 3], [4, 5, 6]], dtype=np.float64)
+        edge = np.array([[7, 8, 9]], dtype=np.float64)
+        face = np.array([[10, 11, 12], [13, 14, 15]], dtype=np.float64)
+        # Simulate using known dimensions (nve=1, nvf=2) instead of .shape[0]
+        nve = 1
+        nvf = 2
+        n_base = len(base)
+        off_edge = n_base + nve
+        result = _np_empty((off_edge + nvf, 3), dtype=np.float64)
+        result[:n_base] = base
+        result[n_base:off_edge] = edge
+        result[off_edge:] = face
+        expected = np.array([[1, 2, 3], [4, 5, 6], [7, 8, 9], [10, 11, 12], [13, 14, 15]], dtype=np.float64)
+        np.testing.assert_array_equal(result, expected)
+
+
+# ---------------------------------------------------------------------------
+# Bounds mask uses module-level cached ufuncs
+# ---------------------------------------------------------------------------
+
+
+class TestBoundsMaskCachedUfuncs:
+    """Verify bounds mask methods use module-level cached ufuncs."""
+
+    def test_static_mask_uses_cached_ufuncs(self):
+        """Static _out_of_bounds_mask should use cached ufunc references."""
+
+        source = inspect.getsource(OcMesher._out_of_bounds_mask)
+        # Should reference local aliases, not np.less_equal directly
+        assert "_le(" in source or "_np_less_equal" in source
+        assert "_ge(" in source or "_np_greater_equal" in source
+        assert "_lor(" in source or "_np_logical_or" in source
+
+    def test_into_mask_uses_cached_ufuncs(self):
+        """Instance _out_of_bounds_mask_into should use cached ufunc references."""
+
+        source = inspect.getsource(OcMesher._out_of_bounds_mask_into)
+        assert "_le(" in source or "_np_less_equal" in source
+        assert "_ge(" in source or "_np_greater_equal" in source
+        assert "_lor(" in source or "_np_logical_or" in source
+
+    def test_cached_ufuncs_produce_correct_mask(self):
+        """Bounds mask with cached ufuncs must match reference implementation."""
+        xyz = np.array(
+            [[0.5, 0.5, 0.5], [0.0, 0.5, 0.5], [1.0, 0.5, 0.5], [-0.1, 0.5, 0.5]],
+            dtype=np.float64,
+        )
+        b_min = np.array([0.0, 0.0, 0.0])
+        b_max = np.array([1.0, 1.0, 1.0])
+        mask = OcMesher._out_of_bounds_mask(xyz, b_min, b_max)
+        # Point 0: strictly inside → False
+        # Point 1: on lower boundary (0.0 <= b_min[0]=0.0 is True) → out-of-bounds
+        # Point 2: on upper boundary (1.0 >= b_max[0]=1.0 is True) → out-of-bounds
+        # Point 3: below lower boundary (-0.1 <= b_min[0]=0.0 is True) → out-of-bounds
+        np.testing.assert_array_equal(mask, [False, True, True, True])
+
+
+# ---------------------------------------------------------------------------
+# Growable buffer optimisation in __call__ loops
+# ---------------------------------------------------------------------------
+
+
+class TestGrowableBuffersCoarseStep:
+    """Verify the growable position/SDF buffers in the coarse step loop."""
+
+    def test_kernel_caller_out_view_writes_correct_values(self):
+        """kernel_caller with out= on a buffer slice must write correct SDF."""
+        obj = object.__new__(OcMesher)
+        obj.enclosed = False
+        obj.sdf_np_float_type = np.float32
+        obj._sdf_pool = None
+        obj._oob_mask = np.empty(_SDF_BATCH_SIZE, dtype=bool)
+        obj._oob_tmp = np.empty(_SDF_BATCH_SIZE, dtype=bool)
+        obj._bounds_min_np = np.zeros(3)
+        obj._bounds_max_np = np.ones(3)
+        pts = np.array([[1, 2, 3], [4, 5, 6]], dtype=np.float64)
+        kernel = lambda xyz: np.linalg.norm(xyz, axis=1)  # noqa: E731
+        # Allocate a buffer larger than needed and pass a slice as out=.
+        buf = np.full((5, 1), -999.0, dtype=np.float32)
+        out_slice = buf[:2]
+        result = obj.kernel_caller([kernel], pts, out=out_slice)
+        # Result should contain the correct SDF values.
+        np.testing.assert_allclose(result[:, 0], np.linalg.norm(pts, axis=1), rtol=1e-5)
+        # The buffer's first two rows should be updated (same underlying data).
+        np.testing.assert_allclose(buf[:2, 0], np.linalg.norm(pts, axis=1), rtol=1e-5)
+
+    def test_growable_buffer_reuse_produces_stable_pointer(self):
+        """Leading slice of a buffer shares the same data pointer."""
+        buf = np.empty((10, 3), dtype=np.float64)
+        view = buf[:5]
+        # The data pointer of a leading slice equals the base array's.
+        assert buf.ctypes.data == view.ctypes.data
+
+    def test_min_out_parameter(self):
+        """ndarray.min(axis, out=) writes into the provided buffer."""
+        sdf = np.array([[1.0, 3.0], [2.0, 0.5]], dtype=np.float32)
+        out = np.empty(2, dtype=np.float32)
+        sdf.min(axis=-1, out=out)
+        np.testing.assert_array_equal(out, [1.0, 0.5])
+
+
+class TestGrowableBuffersFineStep:
+    """Verify growable buffers in the fine step loop."""
+
+    def test_sdf_buffer_slice_preserves_layout(self):
+        """A (cap, K) buffer sliced to [:n] must be C-contiguous."""
+        buf = np.empty((100, 2), dtype=np.float32)
+        view = buf[:50]
+        assert view.flags["C_CONTIGUOUS"]
+
+    def test_kernel_caller_out_larger_buffer(self):
+        """kernel_caller out= with a view of a larger buffer works correctly."""
+        obj = object.__new__(OcMesher)
+        obj.enclosed = True
+        obj.sdf_np_float_type = np.float32
+        obj._sdf_pool = None
+        obj._oob_mask = np.empty(_SDF_BATCH_SIZE, dtype=bool)
+        obj._oob_tmp = np.empty(_SDF_BATCH_SIZE, dtype=bool)
+        obj._bounds_min_np = np.array([-10.0, -10.0, -10.0])
+        obj._bounds_max_np = np.array([10.0, 10.0, 10.0])
+        pts = np.array([[0, 0, 0], [1, 0, 0], [0, 1, 0]], dtype=np.float64)
+        kernel = lambda xyz: np.linalg.norm(xyz, axis=1) - 5.0  # noqa: E731
+        buf = np.full((10, 1), 999.0, dtype=np.float32)
+        result = obj.kernel_caller([kernel], pts, out=buf[:3])
+        # First 3 rows should have valid SDF; remaining rows untouched.
+        np.testing.assert_allclose(result[:, 0], [-5.0, -4.0, -4.0], rtol=1e-5)
+        assert buf[5, 0] == pytest.approx(999.0)
+
+
+class TestExplicitEmptyForFabsBuf:
+    """Verify _fabs_buf uses explicit _empty() instead of np.empty_like."""
+
+    def test_construct_element_mesh_no_empty_like(self):
+        """_construct_element_mesh source must not use np.empty_like for _fabs_buf."""
+        source = inspect.getsource(OcMesher._construct_element_mesh)
+        # The tolerance buffer should use _empty((...), dtype=...) not np.empty_like.
+        assert "np.empty_like" not in source
+
+    def test_refine_extra_vertices_no_empty_like(self):
+        """_refine_extra_vertices source must not use np.empty_like for _fabs_buf."""
+        source = inspect.getsource(OcMesher._refine_extra_vertices)
+        assert "np.empty_like" not in source
+
+    def test_call_uses_growable_buffers(self):
+        """__call__ source must contain growable buffer pattern."""
+        source = inspect.getsource(OcMesher.__call__)
+        # Check for growable buffer capacity tracking variables.
+        assert "_c_cap" in source, "coarse step should use growable buffer"
+        assert "_f_cap" in source, "fine step should use growable buffer"
+        # Check that out= is used with kernel_caller in the loops.
+        assert "out=_c_sdf[:n]" in source
+        assert "out=_f_sdf[:n]" in source

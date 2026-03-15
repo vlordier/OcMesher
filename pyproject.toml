@@ -76,6 +76,8 @@ ignore = [
     "FBT002",   # boolean default positional args (API backwards-compat)
     "PLR0913",  # too-many-arguments (ctypes register_func calls)
     "PLR0915",  # too-many-statements (__call__ orchestrates meshing)
+    "C901",     # complex methods (kernel_caller has split enclosed/non-enclosed loops)
+    "PLR0912",  # too-many-branches (kernel_caller has 4 specialised batch paths)
 ]
 # interface.py – ctypes helper with many function params
 "ocmesher/utils/interface.py" = [
@@ -103,6 +105,31 @@ ignore = [
     "C901",     # complex functions (benchmark main)
     "PLR0912",  # too-many-branches (benchmark main)
     "PLR0913",  # too-many-arguments (benchmark functions mirror mesher API)
+]
+# Python overhead micro-benchmark
+"benchmarks/bench_python_overhead.py" = [
+    "INP001",   # implicit namespace package
+    "SLF001",   # private member access (benchmarking internal methods)
+    "T201",     # print statements (benchmark output)
+    "B023",     # loop-variable binding in closures (intentional for timing)
+    "D103",     # missing docstring in main()
+    "PTH123",   # open() vs Path.open() (simple CLI)
+]
+# End-to-end benchmark (branch comparison)
+"benchmarks/bench_e2e.py" = [
+    "INP001",   # implicit namespace package
+    "SLF001",   # private member access (benchmarking internal methods)
+    "T201",     # print statements (benchmark output)
+    "B023",     # loop-variable binding in closures (intentional for timing)
+    "D103",     # missing docstring in main()
+    "PTH123",   # open() vs Path.open() (simple CLI)
+    "PLR2004",  # magic values OK in benchmarks
+    "C901",     # complex functions OK in benchmark main/regression_check
+    "PLR0912",  # too-many-branches in regression_check
+    "PLR0915",  # too-many-statements in main
+    "F841",     # unused variable `sdf` (intentional: benchmarking call overhead)
+    "ARG001",   # unused function arguments (future-proofing API)
+    "SIM102",   # nested if in regression checks (clearer error messages)
 ]
 # benchmark __init__
 "benchmarks/__init__.py" = [
