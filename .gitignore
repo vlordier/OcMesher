@@ -1,3 +1,37 @@
-__pycache__
-lib
-results
+# Byte-compiled / optimized / DLL files
+__pycache__/
+*.py[cod]
+*$py.class
+
+# C/C++ build artifacts
+*.o
+*.so
+*.dylib
+
+# Distribution / packaging
+build/
+dist/
+*.egg-info/
+*.egg
+
+# Virtual environments
+.venv/
+venv/
+env/
+
+# IDE / Editor
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# Project-specific
+lib/
+results/
+benchmark_results/
+
+# Test / coverage artifacts
+.pytest_cache/
+htmlcov/
+.coverage
