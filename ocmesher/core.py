@@ -186,9 +186,12 @@ class OcMesher:
                     self.update_verts(e, self.sdf_AF(sdf), self.sdf_AF(center_sdf), self.AF(cubes))
                 cubes_r = np.zeros((nv[e] * 8, 3), dtype=self.np_float_type)
                 self.get_lr_verts(e, self.AF(cubes), self.AF(cubes_r))
-                sdf_l = self.kernel_caller(k_e, cubes)
-                sdf_r = self.kernel_caller(k_e, cubes_r)
-                del cubes, cubes_r, centers, center_sdf
+                cubes_lr = np.concatenate((cubes, cubes_r))
+                sdf_lr = self.kernel_caller(k_e, cubes_lr)
+                n_cubes = nv[e] * 8
+                sdf_l = sdf_lr[:n_cubes]
+                sdf_r = sdf_lr[n_cubes:]
+                del cubes, cubes_r, cubes_lr, centers, center_sdf
                 vertices = np.zeros((nv[e], 3), dtype=self.np_float_type)
                 self.finalize_verts(e, self.sdf_AF(sdf_l), self.sdf_AF(sdf_r), self.AF(vertices))
                 del sdf_l, sdf_r
@@ -198,8 +201,10 @@ class OcMesher:
                 edge_vertices_c = np.zeros((nve, 3), dtype=self.np_float_type)
                 face_vertices_c = np.zeros((nvf, 3), dtype=self.np_float_type)
                 self.get_extra_verts_center(self.AF(edge_vertices_c), self.AF(face_vertices_c))
-                ecenter_sdf = self.kernel_caller(k_e, edge_vertices_c)
-                fcenter_sdf = self.kernel_caller(k_e, face_vertices_c)
+                ef_centers = np.concatenate((edge_vertices_c, face_vertices_c))
+                ef_center_sdf = self.kernel_caller(k_e, ef_centers)
+                ecenter_sdf = ef_center_sdf[:nve]
+                fcenter_sdf = ef_center_sdf[nve:]
                 edge_vertices_lr = np.zeros((nve * 2, 3), dtype=self.np_float_type)
                 face_vertices_lr = np.zeros((nvf * 4, 3), dtype=self.np_float_type)
                 self.update_extra_verts(
@@ -208,8 +213,10 @@ class OcMesher:
                     self.AF(edge_vertices_lr), self.AF(face_vertices_lr),
                 )
                 for _ in range(self.bisection_iters):
-                    e_sdf = self.kernel_caller(k_e, edge_vertices_lr)
-                    f_sdf = self.kernel_caller(k_e, face_vertices_lr)
+                    ef_combined = np.concatenate((edge_vertices_lr, face_vertices_lr))
+                    ef_sdf = self.kernel_caller(k_e, ef_combined)
+                    e_sdf = ef_sdf[:nve * 2]
+                    f_sdf = ef_sdf[nve * 2:]
                     self.update_extra_verts(
                         self.sdf_AF(e_sdf), self.sdf_AF(f_sdf),
                         self.sdf_AF(ecenter_sdf), self.sdf_AF(fcenter_sdf),
@@ -219,10 +226,14 @@ class OcMesher:
                 edge_vertices_r = np.zeros((nve * 2, 3), dtype=self.np_float_type)
                 face_vertices_r = np.zeros((nvf * 4, 3), dtype=self.np_float_type)
                 self.get_lr_extra_verts(self.AF(edge_vertices_lr), self.AF(edge_vertices_r), self.AF(face_vertices_lr), self.AF(face_vertices_r))
-                esdf_l = self.kernel_caller(k_e, edge_vertices_lr)
-                esdf_r = self.kernel_caller(k_e, edge_vertices_r)
-                fsdf_l = self.kernel_caller(k_e, face_vertices_lr)
-                fsdf_r = self.kernel_caller(k_e, face_vertices_r)
+                all_extra = np.concatenate((edge_vertices_lr, edge_vertices_r, face_vertices_lr, face_vertices_r))
+                all_extra_sdf = self.kernel_caller(k_e, all_extra)
+                n_elr = nve * 2
+                n_flr = nvf * 4
+                esdf_l = all_extra_sdf[:n_elr]
+                esdf_r = all_extra_sdf[n_elr:n_elr * 2]
+                fsdf_l = all_extra_sdf[n_elr * 2:n_elr * 2 + n_flr]
+                fsdf_r = all_extra_sdf[n_elr * 2 + n_flr:]
                 del edge_vertices_lr, edge_vertices_r, face_vertices_lr, face_vertices_r
                 edge_vertices = np.zeros((nve, 3), dtype=self.np_float_type)
                 face_vertices = np.zeros((nvf, 3), dtype=self.np_float_type)
