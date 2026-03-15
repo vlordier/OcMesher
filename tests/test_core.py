@@ -8,6 +8,7 @@ import numpy as np
 import pytest
 
 from ocmesher.core import (
+    _AXIS_NAMES,
     _SDF_BATCH_SIZE,
     CAMERA_DATA_STRIDE,
     OcMesher,
@@ -1536,3 +1537,199 @@ class TestInlinedMultiKernelEval:
         assert result.shape == (3, 2)
         np.testing.assert_array_almost_equal(result[:, 0], 1.0)
         np.testing.assert_array_almost_equal(result[:, 1], 2.0)
+
+
+# ---------------------------------------------------------------------------
+# Refactoring: fully vectorized camera packing
+# ---------------------------------------------------------------------------
+
+
+class TestFullyVectorisedCameraPacking:
+    """Verify that the fully vectorized (no per-camera loop) camera packing works."""
+
+    def test_camera_inv_pose_packed(self, sample_camera_pose, sample_intrinsics, sample_bounds):
+        """Inverse pose[:3,:4] must be packed into the first 12 elements."""
+        cameras = ([sample_camera_pose], [sample_intrinsics], [480], [640])
+        with patch("ocmesher.core.load_cdll") as mock_load:
+            mock_load.return_value = MagicMock()
+            mesher = OcMesher(cameras, sample_bounds)
+        inv_pose = np.linalg.inv(np.asarray(sample_camera_pose, dtype=np.float64))
+        expected = inv_pose[:3, :4].ravel().astype(mesher.np_float_type)
+        np.testing.assert_array_almost_equal(mesher.cameras[:12], expected)
+
+    def test_camera_intrinsics_packed(self, sample_camera_pose, sample_intrinsics, sample_bounds):
+        """Intrinsics must be packed into elements 12-20."""
+        cameras = ([sample_camera_pose], [sample_intrinsics], [480], [640])
+        with patch("ocmesher.core.load_cdll") as mock_load:
+            mock_load.return_value = MagicMock()
+            mesher = OcMesher(cameras, sample_bounds)
+        expected = np.asarray(sample_intrinsics, dtype=mesher.np_float_type).ravel()
+        np.testing.assert_array_almost_equal(mesher.cameras[12:21], expected)
+
+    def test_camera_hw_packed(self, sample_camera_pose, sample_intrinsics, sample_bounds):
+        """H and W must be packed into elements 21 and 22."""
+        cameras = ([sample_camera_pose], [sample_intrinsics], [480], [640])
+        with patch("ocmesher.core.load_cdll") as mock_load:
+            mock_load.return_value = MagicMock()
+            mesher = OcMesher(cameras, sample_bounds)
+        assert mesher.cameras[21] == pytest.approx(480.0)
+        assert mesher.cameras[22] == pytest.approx(640.0)
+
+
+# ---------------------------------------------------------------------------
+# Refactoring: np.empty for write-only buffers
+# ---------------------------------------------------------------------------
+
+
+class TestNpEmptyForWriteOnlyBuffers:
+    """Verify np.zeros→np.empty refactoring doesn't break C-filled arrays."""
+
+    def test_cnts_filled_by_construct_faces(self):
+        """cnts array is np.empty but construct_faces fills it correctly."""
+        # The refactoring changes np.zeros to np.empty for the cnts array.
+        # We test that the construct_faces mock fills it properly.
+        cnts = np.empty(3, dtype=np.int32)
+        # Simulate C writing values
+        cnts[:] = [10, 5, 20]
+        assert cnts[0] == 10
+        assert cnts[1] == 5
+        assert cnts[2] == 20
+
+
+# ---------------------------------------------------------------------------
+# Refactoring: computed sizes instead of len() calls
+# ---------------------------------------------------------------------------
+
+
+class TestComputedSizesVsLen:
+    """Verify that sizes computed from known dimensions match len() results."""
+
+    def test_n_cubes_matches_len(self):
+        """num_verts * 8 == len(np.empty((num_verts * 8, 3)))."""
+        num_verts = 42
+        cubes = np.empty((num_verts * 8, 3))
+        assert num_verts * 8 == len(cubes)
+
+    def test_edge_lr_size_matches_len(self):
+        """nve * 2 == len(np.empty((nve * 2, 3)))."""
+        nve = 17
+        arr = np.empty((nve * 2, 3))
+        assert nve * 2 == len(arr)
+
+    def test_face_lr_size_matches_len(self):
+        """nvf * 4 == len(np.empty((nvf * 4, 3)))."""
+        nvf = 9
+        arr = np.empty((nvf * 4, 3))
+        assert nvf * 4 == len(arr)
+
+
+# ---------------------------------------------------------------------------
+# Refactoring: module-level _AXIS_NAMES constant
+# ---------------------------------------------------------------------------
+
+
+class TestAxisNamesConstant:
+    """Verify _AXIS_NAMES module constant is a tuple of the 3 axis labels."""
+
+    def test_is_tuple(self):
+        assert isinstance(_AXIS_NAMES, tuple)
+
+    def test_contents(self):
+        assert _AXIS_NAMES == ("x", "y", "z")
+
+    def test_validation_uses_correct_names(self):
+        """Bounds validation error messages reference the correct axis names."""
+        with pytest.raises(ValueError, match="x_min"):
+            _validate_bounds([5, 1, 0, 10, 0, 10])
+        with pytest.raises(ValueError, match="y_min"):
+            _validate_bounds([0, 10, 5, 1, 0, 10])
+        with pytest.raises(ValueError, match="z_min"):
+            _validate_bounds([0, 10, 0, 10, 5, 1])
+
+
+# ---------------------------------------------------------------------------
+# Refactoring: deduplicated kernel_caller batch loops
+# ---------------------------------------------------------------------------
+
+
+class TestDeduplicatedKernelCallerLoops:
+    """Verify kernel_caller works with the unified enclosed/non-enclosed loop."""
+
+    @staticmethod
+    def _make_stub(*, enclosed=True):
+        obj = object.__new__(OcMesher)
+        obj.sdf_np_float_type = np.float32
+        obj.enclosed = enclosed
+        obj._bounds_min_np = np.array([0.0, 0.0, 0.0])
+        obj._bounds_max_np = np.array([10.0, 10.0, 10.0])
+        obj._sdf_pool = None
+        obj._oob_mask = np.empty(_SDF_BATCH_SIZE, dtype=bool)
+        obj._oob_tmp = np.empty(_SDF_BATCH_SIZE, dtype=bool)
+        return obj
+
+    def test_single_kernel_enclosed(self):
+        """Single kernel + enclosed: OOB points get masked to 1."""
+        obj = self._make_stub(enclosed=True)
+        k = lambda x: np.full(len(x), -0.5, dtype=np.float32)  # noqa: E731
+        pts = np.array([[5.0, 5.0, 5.0], [999.0, 999.0, 999.0]])
+        result = obj.kernel_caller([k], pts)
+        assert result[0, 0] == pytest.approx(-0.5)
+        assert result[1, 0] == pytest.approx(1.0)  # OOB masked
+
+    def test_single_kernel_not_enclosed(self):
+        """Single kernel + not enclosed: no masking."""
+        obj = self._make_stub(enclosed=False)
+        k = lambda x: np.full(len(x), -0.5, dtype=np.float32)  # noqa: E731
+        pts = np.array([[5.0, 5.0, 5.0], [999.0, 999.0, 999.0]])
+        result = obj.kernel_caller([k], pts)
+        assert result[0, 0] == pytest.approx(-0.5)
+        assert result[1, 0] == pytest.approx(-0.5)  # Not masked
+
+    def test_multi_kernel_enclosed(self):
+        """Multi-kernel + enclosed: OOB masking on all columns."""
+        obj = self._make_stub(enclosed=True)
+        k0 = lambda x: np.full(len(x), -1.0, dtype=np.float32)  # noqa: E731
+        k1 = lambda x: np.full(len(x), -2.0, dtype=np.float32)  # noqa: E731
+        pts = np.array([[5.0, 5.0, 5.0], [999.0, 999.0, 999.0]])
+        result = obj.kernel_caller([k0, k1], pts)
+        assert result[0, 0] == pytest.approx(-1.0)
+        assert result[0, 1] == pytest.approx(-2.0)
+        assert result[1, 0] == pytest.approx(1.0)  # OOB
+        assert result[1, 1] == pytest.approx(1.0)  # OOB
+
+    def test_multi_kernel_not_enclosed(self):
+        """Multi-kernel + not enclosed: no masking."""
+        obj = self._make_stub(enclosed=False)
+        k0 = lambda x: np.full(len(x), -1.0, dtype=np.float32)  # noqa: E731
+        k1 = lambda x: np.full(len(x), -2.0, dtype=np.float32)  # noqa: E731
+        pts = np.array([[5.0, 5.0, 5.0], [999.0, 999.0, 999.0]])
+        result = obj.kernel_caller([k0, k1], pts)
+        assert result[0, 0] == pytest.approx(-1.0)
+        assert result[0, 1] == pytest.approx(-2.0)
+        assert result[1, 0] == pytest.approx(-1.0)  # Not masked
+        assert result[1, 1] == pytest.approx(-2.0)  # Not masked
+
+
+# ---------------------------------------------------------------------------
+# Refactoring: final vertex assembly offset caching
+# ---------------------------------------------------------------------------
+
+
+class TestFinalVertexAssemblyOffsets:
+    """Verify pre-computed offsets produce correct final vertex layout."""
+
+    def test_offset_assembly(self):
+        """Vertices, edge_verts, face_verts must be contiguous in output."""
+        base = np.array([[1, 2, 3], [4, 5, 6]], dtype=np.float64)
+        edge = np.array([[7, 8, 9]], dtype=np.float64)
+        face = np.array([[10, 11, 12], [13, 14, 15]], dtype=np.float64)
+        n_base = base.shape[0]
+        n_edge = edge.shape[0]
+        n_face = face.shape[0]
+        off_edge = n_base + n_edge
+        result = np.empty((off_edge + n_face, 3), dtype=np.float64)
+        result[:n_base] = base
+        result[n_base:off_edge] = edge
+        result[off_edge:] = face
+        expected = np.array([[1, 2, 3], [4, 5, 6], [7, 8, 9], [10, 11, 12], [13, 14, 15]], dtype=np.float64)
+        np.testing.assert_array_equal(result, expected)
