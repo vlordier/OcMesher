@@ -1006,23 +1006,49 @@ void get_lr_extra_verts(                          // NOLINT(readability-identifi
     }
 }
 
-// todo consider more than corners when a vertex cube has complex side face
+// Consider edge crossings on vertex cube faces for better vertex placement
 void finalize_verts( // NOLINT(readability-identifier-length, readability-identifier-naming,
                      // modernize-use-trailing-return-type)
     int e, sdfT* sdf_l, sdfT* sdf_r, T* verts) {
     using namespace final_ns;
     auto& becv = bipolar_edges_computed_vertices[e];
+    // Cube edge table: pairs of corner indices connected by edges
+    static const int cube_edges[12][2] = {
+        {0, 1}, {2, 3}, {4, 5}, {6, 7}, // along axis 0
+        {0, 2}, {1, 3}, {4, 6}, {5, 7}, // along axis 1
+        {0, 4}, {1, 5}, {2, 6}, {3, 7}, // along axis 2
+    };
     for (int i = 0; i < static_cast<int>(becv.size()); i++) {
         T vx[3] = {0};
         int w = 0;
+        T mid = (becv[i].m_l + becv[i].m_r) / 2;
+        // First pass: bipolar corners (where surface crosses between inner and outer boundary)
         for (int j = 0; j < 8; j++) // NOLINT(readability-identifier-length)
             if ((sdf_l[i * 8 + j] >= 0) != (sdf_r[i * 8 + j] >= 0)) {
                 w++;
                 for (int k = 0; k < 3; k++) { // NOLINT(readability-identifier-length)
-                    vx[k] +=
-                        becv[i].m_c[k] + (((j >> k) & 1) * 2 - 1) * (becv[i].m_l + becv[i].m_r) / 2;
+                    vx[k] += becv[i].m_c[k] + (((j >> k) & 1) * 2 - 1) * mid;
                 }
             }
+        // Second pass: edge crossings on cube faces
+        // When two adjacent corners have opposite SDF signs at the outer boundary,
+        // interpolate to find the crossing point on that edge.
+        // Use becv[i].m_r to match the radius at which sdf_r was sampled.
+        for (int ei = 0; ei < 12; ei++) {
+            int j1 = cube_edges[ei][0];
+            int j2 = cube_edges[ei][1];
+            sdfT s1 = sdf_r[i * 8 + j1];
+            sdfT s2 = sdf_r[i * 8 + j2];
+            if ((s1 >= 0) != (s2 >= 0)) {
+                T t = static_cast<T>(s1) / (static_cast<T>(s1) - static_cast<T>(s2));
+                w++;
+                for (int k = 0; k < 3; k++) { // NOLINT(readability-identifier-length)
+                    T p1 = becv[i].m_c[k] + (((j1 >> k) & 1) * 2 - 1) * becv[i].m_r;
+                    T p2 = becv[i].m_c[k] + (((j2 >> k) & 1) * 2 - 1) * becv[i].m_r;
+                    vx[k] += p1 * (1 - t) + p2 * t;
+                }
+            }
+        }
         if (w == 0) {
             for (int k = 0; k < 3; k++)
                 verts[i * 3 + k] = becv[i].m_c[k]; // NOLINT(readability-identifier-length)
