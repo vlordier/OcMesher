@@ -3,7 +3,7 @@
 # This source code is licensed under the BSD 3-Clause license found in the
 # LICENSE file in the root directory of this source tree.
 
-"""OcMesher benchmark harness.
+"""OcMesher build-profile benchmark harness.
 
 Runs a deterministic meshing workload and records wall-clock time for every
 phase exposed by the Timer context managers inside OcMesher.__call__.
@@ -34,27 +34,29 @@ import os
 import sys
 import time
 from pathlib import Path
-from typing import Callable
+from typing import TYPE_CHECKING
 
 import numpy as np
+
+if TYPE_CHECKING:
+    from collections.abc import Callable
 
 try:
     import psutil as _psutil
     _HAS_PSUTIL = True
-except ImportError:  # psutil is optional – memory reporting is disabled
+except ImportError:  # psutil is optional - memory reporting is disabled
     _psutil = None  # type: ignore[assignment]
     _HAS_PSUTIL = False
 
-# ── make sure the package root is importable even when run from benchmark/ ──
+# Make sure the package root is importable even when run from benchmark/
 _REPO_ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(_REPO_ROOT))
 
 from ocmesher import OcMesher  # noqa: E402  (after sys.path insert)
 
-
-# ─────────────────────────────────────────────────────────────────────────────
+# ---------------------------------------------------------------------------
 # Built-in SDF scenes
-# ─────────────────────────────────────────────────────────────────────────────
+# ---------------------------------------------------------------------------
 
 def _scene_sphere(XYZ: np.ndarray) -> np.ndarray:
     """Unit sphere centred at origin."""
@@ -63,13 +65,13 @@ def _scene_sphere(XYZ: np.ndarray) -> np.ndarray:
 
 def _scene_torus(XYZ: np.ndarray) -> np.ndarray:
     """Torus with major radius 1.5 and minor radius 0.4."""
-    R, r = 1.5, 0.4
-    q = np.sqrt(XYZ[:, 0] ** 2 + XYZ[:, 1] ** 2) - R
-    return np.sqrt(q ** 2 + XYZ[:, 2] ** 2) - r
+    major_r, minor_r = 1.5, 0.4
+    q = np.sqrt(XYZ[:, 0] ** 2 + XYZ[:, 1] ** 2) - major_r
+    return np.sqrt(q ** 2 + XYZ[:, 2] ** 2) - minor_r
 
 
 def _scene_gyroid(XYZ: np.ndarray) -> np.ndarray:
-    """Gyroid minimal surface (periodic, scale ≈ 2π)."""
+    """Gyroid minimal surface (periodic, scale approx 2*pi)."""
     s = 2.0
     x, y, z = XYZ[:, 0] / s, XYZ[:, 1] / s, XYZ[:, 2] / s
     return (
@@ -97,9 +99,9 @@ _SCENES: dict[str, Callable[[np.ndarray], np.ndarray]] = {
 }
 
 
-# ─────────────────────────────────────────────────────────────────────────────
+# ---------------------------------------------------------------------------
 # Timing shim
-# ─────────────────────────────────────────────────────────────────────────────
+# ---------------------------------------------------------------------------
 
 class _TimingCapture:
     """Monkey-patches the Timer reference inside ocmesher.core to capture durations."""
@@ -108,18 +110,20 @@ class _TimingCapture:
         self._records: dict[str, float] = {}
 
     def install(self) -> None:
+        """Patch ocmesher.core.Timer with a capturing implementation."""
         # ocmesher.core imports Timer via `from .utils.timer import Timer`, so
         # patching ocmesher.utils.timer.Timer is too late.  We must replace the
         # name in the already-imported ocmesher.core module namespace.
-        import ocmesher.core as _core_mod
+        import ocmesher.core as _core_mod  # noqa: PLC0415
+
         records = self._records
 
         class _CapturingTimer:
-            def __init__(self, desc: str, disable_timer: bool = False) -> None:
+            def __init__(self, desc: str, disable_timer: bool = False) -> None:  # noqa: FBT001,FBT002
                 self._desc = desc
                 self._disabled = disable_timer
 
-            def __enter__(self) -> "_CapturingTimer":
+            def __enter__(self) -> _CapturingTimer:  # noqa: PYI034
                 if not self._disabled:
                     self._t0 = time.perf_counter()
                 return self
@@ -141,36 +145,40 @@ class _TimingCapture:
 
     @property
     def records(self) -> dict[str, float]:
+        """Return a copy of the captured timing records."""
         return dict(self._records)
 
 
-# ─────────────────────────────────────────────────────────────────────────────
+# ---------------------------------------------------------------------------
 # Benchmark runner
-# ─────────────────────────────────────────────────────────────────────────────
+# ---------------------------------------------------------------------------
 
-def _make_cameras():
-    """Single camera looking down at the origin from height 3."""
+def _make_cameras() -> tuple:
+    """Return a single camera looking down at the origin from height 3."""
     cam_pose = np.array([
         [1, 0,  0, 0],
         [0, 0,  1, 0],
         [0, -1, 0, 3],
         [0, 0,  0, 1],
     ], dtype=np.float64)
-    K = np.array([
+    k_mat = np.array([
         [2000, 0, 640],
         [0, 2000, 360],
         [0, 0, 1],
     ], dtype=np.float64)
-    return ([cam_pose], [K], [720], [1280])
+    return ([cam_pose], [k_mat], [720], [1280])
 
 
 def _bounds_for_scene(scene: str) -> tuple[float, ...]:
+    """Return axis-aligned bounding box (xmin,xmax,ymin,ymax,zmin,zmax) for a scene."""
     if scene == "heightmap":
         return (-5.0, 5.0, -5.0, 5.0, -2.0, 2.0)
     if scene == "gyroid":
-        return (-math.pi * 2, math.pi * 2,
-                -math.pi * 2, math.pi * 2,
-                -math.pi * 2, math.pi * 2)
+        return (
+            -math.pi * 2, math.pi * 2,
+            -math.pi * 2, math.pi * 2,
+            -math.pi * 2, math.pi * 2,
+        )
     return (-3.0, 3.0, -3.0, 3.0, -3.0, 3.0)
 
 
@@ -203,10 +211,10 @@ def run_benchmark(
     scene: str = "sphere",
     pixels_per_cube: int = 8,
     runs: int = 1,
-    profile: str = "unknown",
+    profile: str = "native",
     omp_threads: int | None = None,
 ) -> dict:
-    """Run the benchmark *runs* times and aggregate results."""
+    """Run the benchmark *runs* times and aggregate min/mean/max statistics."""
     all_phases: list[dict[str, float]] = []
     all_totals: list[float] = []
 
@@ -218,13 +226,13 @@ def run_benchmark(
     print(f"{'─'*60}")
 
     for i in range(runs):
-        print(f"\n── Run {i + 1}/{runs} ──")
+        print(f"\n-- Run {i + 1}/{runs} --")
         phases, total = run_once(scene, pixels_per_cube, omp_threads)
         all_phases.append(phases)
         all_totals.append(total)
         print(f"  total wall time: {total:.3f}s")
 
-    # aggregate (min / mean / max)
+    # Compute per-phase and overall min/mean/max across all runs.
     phase_keys = sorted({k for p in all_phases for k in p})
     aggregated: dict[str, dict[str, float]] = {}
     for key in phase_keys:
@@ -244,13 +252,17 @@ def run_benchmark(
     print(f"\n{'─'*60}")
     print(f"Summary  (profile={profile}, n={runs})")
     print(f"{'─'*60}")
-    print(f"  total wall  min={total_stats['min']:.3f}s "
-          f"mean={total_stats['mean']:.3f}s "
-          f"max={total_stats['max']:.3f}s")
+    print(
+        f"  total wall  min={total_stats['min']:.3f}s "
+        f"mean={total_stats['mean']:.3f}s "
+        f"max={total_stats['max']:.3f}s",
+    )
     for key, stats in aggregated.items():
-        print(f"  [{key}]  min={stats['min']:.3f}s "
-              f"mean={stats['mean']:.3f}s "
-              f"max={stats['max']:.3f}s")
+        print(
+            f"  [{key}]  min={stats['min']:.3f}s "
+            f"mean={stats['mean']:.3f}s "
+            f"max={stats['max']:.3f}s",
+        )
 
     return {
         "profile": profile,
@@ -263,19 +275,19 @@ def run_benchmark(
     }
 
 
-# ─────────────────────────────────────────────────────────────────────────────
+# ---------------------------------------------------------------------------
 # CLI
-# ─────────────────────────────────────────────────────────────────────────────
+# ---------------------------------------------------------------------------
 
 def _parse_args() -> argparse.Namespace:
     p = argparse.ArgumentParser(
-        description="OcMesher benchmark harness",
+        description="OcMesher build-profile benchmark harness",
         formatter_class=argparse.ArgumentDefaultsHelpFormatter,
     )
     p.add_argument(
         "--profile",
-        default=os.environ.get("PROFILE", "unknown"),
-        help="Build profile label (informational – does not rebuild the lib)",
+        default=os.environ.get("PROFILE", "native"),
+        help="Build profile label (informational - does not rebuild the lib)",
     )
     p.add_argument(
         "--scene",
@@ -325,6 +337,7 @@ def _append_json(path: str, result: dict) -> None:
 
 
 def main() -> None:
+    """Entry point for the benchmark harness."""
     args = _parse_args()
     result = run_benchmark(
         scene=args.scene,
@@ -342,3 +355,4 @@ def main() -> None:
 
 if __name__ == "__main__":
     main()
+

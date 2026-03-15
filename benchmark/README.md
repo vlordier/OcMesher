@@ -1,7 +1,10 @@
-# OcMesher Benchmark Suite
+# OcMesher Build-Profile Benchmark Suite
 
 This directory contains tooling to measure the performance impact of different
 C++ compiler optimisation profiles on the OcMesher meshing pipeline.
+
+> **Note:** For functional/device/PyTorch benchmarks see [`benchmarks/`](../benchmarks/).
+> This suite is specifically for comparing C++ compiler flag combinations.
 
 ---
 
@@ -11,11 +14,11 @@ C++ compiler optimisation profiles on the OcMesher meshing pipeline.
 # 1. install Python dependencies (once)
 pip install -r requirements.txt
 
-# 2. run all benchmark profiles end-to-end
+# 2. run all benchmark profiles end-to-end (default baseline: native)
 bash benchmark/run_benchmarks.sh
 
-# 3. use a custom baseline for the speedup column (default: O3)
-bash benchmark/run_benchmarks.sh sphere 8 3 baseline
+# 3. use a custom baseline for the speedup column
+bash benchmark/run_benchmarks.sh sphere 8 3 O3
 
 # 4. inspect results
 cat benchmark/results.json
@@ -25,16 +28,17 @@ cat benchmark/results.json
 
 ## Build profiles
 
-`install.sh` now accepts an optional first argument (or the `PROFILE`
-environment variable) that selects a set of compiler flags:
+`install.sh` accepts an optional first argument (or the `PROFILE`
+environment variable) that selects a set of compiler flags.
+All profiles include `-std=c++17`.
 
 | Profile      | Flags                                                          | Description                          |
 |--------------|----------------------------------------------------------------|--------------------------------------|
 | `baseline`   | `-O0`                                                         | No optimisations – timing floor      |
 | `O1`         | `-O1`                                                         | Minimal optimisations                |
 | `O2`         | `-O2 -fopenmp`                                                | Standard optimisations + OpenMP      |
-| `O3`         | `-O3 -fopenmp`                                                | **Default** (matches original build) |
-| `native`     | `-O3 -fopenmp -march=native`                                  | CPU-specific instructions (AVX2/NEON)|
+| `O3`         | `-O3 -fopenmp`                                                | Full optimisations, portable (no native) |
+| `native`     | `-O3 -fopenmp -march=native`                                  | **Default** – CPU-specific ISA (AVX2/NEON) |
 | `fast`       | `-O3 -fopenmp -march=native -ffast-math`                      | Non-strict IEEE FP for extra speed   |
 | `aggressive` | `-O3 -fopenmp -march=native -ffast-math -funroll-loops`       | Maximal vectorisation + loop unroll  |
 | `lto`        | `-O3 -fopenmp -march=native -ffast-math -flto=thin` (Clang) / `-flto` (GCC) | Thin / Full Link-Time Optimisation |
@@ -58,10 +62,10 @@ environment variable) that selects a set of compiler flags:
 
 ```bash
 # build a specific profile and leave core.so in place
-bash install.sh native
+bash install.sh fast
 
 # run the benchmark Python script against the current build
-python benchmark/benchmark.py --profile native --scene sphere --runs 3
+python benchmark/benchmark.py --profile fast --scene sphere --runs 3
 
 # override the number of OpenMP threads
 python benchmark/benchmark.py --omp-threads 4 --out benchmark/results.json
@@ -94,17 +98,17 @@ summary table like:
 ```
 Profile        mean (s)    min (s)    max (s)   speedup
 ────────────────────────────────────────────────────────
-baseline         12.504     12.312     12.731     0.41x
-O1                8.831      8.710      8.994     0.58x
-O2                6.102      6.031      6.195     0.84x
-O3                5.140      5.091      5.210     1.00x
-native            4.213      4.189      4.237     1.22x
-fast              3.902      3.878      3.934     1.32x
-aggressive        3.810      3.791      3.842     1.35x
-lto               3.750      3.730      3.789     1.37x
+baseline         12.504     12.312     12.731     0.30x
+O1                8.831      8.710      8.994     0.51x
+O2                6.102      6.031      6.195     0.71x
+O3                5.140      5.091      5.210     0.84x
+native            4.213      4.189      4.237     1.00x
+fast              3.902      3.878      3.934     1.08x
+aggressive        3.810      3.791      3.842     1.11x
+lto               3.750      3.730      3.789     1.12x
 ```
 
-The **speedup** column is relative to the `O3` profile (the original default).
+The **speedup** column is relative to the `native` profile (the default).
 
 ---
 
@@ -117,3 +121,4 @@ The **speedup** column is relative to the `O3` profile (the original default).
 | `CXXFLAGS`         | Extra compiler flags appended after the profile|
 | `LDFLAGS`          | Extra linker flags appended after the profile  |
 | `PROFILE`          | Default profile for install.sh (env-var form)  |
+
