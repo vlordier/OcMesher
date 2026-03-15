@@ -215,6 +215,10 @@ class OcMesher:
         self._oob_mask: np.ndarray = np.empty(_SDF_BATCH_SIZE, dtype=bool)
         self._oob_tmp: np.ndarray = np.empty(_SDF_BATCH_SIZE, dtype=bool)
 
+        # Cached null SDF pointer — avoids constructing POINTER(c_float)()
+        # on every update_verts / update_extra_verts call (~7 uses per element).
+        self._sdf_null = POINTER(self.sdf_float_type)()
+
         register_func(
             self,
             dll,
@@ -425,6 +429,8 @@ class OcMesher:
         b_max = self._bounds_max_np
         enclosed = self.enclosed
         single_kernel = n_kernels == 1
+        # Cache single-kernel reference outside the batch loop.
+        k0 = kernels[0] if single_kernel else None
 
         for i in range(0, n_XYZ, _SDF_BATCH_SIZE):
             end = min(i + _SDF_BATCH_SIZE, n_XYZ)
@@ -436,7 +442,8 @@ class OcMesher:
 
             if single_kernel:
                 # Single-kernel fast path: write SDF directly, no pool overhead.
-                sdf = np.asarray(kernels[0](XYZ))
+                raw = k0(XYZ)
+                sdf = raw if isinstance(raw, np.ndarray) else np.asarray(raw)
                 if sdf.shape != (n,):
                     msg = f"kernels[0] returned shape {sdf.shape} for {n} query points; expected ({n},)"
                     raise ValueError(msg)
@@ -486,13 +493,21 @@ class OcMesher:
         _validate_kernels(kernels)
         n_elements = len(kernels)
         single_kernel = n_elements == 1
+
+        # Cache attribute lookups for the hot loops below.
+        _af = self.AF
+        _sdf_af = self.sdf_AF
+        _kernel_caller = self.kernel_caller
+        _np_float = self.np_float_type
+        _sdf_null = self._sdf_null
+
         # octree only considering cameras, not sdf
         with Timer("coarse step part1"):
             n_blocks = self.run_coarse(
-                self.AF(self.center),
+                _af(self.center),
                 self.size,
                 self.n_cameras,
-                self.AF(self.cameras),
+                _af(self.cameras),
                 self.inview_pixels_per_cube,
                 self.inv_scale,
                 self.min_dist,
@@ -502,42 +517,49 @@ class OcMesher:
             )
         logger.info("coarse blocks: %d", n_blocks)
         # start considering sdf
+        _fine_group = self.fine_group
+        _fine_iteration = self.fine_iteration
+        _fine_iteration_output = self.fine_iteration_output
         with Timer("coarse step part2"), tqdm(total=n_blocks) as pbar:
             while True:
-                inc = self.fine_group()
+                inc = _fine_group()
                 if inc == 0:
                     break
                 pbar.update(inc)
-                n = self.fine_iteration(POINTER(self.sdf_float_type)())
+                n = _fine_iteration(_sdf_null)
                 while n > 0:
                     # np.empty is safe: fine_iteration_output fills every element.
-                    positions = np.empty((n, 3), dtype=self.np_float_type)
-                    self.fine_iteration_output(self.AF(positions))
-                    sdf_all = self.kernel_caller(kernels, positions)
+                    positions = np.empty((n, 3), dtype=_np_float)
+                    _fine_iteration_output(_af(positions))
+                    sdf_all = _kernel_caller(kernels, positions)
                     # Single-kernel fast path: column view avoids min() reduction.
                     sdf = sdf_all[:, 0] if single_kernel else sdf_all.min(axis=-1)
-                    n = self.fine_iteration(self.sdf_AF(sdf))
+                    n = _fine_iteration(_sdf_af(sdf))
         with Timer("filter visible blocks"):
             n_vis_block = self.vis_filter(self.simplify_occluded, self.visible_relax_iter)
         logger.info("visible blocks: %d", n_vis_block)
 
+        _final_iteration = self.final_iteration
+        _final_iteration2 = self.final_iteration2
+        _final_iteration3 = self.final_iteration3
         with Timer("fine step"), tqdm(total=n_vis_block) as pbar:
             nv = np.zeros(1, dtype=np.int32)
+            nv_ptr = AsInt(nv)
             while True:
-                n = self.final_iteration(AsInt(nv))
+                n = _final_iteration(nv_ptr)
                 if n == 0:
                     break
-                positions = np.empty((n, 3), dtype=self.np_float_type)
-                self.final_iteration2(self.AF(positions))
-                sdf = self.kernel_caller(kernels, positions)
-                inc = self.final_iteration3(self.sdf_AF(sdf))
+                positions = np.empty((n, 3), dtype=_np_float)
+                _final_iteration2(_af(positions))
+                sdf = _kernel_caller(kernels, positions)
+                inc = _final_iteration3(_sdf_af(sdf))
                 pbar.update(inc)
-            n = self.final_iteration_occluded(AsInt(nv))
+            n = self.final_iteration_occluded(nv_ptr)
             if n != 0:
-                positions = np.empty((n, 3), dtype=self.np_float_type)
-                self.final_iteration2(self.AF(positions))
-                sdf = self.kernel_caller(kernels, positions)
-                self.final_iteration3_occluded(self.sdf_AF(sdf))
+                positions = np.empty((n, 3), dtype=_np_float)
+                _final_iteration2(_af(positions))
+                sdf = _kernel_caller(kernels, positions)
+                self.final_iteration3_occluded(_sdf_af(sdf))
             nv = np.zeros(n_elements, dtype=np.int32)
             self.final_remaining(AsInt(nv))
             del positions, sdf
@@ -565,13 +587,14 @@ class OcMesher:
         _sdf_af = self.sdf_AF
         _kernel_caller = self.kernel_caller
         _np_float = self.np_float_type
+        _sdf_null = self._sdf_null
 
         # np.empty avoids zero-init since the C function fills these immediately.
         centers = np.empty((num_verts, 3), dtype=_np_float)
         self.get_verts_center(e, _af(centers))
         center_sdf = _kernel_caller(k_e, centers)
         cubes = np.empty((num_verts * 8, 3), dtype=_np_float)
-        self.update_verts(e, POINTER(self.sdf_float_type)(), POINTER(self.sdf_float_type)(), _af(cubes))
+        self.update_verts(e, _sdf_null, _sdf_null, _af(cubes))
         center_sdf_ptr = _sdf_af(center_sdf)
         tol = self.bisection_tol
         check_tol = tol > 0
@@ -653,7 +676,7 @@ class OcMesher:
         edge_vertices_lr = np.empty((nve * 2, 3), dtype=_np_float)
         face_vertices_lr = np.empty((nvf * 4, 3), dtype=_np_float)
         _update_extra_verts = self.update_extra_verts
-        _sdf_null = POINTER(self.sdf_float_type)()
+        _sdf_null = self._sdf_null
         _update_extra_verts(
             _sdf_null,
             _sdf_null,

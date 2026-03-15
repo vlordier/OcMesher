@@ -1014,3 +1014,59 @@ class TestHotPathLocalCaching:
         """np.fabs(arr).max() is equivalent to np.max(np.abs(arr))."""
         arr = np.array([-3.0, 1.5, -2.0, 0.5], dtype=np.float32)
         assert np.fabs(arr).max() == np.max(np.abs(arr))
+
+
+class TestCachedSdfNull:
+    """Verify that _sdf_null is cached once in __init__ and reused."""
+
+    def test_sdf_null_exists_after_init(self, sample_cameras, sample_bounds):
+        """_sdf_null must be set after __init__."""
+        with patch("ocmesher.core.load_cdll") as mock_load, patch("ocmesher.core.register_func"):
+            mock_load.return_value = MagicMock()
+            mesher = OcMesher(sample_cameras, sample_bounds)
+        assert hasattr(mesher, "_sdf_null")
+        assert mesher._sdf_null is not None
+
+    def test_sdf_null_is_ctypes_pointer(self, sample_cameras, sample_bounds):
+        """_sdf_null must be a ctypes null pointer of the SDF float type."""
+        with patch("ocmesher.core.load_cdll") as mock_load, patch("ocmesher.core.register_func"):
+            mock_load.return_value = MagicMock()
+            mesher = OcMesher(sample_cameras, sample_bounds)
+        # It's a null pointer: bool(ptr) is False for null ctypes pointers.
+        assert not mesher._sdf_null
+
+
+class TestCallLocalCaching:
+    """Verify that __call__ caches attribute lookups for hot loops."""
+
+    @staticmethod
+    def _make_mesher_stub(bounds, *, enclosed=True):
+        obj = object.__new__(OcMesher)
+        obj.bounds = bounds
+        obj.enclosed = enclosed
+        obj.sdf_np_float_type = np.float32
+        obj._bounds_min_np = np.array([bounds[0], bounds[2], bounds[4]], dtype=np.float64)
+        obj._bounds_max_np = np.array([bounds[1], bounds[3], bounds[5]], dtype=np.float64)
+        obj._sdf_pool = None
+        obj._oob_mask = np.empty(_SDF_BATCH_SIZE, dtype=bool)
+        obj._oob_tmp = np.empty(_SDF_BATCH_SIZE, dtype=bool)
+        return obj
+
+    def test_single_kernel_caches_k0(self, sample_bounds, sphere_kernel):
+        """Single-kernel fast path caches kernel[0] reference."""
+        mesher = self._make_mesher_stub(sample_bounds)
+        points = np.array([[0, 0, 0], [1, 0, 0]], dtype=np.float64)
+        # kernel_caller with a list containing one kernel should work
+        result = mesher.kernel_caller([sphere_kernel], points)
+        assert result.shape == (2, 1)
+
+    def test_isinstance_skip_asarray(self, sample_bounds):
+        """When kernel returns ndarray, np.asarray is skipped."""
+        mesher = self._make_mesher_stub(sample_bounds)
+
+        def ndarray_kernel(xyz):
+            return np.full(len(xyz), -1.0, dtype=np.float32)
+
+        points = np.array([[0, 0, 0]], dtype=np.float64)
+        result = mesher.kernel_caller([ndarray_kernel], points)
+        np.testing.assert_allclose(result[:, 0], [-1.0])
