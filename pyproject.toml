@@ -29,6 +29,10 @@ dev = [
 requires = ["setuptools>=68"]
 build-backend = "setuptools.build_meta"
 
+[project.scripts]
+ocmesher-bench = "benchmarks.bench_python_overhead:main"
+ocmesher-bench-e2e = "benchmarks.bench_e2e:main"
+
 [tool.setuptools.package-data]
 ocmesher = ["py.typed"]
 
