@@ -920,6 +920,22 @@ class TorchOcMesher:
         scale = self._cube_scales(levels).unsqueeze(1).unsqueeze(2)
         return self._origin.unsqueeze(0).unsqueeze(0) + scale * corner_coords.to(dtype=self._fdtype)
 
+    def _cube_corner_positions_f64(self, coords: torch.Tensor, levels: torch.Tensor) -> torch.Tensor:
+        """Like :meth:`_cube_corner_positions` but always in float64 on CPU.
+
+        Used by :meth:`_marching_cubes` and :meth:`_construct_element_mesh` so
+        that vertex placement and deduplication are identical across CPU, CUDA
+        and MPS regardless of ``self._fdtype``.
+
+        Returns:
+            ``(N, 8, 3)`` float64 tensor on CPU.
+        """
+        corner_coords = coords.cpu().unsqueeze(1) + self._corner_offsets.cpu().unsqueeze(0)
+        levels_cpu = levels.cpu().double()
+        scale = (self.size / torch.exp2(levels_cpu)).unsqueeze(1).unsqueeze(2)
+        origin = self._origin.cpu().double()
+        return origin.unsqueeze(0).unsqueeze(0) + scale * corner_coords.double()
+
     # ------------------------------------------------------------------
     # Batched projection (all cameras at once)
     # ------------------------------------------------------------------
@@ -1334,10 +1350,12 @@ class TorchOcMesher:
         """Run marching cubes on the given cubes (fully vectorised).
 
         Uses cached lookup tables and fused configuration + interpolation.
+        All geometry operations run on **CPU in float64** so that vertex
+        positions and deduplication are identical across CPU, CUDA and MPS.
 
         Args:
-            corners: ``(N, 8, 3)`` float64 - world positions of cube corners.
-            sdf:     ``(N, 8)``    float32 - SDF values at corners.
+            corners: ``(N, 8, 3)`` float64 CPU tensor — world positions.
+            sdf:     ``(N, 8)``    float32 tensor (any device) — SDF values.
 
         Returns:
             ``(vertices, faces)`` as numpy arrays.
@@ -1346,11 +1364,28 @@ class TorchOcMesher:
         if n == 0:
             return np.zeros((0, 3), dtype=np.float64), np.zeros((0, 3), dtype=np.int32)
 
-        # Use self.device (not sdf.device) because _ensure_mc_cache keys the
-        # cache with self.device.  On MPS, torch.device("mps") != tensor.device
-        # (which adds index=0), so using sdf.device would cause a KeyError.
-        device = self.device
-        cache = TorchOcMesher._mc_cache[device]
+        # Move SDF to CPU for marching cubes; lookup tables likewise on CPU.
+        sdf = sdf.cpu()
+        corners = corners.cpu()  # should already be CPU, but be safe
+
+        device_cpu = torch.device("cpu")
+        # Build / retrieve CPU-side MC cache (separate from the GPU cache).
+        if device_cpu not in TorchOcMesher._mc_cache:
+            edge_table_t = torch.tensor(_EDGE_TABLE, dtype=torch.int32)
+            max_tri_entries = max(len(row) for row in _TRI_TABLE)
+            tri_table_np = np.full((256, max_tri_entries), -1, dtype=np.int16)
+            for i, row in enumerate(_TRI_TABLE):
+                tri_table_np[i, : len(row)] = row
+            tri_table_t = torch.from_numpy(tri_table_np)
+            bit_shifts = torch.tensor([1 << i for i in range(8)], dtype=torch.int32)
+            TorchOcMesher._mc_cache[device_cpu] = {
+                "edge_table": edge_table_t,
+                "tri_table": tri_table_t,
+                "max_tri_entries": torch.tensor(max_tri_entries),
+                "bit_shifts": bit_shifts,
+            }
+
+        cache = TorchOcMesher._mc_cache[device_cpu]
         edge_table_t = cache["edge_table"]
         tri_table_t = cache["tri_table"]
         bit_shifts = cache["bit_shifts"]
@@ -1371,17 +1406,17 @@ class TorchOcMesher:
         a_corners = corners[active_idx]
         a_cfg = cube_idx[active_idx].long()
 
-        # --- Vectorised edge interpolation ---
-        ev = self._edge_vertices
-        s0 = a_sdf[:, ev[:, 0]]  # (A, 12)
-        s1 = a_sdf[:, ev[:, 1]]
+        # --- Vectorised edge interpolation (float64 for geometry) ---
+        ev = self._edge_vertices.cpu()
+        s0 = a_sdf[:, ev[:, 0]].double()  # (A, 12)
+        s1 = a_sdf[:, ev[:, 1]].double()
         denom = s0 - s1
-        t = torch.where(denom.abs() < _DENOM_EPS, torch.tensor(0.5, device=device), s0 / denom)
+        t = torch.where(denom.abs() < _DENOM_EPS, torch.tensor(0.5, dtype=torch.float64), s0 / denom)
         t.clamp_(0.0, 1.0)
-        t = t.unsqueeze(-1).to(dtype=a_corners.dtype)  # (A, 12, 1) match corner dtype for lerp
-        p0 = a_corners[:, ev[:, 0]]
-        p1 = a_corners[:, ev[:, 1]]
-        edge_positions = torch.lerp(p0, p1, t)  # fused linear interpolation
+        t = t.unsqueeze(-1)  # (A, 12, 1)
+        p0 = a_corners[:, ev[:, 0]].double()
+        p1 = a_corners[:, ev[:, 1]].double()
+        edge_positions = torch.lerp(p0, p1, t)  # fused linear interpolation in float64
 
         # Lookup per-cube triangle lists
         tri_entries = tri_table_t[a_cfg]
@@ -1405,24 +1440,17 @@ class TorchOcMesher:
         verts_flat = tri_verts.reshape(-1, 3)
 
         # --- Vertex deduplication via quantised coordinate hashing ---
-        # Perform quantisation on the device (GPU or CPU) to avoid a transfer
-        # for the hashing step.  Only transfer the final deduplicated arrays.
+        # All tensors are already on CPU in float64; quantise directly.
         quantized = (verts_flat * 1e8).round().long()
-        # Encode (x, y, z) triples into a single int64 hash per vertex.
-        # The components are bounded by the scene extent x 1e8 which fits in
-        # int64 when multiplied by large primes.
         hash_vals = quantized[:, 0] * 1000000007 + quantized[:, 1] * 1000000009 + quantized[:, 2] * 1000000021
         _, inverse = torch.unique(hash_vals, return_inverse=True)
-        # Build compact vertex array: pick the first representative per unique
-        # hash.  Writing indices in reverse order ensures the smallest (first)
-        # index wins for each unique bucket.
         n_unique = int(inverse.max().item()) + 1
         n_verts = len(inverse)
-        rep_idx = torch.zeros(n_unique, dtype=torch.long, device=device)
-        rev_arange = torch.arange(n_verts - 1, -1, -1, device=device)
+        rep_idx = torch.zeros(n_unique, dtype=torch.long)
+        rev_arange = torch.arange(n_verts - 1, -1, -1)
         rep_idx.scatter_(0, inverse[rev_arange], rev_arange)
-        dedup_verts = verts_flat[rep_idx].cpu().double().numpy()
-        dedup_faces = inverse.reshape(-1, 3).cpu().numpy().astype(np.int32)
+        dedup_verts = verts_flat[rep_idx].numpy()
+        dedup_faces = inverse.reshape(-1, 3).numpy().astype(np.int32)
         return dedup_verts, dedup_faces
 
     # ------------------------------------------------------------------
@@ -1531,6 +1559,8 @@ class TorchOcMesher:
             c_levels = levels[start:end]
 
             chunk_corners = self._cube_corner_positions(c_coords, c_levels)
+            # Float64 corners on CPU for precise marching-cubes interpolation
+            chunk_corners_f64 = self._cube_corner_positions_f64(c_coords, c_levels)
 
             if corner_sdf is not None:
                 # Reuse cached SDF — no redundant kernel evaluation needed.
@@ -1540,7 +1570,7 @@ class TorchOcMesher:
                 sdf_all = self._evaluate_sdf(kernels, flat)
                 sdf_min = sdf_all.min(dim=-1).values.reshape(end - start, 8)
 
-            v, f = self._marching_cubes(chunk_corners, sdf_min)
+            v, f = self._marching_cubes(chunk_corners_f64, sdf_min)
             if v.shape[0] > 0:
                 f = f + vert_offset
                 all_verts.append(v)
