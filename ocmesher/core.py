@@ -140,9 +140,9 @@ class OcMesher:
     ):
         """Initialise the mesher with camera intrinsics and bounds.
 
-        *bisection_tol*: when ``> 0``, bisection loops exit early once the
+        ``bisection_tol``: when ``> 0``, bisection loops exit early once the
         max absolute SDF residual drops below this value (default ``0``:
-        always run all *bisection_iters* iterations).
+        always run all ``bisection_iters`` iterations).
         """
         cam_poses, Ks, Hs, Ws = _validate_cameras(cameras)
         bounds = _validate_bounds(bounds)
