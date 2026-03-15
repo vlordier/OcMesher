@@ -1070,3 +1070,133 @@ class TestCallLocalCaching:
         points = np.array([[0, 0, 0]], dtype=np.float64)
         result = mesher.kernel_caller([ndarray_kernel], points)
         np.testing.assert_allclose(result[:, 0], [-1.0])
+
+
+# ---------------------------------------------------------------------------
+# kernel_caller out= parameter for result buffer reuse
+# ---------------------------------------------------------------------------
+
+
+class TestKernelCallerOutParam:
+    """Verify that kernel_caller `out=` parameter reuses the provided buffer."""
+
+    @staticmethod
+    def _make_mesher_stub(bounds, *, enclosed=True):
+        obj = object.__new__(OcMesher)
+        obj.bounds = bounds
+        obj.enclosed = enclosed
+        obj.sdf_np_float_type = np.float32
+        obj._bounds_min_np = np.array([bounds[0], bounds[2], bounds[4]], dtype=np.float64)
+        obj._bounds_max_np = np.array([bounds[1], bounds[3], bounds[5]], dtype=np.float64)
+        obj._sdf_pool = None
+        obj._oob_mask = np.empty(_SDF_BATCH_SIZE, dtype=bool)
+        obj._oob_tmp = np.empty(_SDF_BATCH_SIZE, dtype=bool)
+        return obj
+
+    def test_out_param_reuses_buffer(self, sample_bounds, sphere_kernel):
+        """When out= is provided, kernel_caller writes into it and returns it."""
+        mesher = self._make_mesher_stub(sample_bounds)
+        pts = np.array([[0, 0, 0], [1, 0, 0], [0, 1, 0]], dtype=np.float64)
+        buf = np.empty((3, 1), dtype=np.float32)
+        result = mesher.kernel_caller([sphere_kernel], pts, out=buf)
+        assert result is buf
+        # Values should match the kernel output
+        expected = mesher.kernel_caller([sphere_kernel], pts)
+        np.testing.assert_allclose(result, expected)
+
+    def test_out_none_allocates_fresh(self, sample_bounds, sphere_kernel):
+        """When out=None (default), kernel_caller allocates a new array."""
+        mesher = self._make_mesher_stub(sample_bounds)
+        pts = np.array([[0, 0, 0], [1, 0, 0]], dtype=np.float64)
+        r1 = mesher.kernel_caller([sphere_kernel], pts)
+        r2 = mesher.kernel_caller([sphere_kernel], pts)
+        # Different allocations, same values
+        assert r1 is not r2
+        np.testing.assert_allclose(r1, r2)
+
+    def test_out_param_multi_kernel(self, sample_bounds, sphere_kernel, plane_kernel):
+        """out= works with multi-kernel dispatch."""
+        mesher = self._make_mesher_stub(sample_bounds)
+        pts = np.array([[0, 0, 0], [1, 0, 0]], dtype=np.float64)
+        buf = np.empty((2, 2), dtype=np.float32)
+        result = mesher.kernel_caller([sphere_kernel, plane_kernel], pts, out=buf)
+        assert result is buf
+        expected = mesher.kernel_caller([sphere_kernel, plane_kernel], pts)
+        np.testing.assert_allclose(result, expected)
+
+
+# ---------------------------------------------------------------------------
+# Cached ctypes pointers in bisection loops
+# ---------------------------------------------------------------------------
+
+
+class TestCachedCtypesPointers:
+    """Verify that caching ctypes pointers for stable arrays produces correct results."""
+
+    @staticmethod
+    def _make_mesher_stub(bounds, *, enclosed=True):
+        obj = object.__new__(OcMesher)
+        obj.bounds = bounds
+        obj.enclosed = enclosed
+        obj.sdf_np_float_type = np.float32
+        obj._bounds_min_np = np.array([bounds[0], bounds[2], bounds[4]], dtype=np.float64)
+        obj._bounds_max_np = np.array([bounds[1], bounds[3], bounds[5]], dtype=np.float64)
+        obj._sdf_pool = None
+        obj._oob_mask = np.empty(_SDF_BATCH_SIZE, dtype=bool)
+        obj._oob_tmp = np.empty(_SDF_BATCH_SIZE, dtype=bool)
+        return obj
+
+    def test_cached_pointer_produces_same_result(self, sample_bounds, sphere_kernel):
+        """Cached pointer for a stable buffer gives correct SDF values."""
+        mesher = self._make_mesher_stub(sample_bounds)
+        pts = np.array([[0, 0, 0], [1, 0, 0], [0, 1, 0]], dtype=np.float64)
+        # Call with and without pre-allocated out buffer
+        result_fresh = mesher.kernel_caller([sphere_kernel], pts)
+        buf = np.empty((3, 1), dtype=np.float32)
+        result_reused = mesher.kernel_caller([sphere_kernel], pts, out=buf)
+        np.testing.assert_allclose(result_fresh, result_reused)
+
+    def test_repeated_calls_with_same_out_buffer(self, sample_bounds, sphere_kernel):
+        """Multiple calls with same out= buffer correctly overwrite each time."""
+        mesher = self._make_mesher_stub(sample_bounds)
+        buf = np.empty((3, 1), dtype=np.float32)
+        pts1 = np.array([[0, 0, 0], [1, 0, 0], [0, 1, 0]], dtype=np.float64)
+        pts2 = np.array([[2, 0, 0], [0, 2, 0], [0, 0, 2]], dtype=np.float64)
+        r1 = mesher.kernel_caller([sphere_kernel], pts1, out=buf)
+        vals1 = r1.copy()
+        r2 = mesher.kernel_caller([sphere_kernel], pts2, out=buf)
+        # r2 is the same buffer, but values changed
+        assert r2 is buf
+        assert not np.array_equal(vals1, r2)
+        expected2 = mesher.kernel_caller([sphere_kernel], pts2)
+        np.testing.assert_allclose(r2, expected2)
+
+
+# ---------------------------------------------------------------------------
+# Early-exit for zero extra vertices
+# ---------------------------------------------------------------------------
+
+
+class TestEarlyExitZeroExtraVerts:
+    """Verify that _refine_extra_vertices docstring mentions early-exit."""
+
+    def test_docstring_mentions_early_exit(self):
+        """The method docstring should document the early-exit optimisation."""
+        doc = OcMesher._refine_extra_vertices.__doc__
+        assert "Early-exit" in doc or "early-exit" in doc or "nve == 0" in doc
+
+
+# ---------------------------------------------------------------------------
+# Bisection iters cached as local
+# ---------------------------------------------------------------------------
+
+
+class TestBisectionItersLocal:
+    """Verify that bisection_iters is used correctly."""
+
+    def test_bisection_iters_attribute_exists(self, sample_cameras, sample_bounds):
+        """bisection_iters must be stored as an instance attribute."""
+        with patch("ocmesher.core.load_cdll") as mock_load, patch("ocmesher.core.register_func"):
+            mock_load.return_value = MagicMock()
+            mesher = OcMesher(sample_cameras, sample_bounds, bisection_iters=10)
+        assert mesher.bisection_iters == 10

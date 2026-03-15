@@ -395,7 +395,7 @@ class OcMesher:
         np.logical_or(out_bound, _tmp, out=out_bound)
         return out_bound
 
-    def kernel_caller(self, kernels, XYZ_all):
+    def kernel_caller(self, kernels, XYZ_all, *, out=None):
         """Evaluate SDF *kernels* at the given *XYZ_all* positions.
 
         Optimisations over the naïve implementation:
@@ -411,6 +411,8 @@ class OcMesher:
           ``kernel_caller`` invocations (lazy-initialised on first use).
         - **Pre-allocated output buffer** filled in-place (no list
           accumulation, no ``np.stack`` / ``np.concatenate`` per batch).
+          When *out* is provided, writes into the caller's buffer to
+          avoid per-call allocation in tight loops (bisection iterations).
         - **Single-kernel fast path** — when there is exactly one kernel,
           bypasses the pool and writes SDF values directly into the result
           column, avoiding ``_eval_kernels_batch`` dispatch overhead.
@@ -418,13 +420,21 @@ class OcMesher:
         Note: kernel callability is validated once by ``__call__`` at
         pipeline entry; this method skips per-call validation to avoid
         repeated checks in the 15-iteration bisection loops.
+
+        Args:
+            kernels: Sequence of SDF kernel callables.
+            XYZ_all: ``(N, 3)`` array of query positions.
+            out: Optional pre-allocated ``(n_XYZ, n_kernels)`` result buffer.
+                 When provided, SDF values are written into this array and
+                 it is returned directly, eliminating per-call allocation
+                 overhead in the bisection inner loops.
         """
         n_XYZ = len(XYZ_all)
         n_kernels = len(kernels)
         if n_XYZ == 0:
             return np.zeros((0, n_kernels), dtype=self.sdf_np_float_type)
 
-        result = np.empty((n_XYZ, n_kernels), dtype=self.sdf_np_float_type)
+        result = out if out is not None else np.empty((n_XYZ, n_kernels), dtype=self.sdf_np_float_type)
         b_min = self._bounds_min_np
         b_max = self._bounds_max_np
         enclosed = self.enclosed
@@ -599,15 +609,22 @@ class OcMesher:
         tol = self.bisection_tol
         check_tol = tol > 0
         _update_verts = self.update_verts
-        for _ in range(self.bisection_iters):
-            sdf = _kernel_caller(k_e, cubes)
-            _update_verts(e, _sdf_af(sdf), center_sdf_ptr, _af(cubes))
+        _bisection_iters = self.bisection_iters
+        # Cache ctypes pointer for cubes — the buffer is modified in-place
+        # by C but never re-allocated, so the pointer remains valid.
+        cubes_ptr = _af(cubes)
+        # Pre-allocate SDF result buffer for the bisection loop to avoid
+        # creating a fresh (N, 1) array on every iteration.
+        _sdf_buf = np.empty((len(cubes), len(k_e)), dtype=self.sdf_np_float_type)
+        for _ in range(_bisection_iters):
+            sdf = _kernel_caller(k_e, cubes, out=_sdf_buf)
+            _update_verts(e, _sdf_af(sdf), center_sdf_ptr, cubes_ptr)
             # Early-exit: if all SDF residuals are below tolerance the
             # surface has been located to sufficient accuracy.
             if check_tol and np.fabs(sdf).max() < tol:
                 break
         cubes_r = np.empty((num_verts * 8, 3), dtype=_np_float)
-        self.get_lr_verts(e, _af(cubes), _af(cubes_r))
+        self.get_lr_verts(e, cubes_ptr, _af(cubes_r))
         # Fused left/right SDF evaluation: single kernel_caller call instead
         # of two, halving the Python→SDF round-trip overhead.
         # Pre-allocated buffer avoids np.concatenate allocation overhead.
@@ -647,6 +664,12 @@ class OcMesher:
         - All ``np.concatenate`` calls replaced with pre-allocated
           slice-fill to avoid allocation overhead in hot paths.
         - Attribute lookups cached as locals for the tight bisection loop.
+        - Ctypes pointers cached for arrays modified in-place by C (stable
+          buffer address) to avoid per-iteration pointer construction.
+        - Pre-allocated SDF result buffer reused across bisection iterations
+          via the ``out=`` parameter of ``kernel_caller``.
+        - Early-exit when no extra vertices exist (nve == 0 and nvf == 0),
+          skipping all SDF evaluation and bisection overhead.
         """
         # Bind frequently-used attributes to locals to avoid repeated
         # LOAD_ATTR lookups in the tight bisection loop (~15 iterations).
@@ -658,6 +681,12 @@ class OcMesher:
         cnts = np.zeros(3, dtype=np.int32)
         self.construct_faces(e, _af(vertices), AsInt(cnts))
         nve, nvf, nf = cnts
+        # Early-exit: when there are no extra vertices, skip all SDF
+        # evaluation and bisection — just return the faces.
+        if nve == 0 and nvf == 0:
+            faces = np.empty((nf, 3), dtype=np.int32)
+            self.get_faces(AsInt(faces))
+            return vertices, faces
         # np.empty avoids zero-init: C functions fill all elements immediately.
         edge_vertices_c = np.empty((nve, 3), dtype=_np_float)
         face_vertices_c = np.empty((nvf, 3), dtype=_np_float)
@@ -677,42 +706,52 @@ class OcMesher:
         face_vertices_lr = np.empty((nvf * 4, 3), dtype=_np_float)
         _update_extra_verts = self.update_extra_verts
         _sdf_null = self._sdf_null
+        # Cache ctypes pointers for arrays modified in-place by C —
+        # buffer addresses are stable across iterations.
+        elr_ptr = _af(edge_vertices_lr)
+        flr_ptr = _af(face_vertices_lr)
         _update_extra_verts(
             _sdf_null,
             _sdf_null,
             _sdf_null,
             _sdf_null,
-            _af(edge_vertices_lr),
-            _af(face_vertices_lr),
+            elr_ptr,
+            flr_ptr,
         )
         n_edge_lr = len(edge_vertices_lr)
         # Pre-allocate combined buffer once; fill slices each iteration.
         bisection_buf = np.empty((n_edge_lr + len(face_vertices_lr), 3), dtype=_np_float)
         tol = self.bisection_tol
         check_tol = tol > 0
-        for _ in range(self.bisection_iters):
+        _bisection_iters = self.bisection_iters
+        # Cache ctypes pointers for center SDF arrays (unchanged across iterations).
+        ecenter_ptr = _sdf_af(ecenter_sdf)
+        fcenter_ptr = _sdf_af(fcenter_sdf)
+        # Pre-allocate SDF result buffer for the bisection loop.
+        _sdf_buf = np.empty((len(bisection_buf), len(k_e)), dtype=self.sdf_np_float_type)
+        for _ in range(_bisection_iters):
             bisection_buf[:n_edge_lr] = edge_vertices_lr
             bisection_buf[n_edge_lr:] = face_vertices_lr
-            ef_sdf = _kernel_caller(k_e, bisection_buf)
+            ef_sdf = _kernel_caller(k_e, bisection_buf, out=_sdf_buf)
             e_sdf = ef_sdf[:n_edge_lr]
             f_sdf = ef_sdf[n_edge_lr:]
             _update_extra_verts(
                 _sdf_af(e_sdf),
                 _sdf_af(f_sdf),
-                _sdf_af(ecenter_sdf),
-                _sdf_af(fcenter_sdf),
-                _af(edge_vertices_lr),
-                _af(face_vertices_lr),
+                ecenter_ptr,
+                fcenter_ptr,
+                elr_ptr,
+                flr_ptr,
             )
             if check_tol and np.fabs(ef_sdf).max() < tol:
                 break
-        del edge_vertices_c, face_vertices_c, ecenter_sdf, fcenter_sdf, bisection_buf
+        del edge_vertices_c, face_vertices_c, ecenter_sdf, fcenter_sdf, bisection_buf, _sdf_buf
         edge_vertices_r = np.empty((nve * 2, 3), dtype=_np_float)
         face_vertices_r = np.empty((nvf * 4, 3), dtype=_np_float)
         self.get_lr_extra_verts(
-            _af(edge_vertices_lr),
+            elr_ptr,
             _af(edge_vertices_r),
-            _af(face_vertices_lr),
+            flr_ptr,
             _af(face_vertices_r),
         )
         # Fused left/right SDF: 1 call instead of 4 — all 4 vertex arrays
