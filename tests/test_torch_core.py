@@ -293,23 +293,26 @@ class TestCamDimensionTypes:
 # Refactoring: pre-allocated depth buffer (commit 3)
 # ---------------------------------------------------------------------------
 class TestDepthBufPreallocation:
-    def test_depth_buf_exists(self, single_cam_mesher):
-        """Pre-allocated depth buffer attribute must be present after init."""
-        assert hasattr(single_cam_mesher, "_depth_buf")
-        assert isinstance(single_cam_mesher._depth_buf, torch.Tensor)
+    def test_depth_bufs_exists(self, single_cam_mesher):
+        """Pre-allocated batched depth buffer attribute must be present after init."""
+        assert hasattr(single_cam_mesher, "_depth_bufs")
+        assert isinstance(single_cam_mesher._depth_bufs, torch.Tensor)
 
-    def test_depth_buf_dtype_matches_fdtype(self, single_cam_mesher):
+    def test_depth_bufs_dtype_matches_fdtype(self, single_cam_mesher):
         """Depth buffer dtype must match the compute dtype."""
-        assert single_cam_mesher._depth_buf.dtype == single_cam_mesher._fdtype
+        assert single_cam_mesher._depth_bufs.dtype == single_cam_mesher._fdtype
 
-    def test_depth_buf_size_correct(self, single_cam_mesher):
-        """Depth buffer must hold at least the max reduced-resolution camera image."""
+    def test_depth_bufs_shape_correct(self, single_cam_mesher):
+        """Depth buffer must be (C, max_buf) to hold all cameras' bin grids."""
         factor = 10.0
-        expected = max(
+        expected_max_buf = max(
             max(1, int(h / factor)) * max(1, int(w / factor))
             for h, w in zip(single_cam_mesher.cam_heights, single_cam_mesher.cam_widths, strict=True)
         )
-        assert single_cam_mesher._depth_buf.shape[0] == expected
+        assert single_cam_mesher._depth_bufs.shape == (
+            single_cam_mesher.n_cameras,
+            expected_max_buf,
+        )
 
     def test_visibility_filter_with_preallocated_buf(self, single_cam_mesher):
         """_visibility_filter must still produce correct shape with pre-allocated buf."""

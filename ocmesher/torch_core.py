@@ -807,11 +807,21 @@ class TorchOcMesher:
         # across all cameras, avoiding repeated torch.full() allocation inside
         # the per-camera loop of _visibility_filter.  fill_() resets it cheaply.
         factor = 10.0
-        self._vis_depth_buf_size: int = max(
-            max(1, int(h / factor)) * max(1, int(w / factor))
-            for h, w in zip(self.cam_heights, self.cam_widths, strict=True)
+        # Pre-compute per-camera bin dimensions as tensors for batched
+        # visibility filtering (avoids int()/max() inside the hot loop).
+        vis_hb_list = [max(1, int(h / factor)) for h in self.cam_heights]
+        vis_wb_list = [max(1, int(w / factor)) for w in self.cam_widths]
+        self._vis_hb = torch.tensor(vis_hb_list, dtype=torch.int64, device=self.device)  # (C,)
+        self._vis_wb = torch.tensor(vis_wb_list, dtype=torch.int64, device=self.device)  # (C,)
+        self._vis_max_buf: int = max(
+            hb * wb for hb, wb in zip(vis_hb_list, vis_wb_list, strict=True)
         )
-        self._depth_buf = torch.empty(self._vis_depth_buf_size, dtype=self._fdtype, device=self.device)
+        self._vis_inv_factor = 1.0 / factor
+        # Batched depth buffer: (C, max_buf) — one row per camera, padded to
+        # the largest camera's bin grid so scatter_reduce can be batched.
+        self._depth_bufs = torch.empty(
+            (self.n_cameras, self._vis_max_buf), dtype=self._fdtype, device=self.device,
+        )
 
         # Ensure MC tables are cached for this device
         self._ensure_mc_cache()
@@ -1212,13 +1222,14 @@ class TorchOcMesher:
         """Classify positions as visible / occluded via depth buffering.
 
         Uses pre-computed K @ inv_pose projection matrix and batched operations.
-        Camera loop and neighbour relaxation are fully vectorised.
+        Projection, in-view checks, bin coordinate computation, and neighbour
+        relaxation are fully vectorised across all cameras simultaneously.
+        Only the per-camera depth-buffer scatter remains sequential.
 
         Returns:
             ``(N,)`` bool tensor - *True* for visible.
         """
         n = positions.shape[0]
-        visible = torch.zeros(n, dtype=torch.bool, device=self.device)
 
         # Pad-free projection: use pre-split rotation + translation.
         img_all = torch.einsum("cij,nj->cni", self._proj_R, positions) + self._proj_t  # (C, N, 3)
@@ -1238,36 +1249,52 @@ class TorchOcMesher:
             # Simple case: visible if in any camera view
             return in_view_all.any(dim=0)
 
-        # Depth-buffered occlusion culling per camera
-        factor = 10.0
-        for k in range(self.n_cameras):
-            in_view = in_view_all[k]
-            depth = depth_all[k]
-            px = px_all[k]
-            py = py_all[k]
-            h, w = self.cam_heights[k], self.cam_widths[k]
-            hb = max(1, int(h / factor))
-            wb = max(1, int(w / factor))
-            bx = (px / factor).long().clamp(0, wb - 1)
-            by = (py / factor).long().clamp(0, hb - 1)
-            # Reuse pre-allocated depth buffer: fill_ resets to inf in-place,
-            # avoiding a new torch.full allocation per camera iteration.
-            buf_size = wb * hb
-            depth_buf = self._depth_buf[:buf_size].fill_(float("inf"))
-            valid = in_view & (depth > 0)
-            if valid.any():
-                idx = bx[valid] * hb + by[valid]
-                depth_buf.scatter_reduce_(0, idx, depth[valid], reduce="amin")
+        # --- Batched bin coordinate computation (all cameras at once) ---
+        # Pre-computed per-camera bin dimensions: _vis_hb (C,), _vis_wb (C,)
+        hb_col = self._vis_hb.unsqueeze(1)  # (C, 1) for broadcast
+        wb_col = self._vis_wb.unsqueeze(1)  # (C, 1) for broadcast
 
-            # Vectorised neighbour relaxation using pre-computed offsets
-            # _relax_dx, _relax_dy: ((2*rl+1)^2,) offset grids
-            nbx = (bx.unsqueeze(1) + self._relax_dx.unsqueeze(0)).clamp(0, wb - 1)  # (N, R)
-            nby = (by.unsqueeze(1) + self._relax_dy.unsqueeze(0)).clamp(0, hb - 1)  # (N, R)
-            nb_idx = nbx * hb + nby  # (N, R)
-            nb_depths = depth_buf[nb_idx]  # (N, R)
-            near_front = (depth.unsqueeze(1) <= nb_depths).any(dim=1)  # (N,)
-            visible |= in_view & near_front
-        return visible
+        bx_all = (px_all * self._vis_inv_factor).long().clamp_(min=0)  # (C, N)
+        by_all = (py_all * self._vis_inv_factor).long().clamp_(min=0)  # (C, N)
+        bx_all = torch.minimum(bx_all, wb_col - 1)  # per-camera upper clamp
+        by_all = torch.minimum(by_all, hb_col - 1)
+
+        # Linear buffer indices: idx = bx * hb + by (per-camera hb broadcast)
+        idx_all = bx_all * hb_col + by_all  # (C, N)
+
+        valid_all = in_view_all & (depth_all > 0)  # (C, N)
+
+        # --- Per-camera depth buffer scatter (cannot be batched) ---
+        # Reset batched depth buffer to +inf; one row per camera, padded to
+        # the largest camera's grid so indices don't exceed bounds.
+        self._depth_bufs.fill_(float("inf"))
+        for k in range(self.n_cameras):
+            valid_k = valid_all[k]
+            if valid_k.any():
+                self._depth_bufs[k].scatter_reduce_(
+                    0, idx_all[k][valid_k], depth_all[k][valid_k], reduce="amin",
+                )
+
+        # --- Batched neighbour relaxation (all cameras simultaneously) ---
+        # nbx/nby: (C, N, R) via broadcast from (C, N, 1) + (1, 1, R)
+        nbx = (bx_all.unsqueeze(2) + self._relax_dx).clamp_(min=0)  # (C, N, R)
+        nby = (by_all.unsqueeze(2) + self._relax_dy).clamp_(min=0)
+        nbx = torch.minimum(nbx, (wb_col - 1).unsqueeze(2))
+        nby = torch.minimum(nby, (hb_col - 1).unsqueeze(2))
+        nb_idx = nbx * hb_col.unsqueeze(2) + nby  # (C, N, R)
+
+        # Batched gather: look up neighbour depths from all camera buffers at
+        # once.  Reshape to (C, N*R) for gather, then back to (C, N, R).
+        n_relax = nb_idx.shape[2]
+        nb_flat = nb_idx.reshape(self.n_cameras, -1)  # (C, N*R)
+        nb_depths = torch.gather(self._depth_bufs, 1, nb_flat).reshape(
+            self.n_cameras, n, n_relax,
+        )  # (C, N, R)
+
+        # A point is near the front surface if its depth ≤ any neighbour's
+        # buffered depth, for at least one camera.
+        near_front = (depth_all.unsqueeze(2) <= nb_depths).any(dim=2)  # (C, N)
+        return (in_view_all & near_front).any(dim=0)  # (N,)
 
     # ------------------------------------------------------------------
     # Marching cubes (fully vectorised, fused)
