@@ -615,10 +615,12 @@ class TestSplitRotationTranslation:
         """R|t components must reconstruct the full inv_pose matrix."""
         full = single_cam_mesher.cam_inv_poses  # (C, 3, 4)
         torch.testing.assert_close(
-            single_cam_mesher._inv_pose_R, full[:, :, :3],
+            single_cam_mesher._inv_pose_R,
+            full[:, :, :3],
         )
         torch.testing.assert_close(
-            single_cam_mesher._inv_pose_t, full[:, :, 3].unsqueeze(1),
+            single_cam_mesher._inv_pose_t,
+            full[:, :, 3].unsqueeze(1),
         )
 
     def test_projected_sizes_positive(self, single_cam_mesher):
@@ -653,11 +655,16 @@ class TestRefineSkipKeptCubes:
         s_sdf = corner_sdf[mask]
         # Optimised path
         c_opt, l_opt, sdf_opt = single_cam_mesher._refine_surface_octree(
-            kernels, s_coords.clone(), s_levels.clone(), corner_sdf=s_sdf.clone(),
+            kernels,
+            s_coords.clone(),
+            s_levels.clone(),
+            corner_sdf=s_sdf.clone(),
         )
         # Fallback path
         c_fb, l_fb, sdf_fb = single_cam_mesher._refine_surface_octree(
-            kernels, s_coords.clone(), s_levels.clone(),
+            kernels,
+            s_coords.clone(),
+            s_levels.clone(),
         )
         assert len(c_opt) == len(c_fb)
         assert len(l_opt) == len(l_fb)
@@ -671,7 +678,10 @@ class TestRefineSkipKeptCubes:
         s_levels = levels[mask]
         s_sdf = corner_sdf[mask]
         _, _, r_sdf = single_cam_mesher._refine_surface_octree(
-            kernels, s_coords.clone(), s_levels.clone(), corner_sdf=s_sdf.clone(),
+            kernels,
+            s_coords.clone(),
+            s_levels.clone(),
+            corner_sdf=s_sdf.clone(),
         )
         assert r_sdf is not None
         assert r_sdf.shape[1] == 8

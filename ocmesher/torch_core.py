@@ -813,14 +813,14 @@ class TorchOcMesher:
         vis_wb_list = [max(1, int(w / factor)) for w in self.cam_widths]
         self._vis_hb = torch.tensor(vis_hb_list, dtype=torch.int64, device=self.device)  # (C,)
         self._vis_wb = torch.tensor(vis_wb_list, dtype=torch.int64, device=self.device)  # (C,)
-        self._vis_max_buf: int = max(
-            hb * wb for hb, wb in zip(vis_hb_list, vis_wb_list, strict=True)
-        )
+        self._vis_max_buf: int = max(hb * wb for hb, wb in zip(vis_hb_list, vis_wb_list, strict=True))
         self._vis_inv_factor = 1.0 / factor
         # Batched depth buffer: (C, max_buf) — one row per camera, padded to
         # the largest camera's bin grid so scatter_reduce can be batched.
         self._depth_bufs = torch.empty(
-            (self.n_cameras, self._vis_max_buf), dtype=self._fdtype, device=self.device,
+            (self.n_cameras, self._vis_max_buf),
+            dtype=self._fdtype,
+            device=self.device,
         )
 
         # Ensure MC tables are cached for this device
@@ -890,7 +890,9 @@ class TorchOcMesher:
         return self.size / torch.exp2(levels.to(self._fdtype))
 
     @torch.no_grad()
-    def _cube_centers(self, coords: torch.Tensor, levels: torch.Tensor, *, cube_scales: torch.Tensor | None = None) -> torch.Tensor:
+    def _cube_centers(
+        self, coords: torch.Tensor, levels: torch.Tensor, *, cube_scales: torch.Tensor | None = None
+    ) -> torch.Tensor:
         """Integer octree coords -> world-space center positions.
 
         Args:
@@ -922,7 +924,9 @@ class TorchOcMesher:
     # Batched projection (all cameras at once)
     # ------------------------------------------------------------------
     @torch.no_grad()
-    def _projected_sizes(self, positions: torch.Tensor, levels: torch.Tensor, *, cube_scales: torch.Tensor | None = None) -> torch.Tensor:
+    def _projected_sizes(
+        self, positions: torch.Tensor, levels: torch.Tensor, *, cube_scales: torch.Tensor | None = None
+    ) -> torch.Tensor:
         """Max projected pixel size across *all* cameras (batched via bmm).
 
         Args:
@@ -1107,19 +1111,18 @@ class TorchOcMesher:
         # faster than ``torch.unique(dim=0)`` which performs an O(N log N)
         # lexicographic sort with 3-column comparisons per step.
         quantized = (flat * _CORNER_QUANT_SCALE).round().long()
-        hash_vals = (
-            quantized[:, 0] * 1000000007
-            + quantized[:, 1] * 1000000009
-            + quantized[:, 2] * 1000000021
-        )
+        hash_vals = quantized[:, 0] * 1000000007 + quantized[:, 1] * 1000000009 + quantized[:, 2] * 1000000021
         sort_idx = torch.argsort(hash_vals)
         sorted_q = quantized[sort_idx]
 
         # Consecutive rows that differ mark new unique groups.
         diff = (sorted_q[1:] != sorted_q[:-1]).any(dim=1)
-        group_starts = torch.cat([
-            torch.tensor([True], device=flat.device, dtype=torch.bool), diff,
-        ])
+        group_starts = torch.cat(
+            [
+                torch.tensor([True], device=flat.device, dtype=torch.bool),
+                diff,
+            ]
+        )
         group_ids = group_starts.cumsum(0) - 1  # 0-based unique-group ID
 
         # Map back to original (unsorted) order.
@@ -1215,7 +1218,9 @@ class TorchOcMesher:
                 # Optimised path: kept cubes already have valid corner SDF
                 # values — evaluate only the new children.
                 child_mask, child_corner_sdf = self._find_surface_cubes(
-                    kernels, child_coords, child_levels,
+                    kernels,
+                    child_coords,
+                    child_levels,
                 )
                 coords = torch.cat([coords[keep_mask], child_coords[child_mask]])
                 levels = torch.cat([levels[keep_mask], child_levels[child_mask]])
@@ -1288,7 +1293,10 @@ class TorchOcMesher:
             valid_k = valid_all[k]
             if valid_k.any():
                 self._depth_bufs[k].scatter_reduce_(
-                    0, idx_all[k][valid_k], depth_all[k][valid_k], reduce="amin",
+                    0,
+                    idx_all[k][valid_k],
+                    depth_all[k][valid_k],
+                    reduce="amin",
                 )
 
         # --- Batched neighbour relaxation (all cameras simultaneously) ---
@@ -1304,7 +1312,9 @@ class TorchOcMesher:
         n_relax = nb_idx.shape[2]
         nb_flat = nb_idx.reshape(self.n_cameras, -1)  # (C, N*R)
         nb_depths = torch.gather(self._depth_bufs, 1, nb_flat).reshape(
-            self.n_cameras, n, n_relax,
+            self.n_cameras,
+            n,
+            n_relax,
         )  # (C, N, R)
 
         # A point is near the front surface if its depth ≤ any neighbour's
