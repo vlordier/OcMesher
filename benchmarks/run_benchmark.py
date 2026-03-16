@@ -295,7 +295,7 @@ def _bench_torch(
 # ---------------------------------------------------------------------------
 # Sub-operation micro-benchmarks
 # ---------------------------------------------------------------------------
-def _micro_sdf_eval(cameras, bounds, n_points: int = 500_000, n_runs: int = 5):
+def _micro_sdf_eval(cameras, bounds, n_points: int = 500_000, n_runs: int = 5) -> dict[str, object]:
     """Compare SDF evaluation throughput (numpy vs torch+threading)."""
     results: dict[str, object] = {"n_points": n_points}
     rng = np.random.default_rng(42)
@@ -335,7 +335,7 @@ def _micro_sdf_eval(cameras, bounds, n_points: int = 500_000, n_runs: int = 5):
     return results
 
 
-def _micro_projection(cameras, bounds, n_cubes: int = 100_000, n_runs: int = 5):
+def _micro_projection(cameras, bounds, n_cubes: int = 100_000, n_runs: int = 5) -> dict[str, object]:
     """Compare camera-projection throughput (batched vs per-camera)."""
     results: dict[str, object] = {"n_cubes": n_cubes}
 
