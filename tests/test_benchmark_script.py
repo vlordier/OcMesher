@@ -36,7 +36,7 @@ class TestParseLastJsonLine:
         assert result["n_faces"] == 20
 
     def test_raises_when_no_json_line(self):
-        with pytest.raises(RuntimeError, match="No JSON output"):
+        with pytest.raises(benchmark.BenchmarkOutputParseError, match="No JSON output"):
             benchmark._parse_last_json_line("hello\nworld\n")
 
 

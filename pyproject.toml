@@ -133,7 +133,6 @@ ignore = [
     "S603",     # subprocess calls are intentional in benchmark harness
     "S607",     # partial executable path (uses system bash intentionally)
     "PLW1510",  # subprocess.run check handling is explicit
-    "TRY003",   # benchmark exceptions keep contextual messages inline
     "EM101",    # same rationale as TRY003
     "EM102",    # same rationale as TRY003
     "D",        # no docstring enforcement in benchmark script

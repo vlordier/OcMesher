@@ -47,6 +47,30 @@ class TierConfigResult(TypedDict):
     n_verts: int
     n_faces: int
 
+
+class BenchmarkError(RuntimeError):
+    """Base class for benchmark script errors."""
+
+
+class BenchmarkOutputParseError(BenchmarkError):
+    """Raised when benchmark subprocess output does not contain result JSON."""
+
+    def __init__(self, stdout: str) -> None:
+        self.stdout = stdout
+
+    def __str__(self) -> str:
+        return f"No JSON output.\nstdout:\n{self.stdout}"
+
+
+class MesherSubprocessError(BenchmarkError):
+    """Raised when mesher subprocess exits with non-zero status."""
+
+    def __init__(self, stderr: str) -> None:
+        self.stderr = stderr
+
+    def __str__(self) -> str:
+        return f"Mesher subprocess failed.\nstderr:\n{self.stderr}"
+
 BASELINE_BUILD = "./install.sh"
 OPTIMISED_BUILD = "./install_optimized.sh"
 
@@ -176,7 +200,7 @@ def _parse_last_json_line(stdout: str) -> RunResult:
                 "n_verts": int(parsed["n_verts"]),
                 "n_faces": int(parsed["n_faces"]),
             }
-    raise RuntimeError(f"No JSON output.\nstdout:\n{stdout}")
+    raise BenchmarkOutputParseError(stdout)
 
 
 def build(script: str) -> float:
@@ -205,7 +229,7 @@ def run_mesher_subprocess(pixels_per_cube: int, coarse_count: int, sdf_type: str
     )
     if result.returncode != 0:
         print(f"  ERROR:\n{result.stderr}", file=sys.stderr)
-        raise RuntimeError("Mesher subprocess failed")
+        raise MesherSubprocessError(result.stderr)
     return _parse_last_json_line(result.stdout)
 
 
