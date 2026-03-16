@@ -111,6 +111,29 @@ uv run pytest
 uv run python benchmark.py --configs small --runs 1
 ```
 
+To persist benchmark results with run metadata for later branch-to-branch
+comparison, write snapshot JSON artifacts instead of plain results:
+
+```bash
+uv run python benchmark.py --configs small --runs 1 --snapshot-json benchmark_artifacts/benchmark_tiers_snapshot.json
+uv run python benchmarks/bench_python_overhead.py --sizes 100 1000 --snapshot-json benchmark_artifacts/bench_python_overhead_snapshot.json
+uv run python benchmarks/bench_e2e.py --sizes 1000 10000 --snapshot-json benchmark_artifacts/bench_e2e_snapshot.json
+uv run python benchmarks/bench_mlx_sdf.py --sizes 1000 10000 --snapshot-json benchmark_artifacts/bench_mlx_sdf_snapshot.json
+```
+
+The benchmark helpers also support comparing snapshot files from two runs or
+branches:
+
+```bash
+uv run python benchmarks/bench_python_overhead.py --compare old.json new.json
+uv run python benchmarks/bench_e2e.py --compare old.json new.json
+```
+
+Notes:
+- Snapshot files include execution metadata such as branch, commit, Python version, platform, and command line.
+- Optional runtime tiers such as `numba` and `mlx` are skipped automatically when their dependencies are not installed.
+- The MLX benchmark is a narrow SDF-only pilot on macOS, not a full mesher backend.
+
 To perform deterministic numerical parity checks against `main`, ensure both branches are built with the default build script (`bash install.sh`) and compare mesh counts/sums for the same fixed camera/SDF case.
 
 ```bash
@@ -131,3 +154,27 @@ Notes:
 - `--upstream-parity-strict` requires `--upstream-parity`.
 - `--parity-pixels-per-cube` and `--parity-coarse-count` must be >= 1.
 - `--parity-atol` must be >= 0.
+
+### Torch Backend Contract
+
+`ocmesher.TorchOcMesher` now exposes a small backend contract intended for
+future accelerator backends and zero-copy integration work:
+
+```python
+from ocmesher.torch_core import TorchOcMesher
+
+mesher = TorchOcMesher(cameras, bounds, device="cpu")
+caps = mesher.get_capabilities()
+points = mesher.as_backend_tensor([[0.0, 0.0, 0.0]])
+distances = mesher.evaluate_sdf_batch([sdf], points)
+dlpack_capsule = mesher.to_backend_dlpack(points)
+```
+
+Current contract surface:
+- `version`: explicit backend contract version string.
+- `get_capabilities()`: reports device/runtime support and preferred batch policy.
+- `as_backend_tensor(...)`: normalises NumPy, torch, or DLPack-backed positions to backend-native tensors.
+- `evaluate_sdf_batch(...)`: public batched SDF entry point with optional output reuse and CUDA stream control.
+- `to_backend_dlpack(...)`: exports backend-native tensors for zero-copy exchange.
+
+The shared protocol and capability dataclass live in [ocmesher/backend_contract.py](ocmesher/backend_contract.py).
