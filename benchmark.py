@@ -457,11 +457,10 @@ def _create_parser() -> argparse.ArgumentParser:
 
 def _collect_tier_results(configs: list[DemoConfig], runs: int) -> list[tuple[str, list[TierConfigResult]]]:
     """Run all configured tiers and return their aggregated results."""
-    all_results: list[tuple[str, list[TierConfigResult]]] = []
-    for label, build_script, sdf_type in TIERS_SPEC:
-        results = run_tier(label, build_script, sdf_type, configs, runs)
-        all_results.append((label, results))
-    return all_results
+    return [
+        (label, run_tier(label, build_script, sdf_type, configs, runs))
+        for label, build_script, sdf_type in TIERS_SPEC
+    ]
 
 
 def _write_stdout(message: str = "") -> None:
