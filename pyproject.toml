@@ -91,7 +91,6 @@ ignore = [
 "__init__.py" = [
     "INP001",   # implicit namespace package
     "N999",     # module name matches project, intentional
-    "D104",     # package-level __init__.py files (some are intentionally empty)
     "PLC0415",  # conditional/lazy imports in __init__.py
 ]
 # core.py – complex scientific code with many C-bindings
