@@ -58,6 +58,14 @@ def validate_cameras(cameras: CamerasTuple) -> CamerasTuple:
         if k.shape != (3, 3):
             msg = f"Ks[{i}] must be a 3x3 matrix, got shape {k.shape}"
             raise ValueError(msg)
+    for i, h in enumerate(Hs):
+        if int(h) != h or h <= 0:
+            msg = f"Hs[{i}] must be a positive integer, got {h!r}"
+            raise ValueError(msg)
+    for i, w in enumerate(Ws):
+        if int(w) != w or w <= 0:
+            msg = f"Ws[{i}] must be a positive integer, got {w!r}"
+            raise ValueError(msg)
     return cam_poses, Ks, Hs, Ws
 
 

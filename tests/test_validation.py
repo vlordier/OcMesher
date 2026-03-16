@@ -69,6 +69,21 @@ class TestValidateCameras:
         with pytest.raises(ValueError, match="3x3 matrix"):
             _validate_cameras(cameras)
 
+    def test_rejects_non_positive_height(self, sample_camera_pose, sample_intrinsics):
+        cameras = ([sample_camera_pose], [sample_intrinsics], [0], [1280])
+        with pytest.raises(ValueError, match=r"Hs\[0\] must be a positive integer"):
+            _validate_cameras(cameras)
+
+    def test_rejects_non_positive_width(self, sample_camera_pose, sample_intrinsics):
+        cameras = ([sample_camera_pose], [sample_intrinsics], [720], [-1])
+        with pytest.raises(ValueError, match=r"Ws\[0\] must be a positive integer"):
+            _validate_cameras(cameras)
+
+    def test_rejects_non_integral_height(self, sample_camera_pose, sample_intrinsics):
+        cameras = ([sample_camera_pose], [sample_intrinsics], [720.5], [1280])
+        with pytest.raises(ValueError, match=r"Hs\[0\] must be a positive integer"):
+            _validate_cameras(cameras)
+
 
 # ---------------------------------------------------------------------------
 # _validate_bounds
