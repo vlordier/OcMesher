@@ -45,7 +45,9 @@ from .utils.interface import (
 from .utils.timer import Timer
 
 if TYPE_CHECKING:
-    from ._types import MeshResult
+    from numpy.typing import NDArray
+
+    from ._types import BoundsLike, CamerasTuple, KernelSequence, MeshResult
 
 logger = logging.getLogger(__name__)
 
@@ -124,18 +126,18 @@ class OcMesher:
 
     def __init__(
         self,
-        cameras,
-        bounds,
-        pixels_per_cube=8,
-        inv_scale=10,
-        min_dist=1,
-        memory_limit_mb=1000,
-        bisection_iters=15,
-        bisection_tol=0.0,
-        enclosed=True,
-        simplify_occluded=True,
-        visible_relax_iter=2,
-        coarse_count=500000,
+        cameras: CamerasTuple,
+        bounds: BoundsLike,
+        pixels_per_cube: int = 8,
+        inv_scale: float = 10,
+        min_dist: float = 1,
+        memory_limit_mb: int = 1000,
+        bisection_iters: int = 15,
+        bisection_tol: float = 0.0,
+        enclosed: bool = True,
+        simplify_occluded: bool = True,
+        visible_relax_iter: int = 2,
+        coarse_count: int = 500000,
     ):
         """Initialise the mesher with camera intrinsics and bounds.
 
@@ -373,7 +375,13 @@ class OcMesher:
         _lor(out_bound, _tmp, out=out_bound)
         return out_bound
 
-    def kernel_caller(self, kernels, XYZ_all, *, out=None):
+    def kernel_caller(
+        self,
+        kernels: KernelSequence,
+        XYZ_all: NDArray[np.float64],
+        *,
+        out: NDArray[np.float32] | None = None,
+    ) -> NDArray[np.float32]:
         """Evaluate SDF *kernels* at the given *XYZ_all* positions.
 
         Optimisations over the naïve implementation:
@@ -456,15 +464,21 @@ class OcMesher:
             # construction overhead.
             pool = self._get_pool(n_kernels)
             _submit = pool.submit
+            # Pre-allocate futures list and label tuple once — avoids
+            # creating a new list and n_kernels f-strings on every batch
+            # iteration (matters for callers that exceed SDF_BATCH_SIZE).
+            _futures: list = [None] * n_kernels
+            _labels = tuple(f"kernels[{i}]" for i in range(n_kernels))
 
             for i in range(0, n_XYZ, _batch):
                 end = _min(i + _batch, n_XYZ)
                 XYZ = XYZ_all[i:end]
                 n = end - i
-                futures = [_submit(k, XYZ) for k in kernels]
+                for k_idx in range(n_kernels):
+                    _futures[k_idx] = _submit(kernels[k_idx], XYZ)
                 batch_slice = result[i:end]
-                for k_idx, fut in enumerate(futures):
-                    batch_slice[:, k_idx] = _coerce_kernel_sdf(fut.result(), n, f"kernels[{k_idx}]")
+                for k_idx in range(n_kernels):
+                    batch_slice[:, k_idx] = _coerce_kernel_sdf(_futures[k_idx].result(), n, _labels[k_idx])
                 if _enclosed:
                     batch_slice[_mask_into(XYZ, _b_min, _b_max)] = 1
 

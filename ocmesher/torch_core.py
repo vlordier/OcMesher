@@ -57,7 +57,7 @@ from ._validation import validate_mesher_params as _validate_mesher_params
 from .utils.timer import Timer
 
 if TYPE_CHECKING:
-    from ._types import MeshResult
+    from ._types import BoundsLike, CamerasTuple, MeshResult
 
 logger = logging.getLogger(__name__)
 
@@ -148,20 +148,20 @@ class TorchOcMesher:
 
     def __init__(  # noqa: PLR0913, PLR0915
         self,
-        cameras,
-        bounds,
-        pixels_per_cube=8,
-        inv_scale=10,
-        min_dist=1,
-        memory_limit_mb=1000,
-        bisection_iters=15,
-        enclosed=True,
-        simplify_occluded=True,
-        visible_relax_iter=2,
-        coarse_count=500000,
-        device=None,
-        n_sdf_workers=_MAX_SDF_WORKERS,
-        use_compile=False,
+        cameras: CamerasTuple,
+        bounds: BoundsLike,
+        pixels_per_cube: int = 8,
+        inv_scale: float = 10,
+        min_dist: float = 1,
+        memory_limit_mb: int = 1000,
+        bisection_iters: int = 15,
+        enclosed: bool = True,
+        simplify_occluded: bool = True,
+        visible_relax_iter: int = 2,
+        coarse_count: int = 500000,
+        device: str | None = None,
+        n_sdf_workers: int = _MAX_SDF_WORKERS,
+        use_compile: bool = False,
     ):
         """Initialise the mesher with camera intrinsics and bounds.
 
