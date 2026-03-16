@@ -436,6 +436,12 @@ def _validate_parity_args(*, pixels_per_cube: int, coarse_count: int, atol: floa
         raise ValueError(msg)
 
 
+def _validate_mode_flags(parser: argparse.ArgumentParser, args: argparse.Namespace) -> None:
+    """Validate CLI flag combinations that depend on each other."""
+    if args.upstream_parity_strict and not args.upstream_parity:
+        parser.error("--upstream-parity-strict requires --upstream-parity")
+
+
 def _write_results_json(output_path: str, results: list[tuple[str, list[TierConfigResult]]]) -> None:
     """Serialize benchmark results to a JSON file."""
     data = _tier_results_to_dict(results)
@@ -462,6 +468,7 @@ def main() -> None:
     """Parse CLI arguments, run benchmarks, and optionally write JSON output."""
     parser = _create_parser()
     args = parser.parse_args()
+    _validate_mode_flags(parser, args)
 
     os.chdir(Path(__file__).parent)
 

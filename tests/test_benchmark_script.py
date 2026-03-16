@@ -353,4 +353,13 @@ class TestMainUpstreamParityMode:
         written = json.loads(out_path.read_text())
         assert bool(written["delta"]["matches"])
 
+    def test_main_rejects_strict_without_upstream_parity(self, monkeypatch, capsys):
+        monkeypatch.setattr("sys.argv", ["benchmark.py", "--upstream-parity-strict"])
+
+        with pytest.raises(SystemExit, match="2"):
+            benchmark.main()
+
+        err = capsys.readouterr().err
+        assert "requires --upstream-parity" in err
+
 
