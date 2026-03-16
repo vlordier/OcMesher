@@ -436,7 +436,13 @@ def main() -> None:
     os.chdir(Path(__file__).parent)
 
     if args.upstream_parity:
-        parity = run_upstream_parity(Path.cwd(), upstream_ref=args.upstream_parity, python_exe=PYTHON)
+        parity = run_upstream_parity(
+            Path.cwd(),
+            upstream_ref=args.upstream_parity,
+            python_exe=PYTHON,
+            pixels_per_cube=args.parity_pixels_per_cube,
+            coarse_count=args.parity_coarse_count,
+        )
         _write_stdout(json.dumps(parity, indent=2, sort_keys=True))
         return
 
@@ -466,6 +472,18 @@ def _create_parser() -> argparse.ArgumentParser:
         const="main",
         metavar="REF",
         help="Compare numerical mesh signature against Git ref (default: main)",
+    )
+    parser.add_argument(
+        "--parity-pixels-per-cube",
+        type=int,
+        default=32,
+        help="pixels_per_cube for --upstream-parity (default: 32)",
+    )
+    parser.add_argument(
+        "--parity-coarse-count",
+        type=int,
+        default=100_000,
+        help="coarse_count for --upstream-parity (default: 100000)",
     )
     return parser
 

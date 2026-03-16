@@ -163,6 +163,8 @@ class TestCreateParser:
         assert args.configs == "all"
         assert args.json is None
         assert args.upstream_parity is None
+        assert args.parity_pixels_per_cube == 32
+        assert args.parity_coarse_count == 100_000
 
     def test_upstream_parity_default_ref(self):
         parser = benchmark._create_parser()
@@ -173,6 +175,21 @@ class TestCreateParser:
         parser = benchmark._create_parser()
         args = parser.parse_args(["--upstream-parity", "develop"])
         assert args.upstream_parity == "develop"
+
+    def test_upstream_parity_mesh_overrides(self):
+        parser = benchmark._create_parser()
+        args = parser.parse_args(
+            [
+                "--upstream-parity",
+                "develop",
+                "--parity-pixels-per-cube",
+                "24",
+                "--parity-coarse-count",
+                "200000",
+            ]
+        )
+        assert args.parity_pixels_per_cube == 24
+        assert args.parity_coarse_count == 200000
 
     def test_config_choices_include_expected_values(self):
         parser = benchmark._create_parser()
@@ -271,11 +288,19 @@ class TestComparisonCells:
 class TestMainUpstreamParityMode:
     def test_main_runs_upstream_parity_and_returns(self, monkeypatch, capsys):
         monkeypatch.setattr("sys.argv", ["benchmark.py", "--upstream-parity"])
-        monkeypatch.setattr(benchmark, "run_upstream_parity", lambda *_args, **_kwargs: {"delta": {"matches": True}})
+        calls: list[dict[str, object]] = []
+
+        def _fake_run_upstream_parity(*_args, **kwargs):
+            calls.append(kwargs)
+            return {"delta": {"matches": True}}
+
+        monkeypatch.setattr(benchmark, "run_upstream_parity", _fake_run_upstream_parity)
 
         benchmark.main()
 
         out = capsys.readouterr().out
         assert '"matches": true' in out
+        assert calls[0]["pixels_per_cube"] == 32
+        assert calls[0]["coarse_count"] == 100_000
 
 
