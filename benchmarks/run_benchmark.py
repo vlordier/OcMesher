@@ -646,7 +646,7 @@ def _micro_visibility_multicam(bounds, n_runs: int = 3) -> list[dict[str, object
     return results
 
 
-def _micro_triangle_extraction(cameras, bounds, n_runs: int = 5):
+def _micro_triangle_extraction(cameras, bounds, n_runs: int = 5) -> dict[str, object]:
     """Benchmark vectorised triangle extraction in marching cubes."""
     results: dict[str, object] = {}
     try:
@@ -676,7 +676,7 @@ def _micro_triangle_extraction(cameras, bounds, n_runs: int = 5):
     return results
 
 
-def _micro_init_vectorised(n_runs: int = 20):
+def _micro_init_vectorised(n_runs: int = 20) -> dict[str, object]:
     """Benchmark vectorised camera initialisation vs loop-based."""
     results: dict[str, object] = {}
     try:
