@@ -71,3 +71,11 @@ class TestBenchmarkArgValidation:
     def test_validate_selected_configs_rejects_empty(self):
         with pytest.raises(ValueError, match="No benchmark configs selected"):
             benchmark._validate_selected_configs("unknown", [])
+
+
+class TestShortTierLabel:
+    def test_trims_suffix_in_parentheses(self):
+        assert benchmark._short_tier_label("Opt-numba(+numba-SDF)") == "Opt-numba"
+
+    def test_returns_original_without_parentheses(self):
+        assert benchmark._short_tier_label("Baseline") == "Baseline"
