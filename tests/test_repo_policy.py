@@ -37,3 +37,10 @@ def test_cpp_tests_treats_warnings_as_errors() -> None:
 
     for flag in ("-Wall", "-Wextra", "-Wpedantic", "-Werror"):
         assert flag in workflow
+
+
+def test_lint_workflow_pins_python_311() -> None:
+    workflow = _read(".github/workflows/lint.yml")
+
+    assert "actions/setup-python@v5" in workflow
+    assert 'python-version: "3.11"' in workflow
