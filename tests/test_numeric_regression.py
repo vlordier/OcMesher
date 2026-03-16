@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import subprocess
+import sys
 from pathlib import Path
 
 import numpy as np
@@ -17,6 +18,8 @@ EXPECTED_SIGNATURE = {
     "verts_sum": 1384.006159440049,
     "faces_sum": 5494984,
 }
+
+REPO_ROOT = Path(__file__).resolve().parents[1]
 
 
 def _signature() -> dict[str, int | float]:
@@ -80,9 +83,9 @@ def test_numeric_signature_matches_known_reference() -> None:
 @pytest.mark.integration
 def test_numeric_signature_matches_main_branch() -> None:
     parity = run_upstream_parity(
-        Path(__file__).resolve().parents[1],
+        REPO_ROOT,
         upstream_ref="main",
-        python_exe="/Users/vincent/Work/OcMesher/.venv/bin/python",
+        python_exe=sys.executable,
     )
 
     assert bool(parity["delta"]["matches"])
