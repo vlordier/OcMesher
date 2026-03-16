@@ -1158,14 +1158,21 @@ void construct_faces( // NOLINT(readability-identifier-length, readability-ident
     auto& edge_e = bipolar_edges[e];
     auto& vertices_ids = bipolar_edges_vindices[e];
     auto& unique_vertices = bipolar_edges_vertices_vector[e];
+    int edge_count = static_cast<int>(edge_e.size());
     faces.clear();
+    faces.reserve(static_cast<std::size_t>(edge_count) * 24);
     edge_vertices.clear();
+    edge_vertices.reserve(static_cast<std::size_t>(edge_count));
     edge_vertices_in_view_tag.clear();
+    edge_vertices_in_view_tag.reserve(static_cast<std::size_t>(edge_count));
     face_vertices.clear();
+    face_vertices.reserve(static_cast<std::size_t>(edge_count) * 4);
     face_vertices_in_view_tag.clear();
+    face_vertices_in_view_tag.reserve(static_cast<std::size_t>(edge_count) * 4);
     face_vertices_map.clear();
+    face_vertices_map.reserve(static_cast<std::size_t>(edge_count) * 4);
     int nv = static_cast<int>(unique_vertices.size());
-    for (int i = 0; i < static_cast<int>(edge_e.size()); i++) {
+    for (int i = 0; i < edge_count; i++) {
         T computed_edge[6];
         Cube c;
         keyToCube(c, edge_e[i].second);
@@ -1245,19 +1252,21 @@ void construct_faces( // NOLINT(readability-identifier-length, readability-ident
                     in_view_tag[e]
                                [vertices_ids[i * 4 + j]]; // NOLINT(readability-identifier-length)
             edge_vertices_in_view_tag.push_back(edge_in_view);
+            int edge_vertex_index = nv + static_cast<int>(edge_vertices.size()) - 1;
             for (int j = 0; j < 4; j++) { // NOLINT(readability-identifier-length)
                 int v1 = vertices_ids[i * 4 + j], v2 = vertices_ids[i * 4 + (j + 1) % 4];
                 if (v1 == v2)
                     continue;
                 if (!intersect[j]) {
                     int vf;
-                    if (face_vertices_map.count(std::make_pair(v1, v2))) {
-                        vf = face_vertices_map[std::make_pair(v1, v2)];
-                    } else if (face_vertices_map.count(std::make_pair(v2, v1))) {
-                        vf = face_vertices_map[std::make_pair(v2, v1)];
+                    std::pair<int, int> face_key =
+                        v1 < v2 ? std::make_pair(v1, v2) : std::make_pair(v2, v1);
+                    auto face_it = face_vertices_map.find(face_key);
+                    if (face_it != face_vertices_map.end()) {
+                        vf = face_it->second;
                     } else {
                         vf = static_cast<int>(face_vertices.size());
-                        face_vertices_map[std::make_pair(v1, v2)] = vf;
+                        face_vertices_map.emplace(face_key, vf);
                         ComputedVertex cv2;
                         for (int k = 0; k < 3; k++) // NOLINT(readability-identifier-length)
                             cv2.m_c[k] =
@@ -1269,10 +1278,10 @@ void construct_faces( // NOLINT(readability-identifier-length, readability-ident
                         bool face_in_view = in_view_tag[e][v1] || in_view_tag[e][v2];
                         face_vertices_in_view_tag.push_back(face_in_view);
                     }
-                    addFaces(faces, v1, -vf - 1, nv + static_cast<int>(edge_vertices.size()) - 1);
-                    addFaces(faces, -vf - 1, v2, nv + static_cast<int>(edge_vertices.size()) - 1);
+                    addFaces(faces, v1, -vf - 1, edge_vertex_index);
+                    addFaces(faces, -vf - 1, v2, edge_vertex_index);
                 } else {
-                    addFaces(faces, v1, v2, nv + static_cast<int>(edge_vertices.size()) - 1);
+                    addFaces(faces, v1, v2, edge_vertex_index);
                 }
             }
         } else {
@@ -1317,11 +1326,12 @@ void construct_faces( // NOLINT(readability-identifier-length, readability-ident
                         in_view_tag[e][vertices_ids[i * 4 +
                                                     j]]; // NOLINT(readability-identifier-length)
                 edge_vertices_in_view_tag.push_back(edge_in_view);
+                int edge_vertex_index = nv + static_cast<int>(edge_vertices.size()) - 1;
                 for (int j = 0; j < 4; j++) { // NOLINT(readability-identifier-length)
                     int v1 = vertices_ids[i * 4 + j], v2 = vertices_ids[i * 4 + (j + 1) % 4];
                     if (v1 == v2)
                         continue;
-                    addFaces(faces, v1, v2, nv + static_cast<int>(edge_vertices.size()) - 1);
+                    addFaces(faces, v1, v2, edge_vertex_index);
                 }
             } else {
                 int j = start_j; // NOLINT(readability-identifier-length)
