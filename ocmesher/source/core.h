@@ -389,7 +389,7 @@ void findEdges(const Node& n, std::unordered_map<KeyCube, int, KeyCubeHash>& ver
         for (int i = 0; i < ss; i++)
             for (int j = 0; j <= ss; j++)       // NOLINT(readability-identifier-length)
                 for (int k = 0; k <= ss; k++) { // NOLINT(readability-identifier-length)
-                    int coords[3];              // NOLINT(modernize-avoid-c-arrays)
+                    std::array<int, 3> coords{};
                     coords[edir] = i + 1;
                     coords[(edir + 1) % 3] = j;
                     coords[(edir + 2) % 3] = k;
