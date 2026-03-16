@@ -37,7 +37,7 @@ def main():
             ]
         )
     ]
-    Ks = [
+    ks = [
         np.array(
             [
                 [2000, 0, 640],
@@ -46,11 +46,11 @@ def main():
             ]
         )
     ]
-    Hs = [720]
-    Ws = [1280]
+    hs = [720]
+    ws = [1280]
 
     bounds = (-10, 10, -10, 10, -2, 2)
-    mesher = OcMesher((cam_poses, Ks, Hs, Ws), bounds, pixels_per_cube=16)
+    mesher = OcMesher((cam_poses, ks, hs, ws), bounds, pixels_per_cube=16)
     meshes, _in_view_tags = mesher([f])
     Path("results").mkdir(parents=True, exist_ok=True)
     meshes[0].export("results/demo.obj")
