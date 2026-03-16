@@ -309,64 +309,8 @@ pub fn validate_bounds(bounds: &[f64]) -> Result<([f64; 3], [f64; 3], [f64; 3], 
 // SDF evaluation helpers
 // ---------------------------------------------------------------------------
 
-/// Call a single Python SDF kernel with `xyz` (n_pts × 3 f64) and return f32 values.
-///
-/// Prefers `kernel.evaluate_batch(xyz)` when available, otherwise falls back to
-/// `kernel(xyz)`. Accepts numpy float32/float64 arrays, dict outputs containing
-/// `{"sdf": ...}` or `{"SDF": ...}`, or objects that expose `.numpy()`.
-fn eval_kernel_py_once(
-    py: Python<'_>,
-    kernel: &Py<PyAny>,
-    xyz: &[f64],
-    n_pts: usize,
-    torch_eval_device: Option<&str>,
-    torch_eval_dtype: Option<&str>,
-) -> PyResult<Vec<f32>> {
-    use numpy::{IntoPyArray, PyReadonlyArray1};
-    use ndarray::Array2;
-
-    let xyz_arr = Array2::from_shape_vec((n_pts, 3), xyz.to_vec())
-        .map_err(|e| pyo3::exceptions::PyValueError::new_err(e.to_string()))?;
-    let xyz_np = xyz_arr.into_pyarray_bound(py);
-
-    let raw = {
-        let kernel_bound = kernel.bind(py);
-        if let Ok(eval_batch_torch) = kernel_bound.getattr("evaluate_batch_torch") {
-            if eval_batch_torch.is_callable() {
-                let torch = py.import_bound("torch")?;
-                let from_numpy = torch.getattr("from_numpy")?;
-                let xyz_t = from_numpy.call1((xyz_np.clone(),))?;
-                let dtype_name = torch_eval_dtype.unwrap_or("float32");
-                let dtype_obj = if dtype_name == "float64" {
-                    torch.getattr("float64")?
-                } else {
-                    torch.getattr("float32")?
-                };
-                let xyz_t = if let Some(device) = torch_eval_device {
-                    xyz_t.call_method1("to", (device, dtype_obj))?
-                } else {
-                    xyz_t.call_method1("to", (dtype_obj,))?
-                };
-                eval_batch_torch.call1((xyz_t,))?.unbind()
-            } else if let Ok(eval_batch) = kernel_bound.getattr("evaluate_batch") {
-                if eval_batch.is_callable() {
-                    eval_batch.call1((xyz_np,))?.unbind()
-                } else {
-                    kernel_bound.call1((xyz_np,))?.unbind()
-                }
-            } else {
-                kernel_bound.call1((xyz_np,))?.unbind()
-            }
-        } else if let Ok(eval_batch) = kernel_bound.getattr("evaluate_batch") {
-            if eval_batch.is_callable() {
-                eval_batch.call1((xyz_np,))?.unbind()
-            } else {
-                kernel_bound.call1((xyz_np,))?.unbind()
-            }
-        } else {
-            kernel_bound.call1((xyz_np,))?.unbind()
-        }
-    };
+fn extract_sdf_output(py: Python<'_>, raw: Py<PyAny>) -> PyResult<Vec<f32>> {
+    use numpy::PyReadonlyArray1;
 
     let raw = {
         let raw_bound = raw.bind(py);
@@ -385,7 +329,6 @@ fn eval_kernel_py_once(
         }
     };
 
-    // Try numpy f32 directly
     if let Ok(arr) = raw.extract::<PyReadonlyArray1<f32>>(py) {
         return arr
             .as_slice()
@@ -393,7 +336,6 @@ fn eval_kernel_py_once(
             .map_err(|_| pyo3::exceptions::PyValueError::new_err("SDF array not contiguous"));
     }
 
-    // Try numpy f64 → cast to f32
     if let Ok(arr) = raw.extract::<PyReadonlyArray1<f64>>(py) {
         return arr
             .as_slice()
@@ -401,7 +343,6 @@ fn eval_kernel_py_once(
             .map_err(|_| pyo3::exceptions::PyValueError::new_err("SDF array not contiguous"));
     }
 
-    // Try torch.Tensor (possibly CUDA/MPS) -> detach -> cpu -> numpy
     if let Ok(detached) = raw.bind(py).call_method0("detach") {
         if let Ok(cpu_tensor) = detached.call_method1("to", ("cpu",)) {
             if let Ok(numpy_obj) = cpu_tensor.call_method0("numpy") {
@@ -421,7 +362,6 @@ fn eval_kernel_py_once(
         }
     }
 
-    // Try `.numpy()` for torch tensors (CPU) or DLPack-capable objects
     if let Ok(numpy_obj) = raw.bind(py).call_method0("numpy") {
         if let Ok(arr) = numpy_obj.extract::<PyReadonlyArray1<f32>>() {
             return arr
@@ -437,9 +377,7 @@ fn eval_kernel_py_once(
         }
     }
 
-    // Last resort: try __dlpack__ → capsule → numpy (zero-copy path for CPU DLPack)
     if let Ok(cap) = raw.bind(py).call_method0("__dlpack__") {
-        // Import numpy and call np.from_dlpack
         let np = py.import_bound("numpy")?;
         let from_dlpack = np.getattr("from_dlpack")?;
         let arr_obj = from_dlpack.call1((cap,))?;
@@ -455,6 +393,113 @@ fn eval_kernel_py_once(
         "SDF kernel return value must be a float32/float64 numpy array, \
          a CPU torch.Tensor, or a DLPack-capable object",
     ))
+}
+
+fn build_torch_xyz_input<'py>(
+    py: Python<'py>,
+    xyz_np: &Bound<'py, PyAny>,
+    torch_eval_device: Option<&str>,
+    torch_eval_dtype: Option<&str>,
+) -> PyResult<Bound<'py, PyAny>> {
+    let torch = py.import_bound("torch")?;
+    let from_numpy = torch.getattr("from_numpy")?;
+    let xyz_t = from_numpy.call1((xyz_np.clone(),))?;
+    let dtype_name = torch_eval_dtype.unwrap_or("float32");
+    let dtype_obj = if dtype_name == "float64" {
+        torch.getattr("float64")?
+    } else {
+        torch.getattr("float32")?
+    };
+    if let Some(device) = torch_eval_device {
+        xyz_t.call_method1("to", (device, dtype_obj))
+    } else {
+        xyz_t.call_method1("to", (dtype_obj,))
+    }
+}
+
+fn eval_kernel_from_inputs<'py>(
+    py: Python<'py>,
+    kernel: &Py<PyAny>,
+    xyz_np: &Bound<'py, PyAny>,
+    xyz_torch: Option<&Bound<'py, PyAny>>,
+) -> PyResult<Vec<f32>> {
+    let raw = {
+        let kernel_bound = kernel.bind(py);
+        if let Some(xyz_t) = xyz_torch {
+            if let Ok(eval_batch_torch) = kernel_bound.getattr("evaluate_batch_torch") {
+                if eval_batch_torch.is_callable() {
+                    eval_batch_torch.call1((xyz_t.clone(),))?.unbind()
+                } else if let Ok(eval_batch) = kernel_bound.getattr("evaluate_batch") {
+                    if eval_batch.is_callable() {
+                        eval_batch.call1((xyz_np.clone(),))?.unbind()
+                    } else {
+                        kernel_bound.call1((xyz_np.clone(),))?.unbind()
+                    }
+                } else {
+                    kernel_bound.call1((xyz_np.clone(),))?.unbind()
+                }
+            } else if let Ok(eval_batch) = kernel_bound.getattr("evaluate_batch") {
+                if eval_batch.is_callable() {
+                    eval_batch.call1((xyz_np.clone(),))?.unbind()
+                } else {
+                    kernel_bound.call1((xyz_np.clone(),))?.unbind()
+                }
+            } else {
+                kernel_bound.call1((xyz_np.clone(),))?.unbind()
+            }
+        } else if let Ok(eval_batch) = kernel_bound.getattr("evaluate_batch") {
+            if eval_batch.is_callable() {
+                eval_batch.call1((xyz_np.clone(),))?.unbind()
+            } else {
+                kernel_bound.call1((xyz_np.clone(),))?.unbind()
+            }
+        } else {
+            kernel_bound.call1((xyz_np.clone(),))?.unbind()
+        }
+    };
+    extract_sdf_output(py, raw)
+}
+
+fn all_kernels_support_torch_eval(py: Python<'_>, kernels: &[Py<PyAny>]) -> bool {
+    kernels.iter().all(|kernel| {
+        kernel
+            .bind(py)
+            .getattr("evaluate_batch_torch")
+            .map(|attr| attr.is_callable())
+            .unwrap_or(false)
+    })
+}
+
+/// Call a single Python SDF kernel with `xyz` (n_pts × 3 f64) and return f32 values.
+///
+/// Prefers `kernel.evaluate_batch(xyz)` when available, otherwise falls back to
+/// `kernel(xyz)`. Accepts numpy float32/float64 arrays, dict outputs containing
+/// `{"sdf": ...}` or `{"SDF": ...}`, or objects that expose `.numpy()`.
+fn eval_kernel_py_once(
+    py: Python<'_>,
+    kernel: &Py<PyAny>,
+    xyz: &[f64],
+    n_pts: usize,
+    torch_eval_device: Option<&str>,
+    torch_eval_dtype: Option<&str>,
+) -> PyResult<Vec<f32>> {
+    use ndarray::Array2;
+    use numpy::IntoPyArray;
+
+    let xyz_arr = Array2::from_shape_vec((n_pts, 3), xyz.to_vec())
+        .map_err(|e| pyo3::exceptions::PyValueError::new_err(e.to_string()))?;
+    let xyz_np = xyz_arr.into_pyarray_bound(py).into_any();
+    let xyz_torch = if torch_eval_device.is_some() {
+        Some(build_torch_xyz_input(
+            py,
+            &xyz_np,
+            torch_eval_device,
+            torch_eval_dtype,
+        )?)
+    } else {
+        None
+    };
+    eval_kernel_from_inputs(py, kernel, &xyz_np, xyz_torch.as_ref())
 }
 
 fn eval_kernel_py(
@@ -511,24 +556,57 @@ fn eval_sdf_full(
 ) -> PyResult<Vec<f32>> {
     let mut result = vec![0.0f32; n_pts * n_kernels];
 
-    for (k_idx, kernel) in kernels.iter().enumerate() {
-        let sdf = eval_kernel_py(
-            py,
-            kernel,
-            xyz,
-            n_pts,
-            sdf_batch_size,
-            torch_eval_device,
-            torch_eval_dtype,
-        )?;
-        if sdf.len() != n_pts {
-            return Err(pyo3::exceptions::PyValueError::new_err(format!(
-                "kernels[{k_idx}] returned {} values for {n_pts} query points",
-                sdf.len()
-            )));
+    let use_fused_torch = torch_eval_device.is_some() && n_kernels > 1 && all_kernels_support_torch_eval(py, kernels);
+
+    if use_fused_torch {
+        use ndarray::Array2;
+        use numpy::IntoPyArray;
+
+        let chunk_size = sdf_batch_size.unwrap_or(n_pts).max(1);
+        for start in (0..n_pts).step_by(chunk_size) {
+            let end = (start + chunk_size).min(n_pts);
+            let chunk_n = end - start;
+            let chunk_xyz = &xyz[start * 3..end * 3];
+            let xyz_arr = Array2::from_shape_vec((chunk_n, 3), chunk_xyz.to_vec())
+                .map_err(|e| pyo3::exceptions::PyValueError::new_err(e.to_string()))?;
+            let xyz_np = xyz_arr.into_pyarray_bound(py).into_any();
+            let xyz_torch = build_torch_xyz_input(py, &xyz_np, torch_eval_device, torch_eval_dtype)?;
+
+            for (k_idx, kernel) in kernels.iter().enumerate() {
+                let sdf = eval_kernel_from_inputs(py, kernel, &xyz_np, Some(&xyz_torch))?;
+                if sdf.len() != chunk_n {
+                    return Err(pyo3::exceptions::PyValueError::new_err(format!(
+                        "kernels[{k_idx}] returned {} values for {chunk_n} query points",
+                        sdf.len()
+                    )));
+                }
+                for (local_i, v) in sdf.iter().enumerate() {
+                    let global_i = start + local_i;
+                    result[global_i * n_kernels + k_idx] = *v;
+                }
+            }
         }
-        for (i, v) in sdf.iter().enumerate() {
-            result[i * n_kernels + k_idx] = *v;
+    } else {
+
+        for (k_idx, kernel) in kernels.iter().enumerate() {
+            let sdf = eval_kernel_py(
+                py,
+                kernel,
+                xyz,
+                n_pts,
+                sdf_batch_size,
+                torch_eval_device,
+                torch_eval_dtype,
+            )?;
+            if sdf.len() != n_pts {
+                return Err(pyo3::exceptions::PyValueError::new_err(format!(
+                    "kernels[{k_idx}] returned {} values for {n_pts} query points",
+                    sdf.len()
+                )));
+            }
+            for (i, v) in sdf.iter().enumerate() {
+                result[i * n_kernels + k_idx] = *v;
+            }
         }
     }
 
