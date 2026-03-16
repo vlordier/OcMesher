@@ -137,7 +137,6 @@ ignore = [
     "EM101",    # same rationale as TRY003
     "EM102",    # same rationale as TRY003
     "D",        # no docstring enforcement in benchmark script
-    "EXE001",   # shebang is informational; script may be launched via python
 ]
 # Python overhead micro-benchmark
 "benchmarks/bench_python_overhead.py" = [

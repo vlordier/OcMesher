@@ -1,4 +1,3 @@
-#!/usr/bin/env python3
 """
 Benchmark OcMesher with and without optimisations on Apple M4.
 
