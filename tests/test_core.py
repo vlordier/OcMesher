@@ -13,6 +13,8 @@ from ocmesher.core import (
     _validate_kernels,
 )
 
+from .sdf_fixtures import constant_kernel as _constant_kernel
+
 # ---------------------------------------------------------------------------
 # kernel_caller
 # ---------------------------------------------------------------------------
@@ -697,9 +699,9 @@ class TestKernelCallerCachedLocals:
 class TestTupleKernelWrapping:
     """Verify tuple wrapping of single kernels matches slice behaviour."""
 
-    def test_tuple_single_kernel_matches_slice(self):
+    def test_tuple_single_kernel_matches_slice(self, zeros_kernel):
         """(kernel,) tuple behaves identically to kernels[0:1] slice."""
-        kernels = [lambda x: np.zeros(len(x), dtype=np.float32)]
+        kernels = [zeros_kernel]
         # Slice produces a list
         sliced = kernels[0:1]
         # Tuple wrap produces a tuple
@@ -707,7 +709,7 @@ class TestTupleKernelWrapping:
         assert len(sliced) == len(wrapped) == 1
         assert sliced[0] is wrapped[0]
 
-    def test_tuple_kernel_works_with_kernel_caller(self):
+    def test_tuple_kernel_works_with_kernel_caller(self, ones_kernel):
         """kernel_caller accepts tuple kernels correctly."""
         bounds = np.array([-5.0, 5.0, -5.0, 5.0, -5.0, 5.0])
         obj = object.__new__(OcMesher)
@@ -719,10 +721,8 @@ class TestTupleKernelWrapping:
         obj._sdf_pool = None
         obj._oob_mask = np.empty(_SDF_BATCH_SIZE, dtype=bool)
         obj._oob_tmp = np.empty(_SDF_BATCH_SIZE, dtype=bool)
-        kernel = lambda x: np.ones(len(x), dtype=np.float32)  # noqa: E731
         pts = np.array([[0.0, 0.0, 0.0], [1.0, 1.0, 1.0]])
-        # Call with tuple
-        result = obj.kernel_caller((kernel,), pts)
+        result = obj.kernel_caller((ones_kernel,), pts)
         assert result.shape == (2, 1)
         np.testing.assert_array_equal(result[:, 0], 1.0)
 
@@ -747,8 +747,8 @@ class TestInlinedMultiKernelEval:
         obj._sdf_pool = None
         obj._oob_mask = np.empty(_SDF_BATCH_SIZE, dtype=bool)
         obj._oob_tmp = np.empty(_SDF_BATCH_SIZE, dtype=bool)
-        k0 = lambda x: np.full(len(x), 1.0, dtype=np.float32)  # noqa: E731
-        k1 = lambda x: np.full(len(x), 2.0, dtype=np.float32)  # noqa: E731
+        k0 = _constant_kernel(1.0)
+        k1 = _constant_kernel(2.0)
         pts = np.array([[0.0, 0.0, 0.0], [1.0, 2.0, 3.0], [4.0, 5.0, 6.0]])
         result = obj.kernel_caller([k0, k1], pts)
         assert result.shape == (3, 2)
@@ -779,7 +779,7 @@ class TestDeduplicatedKernelCallerLoops:
     def test_single_kernel_enclosed(self):
         """Single kernel + enclosed: OOB points get masked to 1."""
         obj = self._make_stub(enclosed=True)
-        k = lambda x: np.full(len(x), -0.5, dtype=np.float32)  # noqa: E731
+        k = _constant_kernel(-0.5)
         pts = np.array([[5.0, 5.0, 5.0], [999.0, 999.0, 999.0]])
         result = obj.kernel_caller([k], pts)
         assert result[0, 0] == pytest.approx(-0.5)
@@ -788,7 +788,7 @@ class TestDeduplicatedKernelCallerLoops:
     def test_single_kernel_not_enclosed(self):
         """Single kernel + not enclosed: no masking."""
         obj = self._make_stub(enclosed=False)
-        k = lambda x: np.full(len(x), -0.5, dtype=np.float32)  # noqa: E731
+        k = _constant_kernel(-0.5)
         pts = np.array([[5.0, 5.0, 5.0], [999.0, 999.0, 999.0]])
         result = obj.kernel_caller([k], pts)
         assert result[0, 0] == pytest.approx(-0.5)
@@ -797,8 +797,8 @@ class TestDeduplicatedKernelCallerLoops:
     def test_multi_kernel_enclosed(self):
         """Multi-kernel + enclosed: OOB masking on all columns."""
         obj = self._make_stub(enclosed=True)
-        k0 = lambda x: np.full(len(x), -1.0, dtype=np.float32)  # noqa: E731
-        k1 = lambda x: np.full(len(x), -2.0, dtype=np.float32)  # noqa: E731
+        k0 = _constant_kernel(-1.0)
+        k1 = _constant_kernel(-2.0)
         pts = np.array([[5.0, 5.0, 5.0], [999.0, 999.0, 999.0]])
         result = obj.kernel_caller([k0, k1], pts)
         assert result[0, 0] == pytest.approx(-1.0)
@@ -809,8 +809,8 @@ class TestDeduplicatedKernelCallerLoops:
     def test_multi_kernel_not_enclosed(self):
         """Multi-kernel + not enclosed: no masking."""
         obj = self._make_stub(enclosed=False)
-        k0 = lambda x: np.full(len(x), -1.0, dtype=np.float32)  # noqa: E731
-        k1 = lambda x: np.full(len(x), -2.0, dtype=np.float32)  # noqa: E731
+        k0 = _constant_kernel(-1.0)
+        k1 = _constant_kernel(-2.0)
         pts = np.array([[5.0, 5.0, 5.0], [999.0, 999.0, 999.0]])
         result = obj.kernel_caller([k0, k1], pts)
         assert result[0, 0] == pytest.approx(-1.0)

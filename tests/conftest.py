@@ -107,6 +107,31 @@ def plane_kernel():
     return kernel
 
 
+# ---------------------------------------------------------------------------
+# Constant-value SDF kernels — reusable across tests
+# ---------------------------------------------------------------------------
+
+
+@pytest.fixture
+def zeros_kernel():
+    """SDF kernel returning zero for every query point."""
+
+    def kernel(x):
+        return np.zeros(len(x), dtype=np.float32)
+
+    return kernel
+
+
+@pytest.fixture
+def ones_kernel():
+    """SDF kernel returning 1.0 for every query point."""
+
+    def kernel(x):
+        return np.ones(len(x), dtype=np.float32)
+
+    return kernel
+
+
 @pytest.fixture
 def mock_dll():
     """A mock CDLL object with all expected C functions."""
