@@ -45,3 +45,18 @@ def test_write_stream_accepts_custom_buffer() -> None:
 
     benchmark._write_stream(_Stream(), "line")
     assert chunks == ["line\n"]
+
+
+def test_run_config_benchmark_aggregates_single_run(monkeypatch) -> None:
+    monkeypatch.setattr(
+        benchmark,
+        "run_mesher_subprocess",
+        lambda _ppc, _coarse, _sdf: {"elapsed_s": 0.25, "n_verts": 12, "n_faces": 34},
+    )
+
+    cfg = {"label": "small", "pixels_per_cube": 32, "coarse_count": 100_000}
+    result = benchmark._run_config_benchmark(cfg, "vnoise", 1)
+    assert result["config"] == "small"
+    assert result["times"] == [0.25]
+    assert result["n_verts"] == 12
+    assert result["n_faces"] == 34
