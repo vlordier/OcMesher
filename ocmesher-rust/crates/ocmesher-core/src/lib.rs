@@ -22,6 +22,12 @@ use libloading::{Library, Symbol};
 use pyo3::prelude::*;
 use pyo3::types::PyDict;
 
+mod native_kernels;
+
+pub use native_kernels::{BoxedSdfEvaluator, SdfEvaluator, SphereKernel};
+#[cfg(feature = "tch-kernels")]
+pub use native_kernels::tch_kernels;
+
 // ---------------------------------------------------------------------------
 // Error type
 // ---------------------------------------------------------------------------
@@ -892,6 +898,393 @@ pub fn run_meshing_pipeline(
     }
 
     Ok(results)
+}
+
+pub fn run_meshing_pipeline_native(
+    lib: &CoreLib,
+    params: &MesherParams,
+    kernels: &[BoxedSdfEvaluator],
+) -> Result<Vec<MeshData>, CoreError> {
+    let n_elements = kernels.len() as i32;
+    let n_kerns = kernels.len();
+
+    let _guard = core_lock()
+        .lock()
+        .map_err(|_| CoreError::Sdf("core lock poisoned".to_string()))?;
+
+    let mut center_arr = params.center;
+    let mut cams_arr = params.cameras_data.clone();
+
+    let _n_blocks = unsafe {
+        (lib.run_coarse)(
+            center_arr.as_mut_ptr(),
+            params.size,
+            params.n_cams,
+            cams_arr.as_mut_ptr(),
+            params.pixels_per_cube,
+            params.inv_scale,
+            params.min_dist,
+            params.coarse_count,
+            params.memory_limit_mb,
+            n_elements,
+        )
+    };
+
+    loop {
+        let inc = unsafe { (lib.fine_group)() };
+        if inc == 0 {
+            break;
+        }
+
+        let mut n = unsafe { (lib.fine_iteration)(std::ptr::null_mut()) };
+        while n > 0 {
+            let n_pts = n as usize;
+            let mut xyz = vec![0.0f64; n_pts * 3];
+            unsafe { (lib.fine_iteration_output)(xyz.as_mut_ptr()) };
+
+            let mut sdf_min = native_kernels::eval_sdf_min_native(
+                kernels,
+                &xyz,
+                n_pts,
+                &params.bounds_min,
+                &params.bounds_max,
+                params.enclosed,
+            )?;
+
+            n = unsafe { (lib.fine_iteration)(sdf_min.as_mut_ptr()) };
+        }
+    }
+
+    let _n_vis = unsafe { (lib.vis_filter)(params.simplify_occluded, params.visible_relax_iter) };
+
+    let mut nv = vec![0i32; n_kerns];
+    loop {
+        let n = unsafe { (lib.final_iteration)() };
+        if n == 0 {
+            break;
+        }
+        let n_pts = n as usize;
+        let mut xyz = vec![0.0f64; n_pts * 3];
+        unsafe { (lib.final_iteration2)(xyz.as_mut_ptr()) };
+
+        let mut sdf_full = native_kernels::eval_sdf_full_native(
+            kernels,
+            &xyz,
+            n_pts,
+            n_kerns,
+            &params.bounds_min,
+            &params.bounds_max,
+            params.enclosed,
+        )?;
+
+        unsafe { (lib.final_iteration3)(sdf_full.as_mut_ptr()) };
+    }
+
+    let n = unsafe { (lib.final_iteration_occluded)() };
+    if n > 0 {
+        let n_pts = n as usize;
+        let mut xyz = vec![0.0f64; n_pts * 3];
+        unsafe { (lib.final_iteration2)(xyz.as_mut_ptr()) };
+
+        let mut sdf_full = native_kernels::eval_sdf_full_native(
+            kernels,
+            &xyz,
+            n_pts,
+            n_kerns,
+            &params.bounds_min,
+            &params.bounds_max,
+            params.enclosed,
+        )?;
+
+        unsafe { (lib.final_iteration3_occluded)(sdf_full.as_mut_ptr()) };
+    }
+
+    unsafe { (lib.final_remaining)(nv.as_mut_ptr()) };
+
+    let mut results = Vec::with_capacity(n_kerns);
+    for (element, kernel) in kernels.iter().enumerate() {
+        let mesh = construct_element_mesh_native(
+            lib,
+            element as i32,
+            kernel.as_ref(),
+            nv[element],
+            params.bisection_iters,
+            params.bisection_tol,
+            &params.bounds_min,
+            &params.bounds_max,
+            params.enclosed,
+        )?;
+        results.push(mesh);
+    }
+
+    Ok(results)
+}
+
+fn construct_element_mesh_native(
+    lib: &CoreLib,
+    element: i32,
+    kernel: &dyn SdfEvaluator,
+    num_verts: i32,
+    bisection_iters: i32,
+    bisection_tol: f64,
+    b_min: &[f64; 3],
+    b_max: &[f64; 3],
+    enclosed: bool,
+) -> Result<MeshData, CoreError> {
+    let nv = num_verts as usize;
+
+    let mut centers = vec![0.0f64; nv * 3];
+    unsafe { (lib.get_verts_center)(element, centers.as_mut_ptr()) };
+
+    let center_sdf = kernel.evaluate_batch(&centers, nv)?;
+    if center_sdf.len() != nv {
+        return Err(CoreError::Sdf(format!(
+            "native center SDF length mismatch: got {}, expected {nv}",
+            center_sdf.len()
+        )));
+    }
+
+    let mut cubes = vec![0.0f64; nv * 8 * 3];
+    unsafe {
+        (lib.update_verts)(
+            element,
+            std::ptr::null(),
+            std::ptr::null(),
+            cubes.as_mut_ptr(),
+        )
+    };
+
+    let n_cubes = nv * 8;
+    let mut sdf_buf = vec![0.0f32; n_cubes];
+    let check_tol = bisection_tol > 0.0;
+
+    for _ in 0..bisection_iters {
+        let sdf_cubes = kernel.evaluate_batch(&cubes, n_cubes)?;
+        if sdf_cubes.len() != n_cubes {
+            return Err(CoreError::Sdf(format!(
+                "native cube SDF length mismatch: got {}, expected {n_cubes}",
+                sdf_cubes.len()
+            )));
+        }
+        sdf_buf.copy_from_slice(&sdf_cubes);
+
+        unsafe {
+            (lib.update_verts)(
+                element,
+                sdf_buf.as_ptr(),
+                center_sdf.as_ptr(),
+                cubes.as_mut_ptr(),
+            )
+        };
+
+        if check_tol {
+            let max_abs = sdf_buf.iter().fold(0.0f32, |acc, &value| acc.max(value.abs()));
+            if (max_abs as f64) < bisection_tol {
+                break;
+            }
+        }
+    }
+
+    let mut cubes_r = vec![0.0f64; n_cubes * 3];
+    unsafe { (lib.get_lr_verts)(element, cubes.as_mut_ptr(), cubes_r.as_mut_ptr()) };
+
+    let sdf_l = kernel.evaluate_batch(&cubes, n_cubes)?;
+    let sdf_r = kernel.evaluate_batch(&cubes_r, n_cubes)?;
+    if sdf_l.len() != n_cubes || sdf_r.len() != n_cubes {
+        return Err(CoreError::Sdf(format!(
+            "native LR SDF length mismatch: left={}, right={}, expected {n_cubes}",
+            sdf_l.len(),
+            sdf_r.len()
+        )));
+    }
+
+    let mut vertices = vec![0.0f64; nv * 3];
+    unsafe {
+        (lib.finalize_verts)(
+            element,
+            sdf_l.as_ptr(),
+            sdf_r.as_ptr(),
+            vertices.as_mut_ptr(),
+        )
+    };
+
+    let mut cnts = [0i32; 3];
+    unsafe { (lib.construct_faces)(element, vertices.as_mut_ptr(), cnts.as_mut_ptr()) };
+    let (nve, nvf, nf) = (cnts[0] as usize, cnts[1] as usize, cnts[2] as usize);
+
+    let (final_vertices, faces) = if nve == 0 && nvf == 0 {
+        let mut raw_faces = vec![0i32; nf * 3];
+        unsafe { (lib.get_faces)(raw_faces.as_mut_ptr()) };
+        (vertices, raw_faces)
+    } else {
+        refine_extra_vertices_native(
+            lib,
+            kernel,
+            &vertices,
+            nv,
+            nve,
+            nvf,
+            nf,
+            bisection_iters,
+            bisection_tol,
+            b_min,
+            b_max,
+            enclosed,
+        )?
+    };
+
+    let n_final_verts = final_vertices.len() / 3;
+    let mut in_view_tag = vec![false; n_final_verts];
+    unsafe { (lib.get_in_view_tag)(element, in_view_tag.as_mut_ptr()) };
+
+    Ok(MeshData {
+        vertices: final_vertices,
+        n_verts: n_final_verts,
+        faces,
+        n_faces: nf,
+        in_view_tag,
+    })
+}
+
+#[allow(clippy::too_many_arguments)]
+fn refine_extra_vertices_native(
+    lib: &CoreLib,
+    kernel: &dyn SdfEvaluator,
+    base_vertices: &[f64],
+    n_base: usize,
+    nve: usize,
+    nvf: usize,
+    nf: usize,
+    bisection_iters: i32,
+    bisection_tol: f64,
+    _b_min: &[f64; 3],
+    _b_max: &[f64; 3],
+    _enclosed: bool,
+) -> Result<(Vec<f64>, Vec<i32>), CoreError> {
+    let mut edge_centers = vec![0.0f64; nve * 3];
+    let mut face_centers = vec![0.0f64; nvf * 3];
+    unsafe { (lib.get_extra_verts_center)(edge_centers.as_mut_ptr(), face_centers.as_mut_ptr()) };
+
+    let ef_n = nve + nvf;
+    let mut ef_centers = vec![0.0f64; ef_n * 3];
+    ef_centers[..nve * 3].copy_from_slice(&edge_centers);
+    ef_centers[nve * 3..].copy_from_slice(&face_centers);
+    let ef_sdf = kernel.evaluate_batch(&ef_centers, ef_n)?;
+    if ef_sdf.len() != ef_n {
+        return Err(CoreError::Sdf(format!(
+            "native extra center SDF length mismatch: got {}, expected {ef_n}",
+            ef_sdf.len()
+        )));
+    }
+    let ecenter_sdf = ef_sdf[..nve].to_vec();
+    let fcenter_sdf = ef_sdf[nve..].to_vec();
+
+    let mut edge_lr = vec![0.0f64; nve * 2 * 3];
+    let mut face_lr = vec![0.0f64; nvf * 4 * 3];
+    unsafe {
+        (lib.update_extra_verts)(
+            std::ptr::null(),
+            std::ptr::null(),
+            std::ptr::null(),
+            std::ptr::null(),
+            edge_lr.as_mut_ptr(),
+            face_lr.as_mut_ptr(),
+        )
+    };
+
+    let n_elr = nve * 2;
+    let n_flr = nvf * 4;
+    let n_bisect = n_elr + n_flr;
+    let check_tol = bisection_tol > 0.0;
+    let mut bisect_buf = vec![0.0f64; n_bisect * 3];
+    let mut sdf_buf = vec![0.0f32; n_bisect];
+
+    for _ in 0..bisection_iters {
+        bisect_buf[..n_elr * 3].copy_from_slice(&edge_lr);
+        bisect_buf[n_elr * 3..].copy_from_slice(&face_lr);
+
+        let sdf_all = kernel.evaluate_batch(&bisect_buf, n_bisect)?;
+        if sdf_all.len() != n_bisect {
+            return Err(CoreError::Sdf(format!(
+                "native extra bisection SDF length mismatch: got {}, expected {n_bisect}",
+                sdf_all.len()
+            )));
+        }
+        sdf_buf.copy_from_slice(&sdf_all);
+
+        let (e_sdf, f_sdf) = sdf_buf.split_at(n_elr);
+        unsafe {
+            (lib.update_extra_verts)(
+                e_sdf.as_ptr(),
+                f_sdf.as_ptr(),
+                ecenter_sdf.as_ptr(),
+                fcenter_sdf.as_ptr(),
+                edge_lr.as_mut_ptr(),
+                face_lr.as_mut_ptr(),
+            )
+        };
+
+        if check_tol {
+            let max_abs = sdf_buf.iter().fold(0.0f32, |acc, &value| acc.max(value.abs()));
+            if (max_abs as f64) < bisection_tol {
+                break;
+            }
+        }
+    }
+
+    let mut edge_r = vec![0.0f64; nve * 2 * 3];
+    let mut face_r = vec![0.0f64; nvf * 4 * 3];
+    unsafe {
+        (lib.get_lr_extra_verts)(
+            edge_lr.as_mut_ptr(),
+            edge_r.as_mut_ptr(),
+            face_lr.as_mut_ptr(),
+            face_r.as_mut_ptr(),
+        )
+    };
+
+    let n_all_lr = n_elr * 2 + n_flr * 2;
+    let mut all_lr = vec![0.0f64; n_all_lr * 3];
+    all_lr[..n_elr * 3].copy_from_slice(&edge_lr);
+    all_lr[n_elr * 3..n_elr * 2 * 3].copy_from_slice(&edge_r);
+    all_lr[n_elr * 2 * 3..(n_elr * 2 + n_flr) * 3].copy_from_slice(&face_lr);
+    all_lr[(n_elr * 2 + n_flr) * 3..].copy_from_slice(&face_r);
+
+    let all_lr_sdf = kernel.evaluate_batch(&all_lr, n_all_lr)?;
+    if all_lr_sdf.len() != n_all_lr {
+        return Err(CoreError::Sdf(format!(
+            "native LR-extra SDF length mismatch: got {}, expected {n_all_lr}",
+            all_lr_sdf.len()
+        )));
+    }
+    let esdf_l = &all_lr_sdf[..n_elr];
+    let esdf_r = &all_lr_sdf[n_elr..n_elr * 2];
+    let fsdf_l = &all_lr_sdf[n_elr * 2..n_elr * 2 + n_flr];
+    let fsdf_r = &all_lr_sdf[n_elr * 2 + n_flr..];
+
+    let mut edge_verts = vec![0.0f64; nve * 3];
+    let mut face_verts = vec![0.0f64; nvf * 3];
+    unsafe {
+        (lib.finalize_extra_verts)(
+            esdf_l.as_ptr(),
+            esdf_r.as_ptr(),
+            edge_verts.as_mut_ptr(),
+            fsdf_l.as_ptr(),
+            fsdf_r.as_ptr(),
+            face_verts.as_mut_ptr(),
+        )
+    };
+
+    let n_final = n_base + nve + nvf;
+    let mut final_vertices = vec![0.0f64; n_final * 3];
+    final_vertices[..n_base * 3].copy_from_slice(base_vertices);
+    final_vertices[n_base * 3..(n_base + nve) * 3].copy_from_slice(&edge_verts);
+    final_vertices[(n_base + nve) * 3..].copy_from_slice(&face_verts);
+
+    let mut faces = vec![0i32; nf * 3];
+    unsafe { (lib.get_faces)(faces.as_mut_ptr()) };
+
+    Ok((final_vertices, faces))
 }
 
 /// Convert a [`MeshData`] into a Python `trimesh.Trimesh` object and a numpy bool array.

@@ -205,6 +205,8 @@ Notes:
 - The Rust workspace currently bridges to the existing `ocmesher/lib/core.so` shared library rather than replacing the meshing algorithm with a pure Rust core.
 - `bash install.sh` still needs to be run first so `core.so` exists for the Rust extension to load.
 - The Rust wrapper batches SDF evaluation through the same public backend contract used by the Torch backend.
+- `ocmesher-rust/crates/ocmesher-core` now also exposes a Rust-native `SdfEvaluator` path via `run_meshing_pipeline_native(...)`, so the meshing pipeline can be driven from Rust without Python callables.
+- The optional `tch-kernels` feature is intended for tensor-backed Rust SDF kernels, but building it requires a working libtorch / `torch-sys` setup in the build environment.
 
 Relevant files:
 - [ocmesher/rust_backend.py](ocmesher/rust_backend.py)
