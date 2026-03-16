@@ -224,6 +224,25 @@ class TestCoerceKernelSdf:
         with pytest.raises(ValueError, match=r"kernels\[1\].*expected \(2,\)"):
             coerce_kernel_sdf(np.zeros((2, 1)), 2, "kernels[1]")
 
+    def test_preserves_dtype(self):
+        arr = np.array([1.5, 2.5], dtype=np.float64)
+        result = coerce_kernel_sdf(arr, 2, "test")
+        assert result.dtype == np.float64
+
+    def test_converts_scalar_to_array(self):
+        # A list of 1 element should become (1,) array
+        sdf = coerce_kernel_sdf([42.0], 1, "test")
+        assert sdf.shape == (1,)
+
+    def test_rejects_0d_scalar(self):
+        with pytest.raises(ValueError, match="expected"):
+            coerce_kernel_sdf(np.float32(1.0), 1, "test")
+
+    def test_rejects_2d_matching_length(self):
+        # (3, 1) has len 3 but shape != (3,)
+        with pytest.raises(ValueError, match="expected"):
+            coerce_kernel_sdf(np.zeros((3, 1)), 3, "test")
+
 
 # ---------------------------------------------------------------------------
 # Refactoring: module-level _AXIS_NAMES constant
