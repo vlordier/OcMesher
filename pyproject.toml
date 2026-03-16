@@ -39,11 +39,17 @@ benchmark = [
     "numba>=0.60.0",  # JIT-compiled SDF (Opt-numba tier)
     "mlx>=0.22.0",    # Apple Metal GPU SDF (Opt-metal tier, macOS-only)
 ]
+docs = [
+    "mkdocs>=1.6.0",
+    "mkdocs-material>=9.5.0",
+    "mkdocstrings[python]>=0.29.0",
+]
 
 [project.urls]
 Homepage = "https://github.com/princeton-vl/OcMesher"
 Repository = "https://github.com/princeton-vl/OcMesher"
 Issues = "https://github.com/princeton-vl/OcMesher/issues"
+Documentation = "https://princeton-vl.github.io/OcMesher/"
 
 [build-system]
 requires = ["setuptools>=68"]
@@ -94,6 +100,7 @@ ignore = [
 ]
 # core.py – complex scientific code with many C-bindings
 "ocmesher/core.py" = [
+    "FBT001",   # boolean-typed positional arg (__init__ bool kwargs are public API)
     "FBT002",   # boolean default positional args (API backwards-compat)
     "PLR0913",  # too-many-arguments (ctypes register_func calls)
     "PLR0915",  # too-many-statements (__call__ orchestrates meshing)
@@ -111,6 +118,7 @@ ignore = [
 ]
 # PyTorch mesher – complex scientific code with GPU tensor ops
 "ocmesher/torch_core.py" = [
+    "FBT001",   # boolean-typed positional arg (__init__ bool kwargs are public API)
     "FBT002",   # boolean default positional args (API backwards-compat)
 ]
 # benchmark script – standalone runner

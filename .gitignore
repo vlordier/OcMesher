@@ -35,3 +35,6 @@ benchmark_results/
 .pytest_cache/
 htmlcov/
 .coverage
+
+# MkDocs build output
+site/
