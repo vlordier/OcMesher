@@ -227,8 +227,17 @@ class RustOcMesher:
         stream_policy: str = "sync",
         cuda_sync: bool = False,
         backend: RustBackendProtocol | None = None,
+        adaptive_batching: bool = True,
     ):
-        """Create a Rust-backed mesher with OcMesher-compatible arguments."""
+        """Create a Rust-backed mesher with OcMesher-compatible arguments.
+        
+        Parameters
+        ----------
+        adaptive_batching : bool, default=True
+            When True and sdf_batch_size is not specified, automatically profile 
+            kernels at extraction time to pick optimal batch size. This reduces 
+            Python/FFI overhead and improves performance, especially for fast kernels.
+        """
         cam_poses, Ks, Hs, Ws = _validate_cameras(cameras)
         self.cameras = (cam_poses, Ks, Hs, Ws)
         self.bounds = _validate_bounds(bounds)
@@ -277,6 +286,7 @@ class RustOcMesher:
         self.cuda_sync = cuda_sync
         self._device_caps = caps
         self._backend = backend
+        self.adaptive_batching = adaptive_batching
 
     def capabilities(self) -> dict[str, Any]:
         """Return runtime capability flags used by Infinigen integration."""
@@ -336,13 +346,31 @@ class RustOcMesher:
         else:
             bundled_kernels = None
 
+        # Adaptive batch sizing: if not specified and enabled, profile kernels
+        effective_batch_size = self._effective_batch_size
+        if (
+            self.adaptive_batching
+            and self.sdf_batch_size is None
+            and effective_batch_size is None
+            and bool(backend_caps.get("native_batching", False))
+        ):
+            try:
+                from ocmesher.adaptive_batching import profile_and_recommend_batch_size
+                recommended, _diag = profile_and_recommend_batch_size(
+                    list(kernels), default_batch_size=16384
+                )
+                effective_batch_size = recommended
+            except Exception:
+                # On any profiling error, fall back to default
+                pass
+
         if bool(backend_caps.get("native_batching", False)):
             # The Rust extension handles SDF batch chunking internally.
             sdf_kernels = bundled_kernels or list(kernels)
         else:
             sdf_kernels = build_batched_sdf_kernels(
                 list(kernels),
-                batch_size=self._effective_batch_size,
+                batch_size=effective_batch_size,
             )
 
         result = cast(tuple[Any, Any] | list[Any], self._backend.extract_meshes(sdf_kernels))
@@ -412,7 +440,7 @@ def make_rust_ocmesher(
     # Split kwargs between Rust extension backend and Python wrapper.
     # `batch_size` and `dtype` are wrapper-only controls; the remaining runtime
     # knobs are passed to both layers so capability negotiation stays aligned.
-    _wrapper_only = {"batch_size", "dtype"}
+    _wrapper_only = {"batch_size", "dtype", "adaptive_batching"}
     _shared = {"device", "max_batch", "sdf_batch_size", "stream_policy", "cuda_sync"}
     backend_kwargs = {k: v for k, v in kwargs.items() if k not in _wrapper_only}
     wrapper_kwargs = {
