@@ -60,3 +60,14 @@ def test_run_config_benchmark_aggregates_single_run(monkeypatch) -> None:
     assert result["times"] == [0.25]
     assert result["n_verts"] == 12
     assert result["n_faces"] == 34
+
+
+def test_collect_tier_results_uses_tier_order(monkeypatch) -> None:
+    monkeypatch.setattr(benchmark, "TIERS_SPEC", [("A", "build-a", "vnoise"), ("B", "build-b", "numba")])
+
+    def _fake_run_tier(label, _build_script, _sdf_type, _configs, _runs):
+        return [{"config": label, "times": [1.0], "mean": 1.0, "median": 1.0, "stdev": 0.0, "min": 1.0, "max": 1.0, "n_verts": 1, "n_faces": 2}]
+
+    monkeypatch.setattr(benchmark, "run_tier", _fake_run_tier)
+    results = benchmark._collect_tier_results([], 1)
+    assert [label for label, _ in results] == ["A", "B"]
