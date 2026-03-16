@@ -280,6 +280,13 @@ def print_comparison(tiers: list[tuple[str, list[TierConfigResult]]]) -> None:
     print()
 
 
+def _select_configs(config_choice: str, all_configs: list[DemoConfig]) -> list[DemoConfig]:
+    """Return selected benchmark configs for CLI choice."""
+    if config_choice == "all":
+        return all_configs
+    return [c for c in all_configs if c["label"].startswith(config_choice)]
+
+
 def main() -> None:
     parser = argparse.ArgumentParser(description="Benchmark OcMesher: baseline vs opt-C++ vs opt+numba-SDF")
     parser.add_argument("--runs", type=int, default=3, help="Runs per configuration (default: 3)")
@@ -289,9 +296,7 @@ def main() -> None:
 
     os.chdir(Path(__file__).parent)
 
-    configs = DEMO_CONFIGS
-    if args.configs != "all":
-        configs = [c for c in DEMO_CONFIGS if c["label"].startswith(args.configs)]
+    configs = _select_configs(args.configs, DEMO_CONFIGS)
 
     tiers_spec = [
         ("Baseline(-O3+vnoise)", BASELINE_BUILD, "vnoise"),
