@@ -5,15 +5,19 @@ on:
     branches: ["main", "develop"]
     paths:
       - "**.py"
+      - ".python-version"
       - "pyproject.toml"
       - ".pre-commit-config.yaml"
+      - "uv.lock"
       - ".github/workflows/lint.yml"
   pull_request:
     branches: ["main", "develop"]
     paths:
       - "**.py"
+      - ".python-version"
       - "pyproject.toml"
       - ".pre-commit-config.yaml"
+      - "uv.lock"
       - ".github/workflows/lint.yml"
 
 permissions:
