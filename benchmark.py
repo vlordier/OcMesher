@@ -22,11 +22,36 @@ import sys
 import textwrap
 import time
 from pathlib import Path
+from typing import TypedDict
+
+
+class DemoConfig(TypedDict):
+    label: str
+    pixels_per_cube: int
+    coarse_count: int
+
+
+class RunResult(TypedDict):
+    elapsed_s: float
+    n_verts: int
+    n_faces: int
+
+
+class TierConfigResult(TypedDict):
+    config: str
+    times: list[float]
+    mean: float
+    median: float
+    stdev: float
+    min: float
+    max: float
+    n_verts: int
+    n_faces: int
 
 BASELINE_BUILD = "./install.sh"
 OPTIMISED_BUILD = "./install_optimized.sh"
 
-DEMO_CONFIGS = [
+DEMO_CONFIGS: list[DemoConfig] = [
     {"label": "small (ppc=32)", "pixels_per_cube": 32, "coarse_count": 100_000},
     {"label": "medium (ppc=16)", "pixels_per_cube": 16, "coarse_count": 500_000},
     {"label": "large (ppc=8)", "pixels_per_cube": 8, "coarse_count": 500_000},
@@ -147,7 +172,7 @@ def build(script: str) -> float:
     return time.perf_counter() - t0
 
 
-def run_mesher_subprocess(pixels_per_cube: int, coarse_count: int, sdf_type: str) -> dict:
+def run_mesher_subprocess(pixels_per_cube: int, coarse_count: int, sdf_type: str) -> RunResult:
     sdf_blocks = {"vnoise": _SDF_VNOISE, "numba": _SDF_NUMBA, "mlx": _SDF_MLX}
     sdf_block = textwrap.dedent(sdf_blocks[sdf_type])
     script = _MESHER_TEMPLATE.format(
@@ -171,7 +196,13 @@ def run_mesher_subprocess(pixels_per_cube: int, coarse_count: int, sdf_type: str
     raise RuntimeError(f"No JSON output.\nstdout:\n{result.stdout}")
 
 
-def run_tier(label: str, build_script: str, sdf_type: str, configs: list, runs: int) -> list:
+def run_tier(
+    label: str,
+    build_script: str,
+    sdf_type: str,
+    configs: list[DemoConfig],
+    runs: int,
+) -> list[TierConfigResult]:
     print(f"\n{'=' * 62}")
     print(f"  {label}")
     print(f"{'=' * 62}")
@@ -204,7 +235,7 @@ def run_tier(label: str, build_script: str, sdf_type: str, configs: list, runs: 
     return results
 
 
-def print_comparison(tiers: list):
+def print_comparison(tiers: list[tuple[str, list[TierConfigResult]]]) -> None:
     """tiers: list of (label, results)"""
     names = [t[0] for t in tiers]
     tables = [t[1] for t in tiers]
@@ -239,7 +270,7 @@ def print_comparison(tiers: list):
     print()
 
 
-def main():
+def main() -> None:
     parser = argparse.ArgumentParser(description="Benchmark OcMesher: baseline vs opt-C++ vs opt+numba-SDF")
     parser.add_argument("--runs", type=int, default=3, help="Runs per configuration (default: 3)")
     parser.add_argument("--configs", default="all", choices=["small", "medium", "large", "all"])
