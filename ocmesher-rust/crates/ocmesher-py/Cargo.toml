@@ -3,6 +3,11 @@ name = "ocmesher_rust"
 version = "0.1.0"
 edition = "2021"
 description = "PyO3 extension module exposing the OcMesher Rust backend"
+build = "build.rs"
+
+[features]
+default = []
+tch-kernels = ["ocmesher-core/tch-kernels", "dep:tch"]
 
 [lib]
 name = "ocmesher_rust"
@@ -13,3 +18,4 @@ ocmesher-core = { path = "../ocmesher-core" }
 pyo3 = { version = "0.22", features = ["extension-module"] }
 numpy = "0.22"
 ndarray = "0.16"
+tch = { version = "0.18", optional = true }

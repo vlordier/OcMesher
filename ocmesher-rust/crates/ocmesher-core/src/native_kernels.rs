@@ -196,4 +196,18 @@ mod tests {
         let min = eval_sdf_min_native(&kernels, &xyz, 2, &[-1.0, -1.0, -1.0], &[1.0, 1.0, 1.0], true).unwrap();
         assert_eq!(min[1], 1.0);
     }
+
+    #[cfg(feature = "tch-kernels")]
+    #[test]
+    fn tch_sphere_kernel_matches_expected_distances() {
+        use super::tch_kernels::TchSphereKernel;
+        use tch::Device;
+
+        let kernel = TchSphereKernel::new([0.0, 0.0, 0.0], 1.0, Device::Cpu);
+        let xyz = [0.0, 0.0, 0.0, 2.0, 0.0, 0.0];
+        let out = crate::native_kernels::SdfEvaluator::evaluate_batch(&kernel, &xyz, 2).unwrap();
+        assert_eq!(out.len(), 2);
+        assert!((out[0] + 1.0).abs() <= 1e-5);
+        assert!((out[1] - 1.0).abs() <= 1e-5);
+    }
 }

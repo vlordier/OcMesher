@@ -428,6 +428,7 @@ dependencies = [
  "numpy",
  "ocmesher-core",
  "pyo3",
+ "tch",
 ]
 
 [[package]]

@@ -29,6 +29,10 @@ use ocmesher_core::{
     pack_cameras, run_meshing_pipeline, run_meshing_pipeline_native, validate_bounds, CoreLib,
     MesherParams, SphereKernel,
 };
+#[cfg(feature = "tch-kernels")]
+use ocmesher_core::tch_kernels::TchSphereKernel;
+#[cfg(feature = "tch-kernels")]
+use tch::Device;
 
 // ---------------------------------------------------------------------------
 // Backend PyO3 class
@@ -265,6 +269,52 @@ impl Backend {
             None => [0.0, 0.0, 0.0],
         };
         let kernels = vec![Box::new(SphereKernel::new(center_arr, radius)) as _];
+        let mesh_data_list = run_meshing_pipeline_native(&self.lib, &self.params, &kernels)
+            .map_err(PyErr::from)?;
+
+        let meshes_list = PyList::empty_bound(py);
+        let tags_list = PyList::empty_bound(py);
+
+        for mesh_data in mesh_data_list {
+            let (mesh_obj, tag_np) = ocmesher_core::mesh_data_to_python(py, mesh_data)?;
+            meshes_list.append(mesh_obj)?;
+            tags_list.append(tag_np)?;
+        }
+
+        Ok(PyTuple::new_bound(py, [meshes_list.into_any(), tags_list.into_any()]))
+    }
+
+    /// Run the meshing pipeline with a `tch`-backed sphere SDF.
+    #[cfg(feature = "tch-kernels")]
+    #[pyo3(signature = (radius = 1.0, center = None, device = None))]
+    fn extract_tch_sphere<'py>(
+        &self,
+        py: Python<'py>,
+        radius: f64,
+        center: Option<Vec<f64>>,
+        device: Option<String>,
+    ) -> PyResult<Bound<'py, PyTuple>> {
+        let center_arr = match center {
+            Some(values) => {
+                if values.len() != 3 {
+                    return Err(pyo3::exceptions::PyValueError::new_err(
+                        "center must contain exactly 3 values",
+                    ));
+                }
+                [values[0] as f32, values[1] as f32, values[2] as f32]
+            }
+            None => [0.0, 0.0, 0.0],
+        };
+        let tch_device = match device.as_deref() {
+            None | Some("cpu") => Device::Cpu,
+            Some("mps") => Device::Mps,
+            Some(value) => {
+                return Err(pyo3::exceptions::PyValueError::new_err(format!(
+                    "unsupported tch device: {value}"
+                )))
+            }
+        };
+        let kernels = vec![Box::new(TchSphereKernel::new(center_arr, radius as f32, tch_device)) as _];
         let mesh_data_list = run_meshing_pipeline_native(&self.lib, &self.params, &kernels)
             .map_err(PyErr::from)?;
 

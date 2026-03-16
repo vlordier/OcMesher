@@ -3,6 +3,7 @@ name = "ocmesher-core"
 version = "0.1.0"
 edition = "2021"
 description = "Rust core: dynamic loader for OcMesher C++ backend + pyo3-based meshing pipeline"
+build = "build.rs"
 
 [features]
 default = []

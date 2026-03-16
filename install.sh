@@ -31,6 +31,20 @@ if [[ -n "${LDFLAGS:-}" ]]; then
     read -ra LDFLAGS_ARRAY <<< "${LDFLAGS}"
 fi
 
+if [ "${OS}" = "Darwin" ]; then
+    libomp_prefix=""
+    if [ -d "/opt/homebrew/opt/libomp" ]; then
+        libomp_prefix="/opt/homebrew/opt/libomp"
+    elif [ -d "/usr/local/opt/libomp" ]; then
+        libomp_prefix="/usr/local/opt/libomp"
+    fi
+
+    if [ -n "${libomp_prefix}" ]; then
+        CXXFLAGS_ARRAY+=("-I${libomp_prefix}/include")
+        LDFLAGS_ARRAY+=("-L${libomp_prefix}/lib" "-Wl,-rpath,${libomp_prefix}/lib")
+    fi
+fi
+
 # ---------------------------------------------------------------------------
 # Architecture-specific optimisation flags
 # -march=native enables all CPU ISA extensions available on the build machine

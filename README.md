@@ -207,7 +207,7 @@ Notes:
 - The Rust wrapper batches SDF evaluation through the same public backend contract used by the Torch backend.
 - `ocmesher-rust/crates/ocmesher-core` now also exposes a Rust-native `SdfEvaluator` path via `run_meshing_pipeline_native(...)`, so the meshing pipeline can be driven from Rust without Python callables.
 - The compiled extension also exposes `Backend.extract_native_sphere(...)` as the first end-to-end no-Python-callback pilot path.
-- The optional `tch-kernels` feature is intended for tensor-backed Rust SDF kernels, but building it requires a working libtorch / `torch-sys` setup in the build environment.
+- The optional `tch-kernels` feature adds a tensor-backed Rust path, including `Backend.extract_tch_sphere(...)`, and builds when `LIBTORCH` points at a valid libtorch root; on macOS the extension now links with an rpath targeting the Python `torch/lib` bundle.
 
 Relevant files:
 - [ocmesher/rust_backend.py](ocmesher/rust_backend.py)
