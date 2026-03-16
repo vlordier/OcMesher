@@ -4,6 +4,7 @@
 """OcMesher: View-dependent octree-based mesh extraction for unbounded SDF scenes."""
 
 import logging
+from importlib.metadata import PackageNotFoundError, version
 
 from .core import OcMesher
 
@@ -13,7 +14,11 @@ from .core import OcMesher
 logging.getLogger(__name__).addHandler(logging.NullHandler())
 
 __all__ = ["OcMesher", "TorchOcMesher"]
-__version__ = "1.0.0"
+
+try:
+    __version__ = version("ocmesher")
+except PackageNotFoundError:
+    __version__ = "0.0.0.dev0"
 
 
 def __getattr__(name: str):

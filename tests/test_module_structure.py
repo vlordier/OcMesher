@@ -227,3 +227,22 @@ class TestModuleAllExports:
         assert hasattr(ocmesher, "__all__")
         assert "OcMesher" in ocmesher.__all__
         assert "TorchOcMesher" in ocmesher.__all__
+
+
+# ---------------------------------------------------------------------------
+# __version__ from package metadata
+# ---------------------------------------------------------------------------
+
+
+class TestPackageVersion:
+    def test_version_is_string(self):
+        import ocmesher
+
+        assert isinstance(ocmesher.__version__, str)
+
+    def test_version_matches_metadata(self):
+        from importlib.metadata import version
+
+        import ocmesher
+
+        assert ocmesher.__version__ == version("ocmesher")
