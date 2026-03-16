@@ -17,9 +17,10 @@ def _line_count(path: Path) -> int:
     return path.read_text(encoding="utf-8").count("\n") + 1
 
 
-def _file_length_violations(repo_root: Path) -> list[str]:
+def _file_length_violations(repo_root: Path, limits: dict[str, int] | None = None) -> list[str]:
+    limits = limits or MAX_LINES_BY_FILE
     violations = []
-    for rel_path, max_lines in MAX_LINES_BY_FILE.items():
+    for rel_path, max_lines in limits.items():
         abs_path = repo_root / rel_path
         n_lines = _line_count(abs_path)
         if n_lines > max_lines:
@@ -31,3 +32,10 @@ def test_file_length_policy() -> None:
     repo_root = Path(__file__).resolve().parents[1]
     violations = _file_length_violations(repo_root)
     assert not violations, "\n".join(violations)
+
+
+def test_file_length_violations_reports_offending_file(tmp_path) -> None:
+    test_file = tmp_path / "example.py"
+    test_file.write_text("a\n" * 10, encoding="utf-8")
+    violations = _file_length_violations(tmp_path, {"example.py": 5})
+    assert violations == ["example.py: 11 lines (limit 5)"]
