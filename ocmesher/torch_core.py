@@ -78,6 +78,8 @@ _CORNER_QUANT_SCALE = CORNER_QUANT_SCALE
 
 # Maximum number of SDF evaluation threads for parallel chunk processing.
 _MAX_SDF_WORKERS = MAX_SDF_WORKERS
+_torch_empty = torch.empty
+_torch_zeros = torch.zeros
 
 
 class TorchOcMesher:
@@ -154,7 +156,7 @@ class TorchOcMesher:
         _, inverse = torch.unique(hash_vals, return_inverse=True)
         n_unique = int(inverse.max().item()) + 1
         n_verts = len(inverse)
-        rep_idx = torch.zeros(n_unique, dtype=torch.long)
+        rep_idx = _torch_zeros(n_unique, dtype=torch.long)
         rev_arange = torch.arange(n_verts - 1, -1, -1)
         rep_idx.scatter_(0, inverse[rev_arange], rev_arange)
         dedup_verts = verts_flat[rep_idx].numpy()
@@ -319,7 +321,7 @@ class TorchOcMesher:
         self._vis_inv_factor = 1.0 / factor
         # Batched depth buffer: (C, max_buf) — one row per camera, padded to
         # the largest camera's bin grid so scatter_reduce can be batched.
-        self._depth_bufs = torch.empty(
+        self._depth_bufs = _torch_empty(
             (self.n_cameras, self._vis_max_buf),
             dtype=self._fdtype,
             device=self.device,
@@ -504,7 +506,7 @@ class TorchOcMesher:
         n = positions.shape[0]
         n_kernels = len(kernels)
         if n == 0:
-            return torch.zeros((0, n_kernels), dtype=torch.float32, device=self.device)
+            return _torch_zeros((0, n_kernels), dtype=torch.float32, device=self.device)
 
         xyz_np = positions.cpu().double().numpy()
         step = TORCH_SDF_CHUNK_SIZE
@@ -592,7 +594,7 @@ class TorchOcMesher:
         if n_expand > budget:
             _, top_k = proj[expand_idx].topk(budget)
             expand_idx = expand_idx[top_k]
-            to_expand = torch.zeros(n, dtype=torch.bool, device=self.device)
+            to_expand = _torch_zeros(n, dtype=torch.bool, device=self.device)
             to_expand[expand_idx] = True
 
         keep_mask = ~to_expand
@@ -607,8 +609,8 @@ class TorchOcMesher:
         Returns:
             ``(coords, levels)`` - leaf cubes of the coarse octree.
         """
-        coords = torch.zeros((1, 3), dtype=torch.int64, device=self.device)
-        levels = torch.zeros(1, dtype=torch.int64, device=self.device)
+        coords = _torch_zeros((1, 3), dtype=torch.int64, device=self.device)
+        levels = _torch_zeros(1, dtype=torch.int64, device=self.device)
 
         for _ in range(30):
             if len(coords) >= self.coarse_count:
