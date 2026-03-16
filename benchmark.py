@@ -464,12 +464,17 @@ def _collect_tier_results(configs: list[DemoConfig], runs: int) -> list[tuple[st
 
 def _write_stdout(message: str = "") -> None:
     """Write one line to stdout without relying on print()."""
-    sys.stdout.write(f"{message}\n")
+    _write_stream(sys.stdout, message)
 
 
 def _write_stderr(message: str) -> None:
     """Write one line to stderr without relying on print()."""
-    sys.stderr.write(f"{message}\n")
+    _write_stream(sys.stderr, message)
+
+
+def _write_stream(stream: object, message: str = "") -> None:
+    """Write one line to a text stream."""
+    stream.write(f"{message}\n")
 
 
 if __name__ == "__main__":
