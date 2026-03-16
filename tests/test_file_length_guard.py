@@ -39,3 +39,9 @@ def test_line_count_handles_empty_file(tmp_path) -> None:
     p = tmp_path / "empty.py"
     p.write_text("", encoding="utf-8")
     assert guard._line_count(p) == 0
+
+
+def test_write_violations_writes_to_stderr(capsys) -> None:
+    guard._write_violations(["a", "b"])
+    err = capsys.readouterr().err
+    assert err == "a\nb\n"
