@@ -849,7 +849,7 @@ def _micro_dtype_comparison(cameras, bounds, n_runs: int = 5) -> dict[str, objec
     return results
 
 
-def _bench_cpu_threads(cameras, bounds, sdf_name: str = "terrain", n_runs: int = 3):
+def _bench_cpu_threads(cameras, bounds, sdf_name: str = "terrain", n_runs: int = 3) -> list[dict[str, object]]:
     """Benchmark end-to-end PyTorch CPU performance across different thread counts.
 
     Uses :func:`torch.set_num_threads` to vary the intra-op parallelism and
@@ -888,7 +888,7 @@ def _bench_cpu_threads(cameras, bounds, sdf_name: str = "terrain", n_runs: int =
     return results
 
 
-def _bench_compile(cameras, bounds, sdf_name: str = "terrain", n_runs: int = 3, warmup: int = 2):
+def _bench_compile(cameras, bounds, sdf_name: str = "terrain", n_runs: int = 3, warmup: int = 2) -> dict[str, object]:
     """Benchmark ``torch.compile`` JIT impact on CPU and CUDA.
 
     Compares plain TorchOcMesher vs ``use_compile=True`` to quantify the
