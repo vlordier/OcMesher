@@ -212,6 +212,12 @@ class TestCallReturnType:
         ret = sig.return_annotation
         assert ret != inspect.Parameter.empty
 
+    def test_torch_mesher_kernels_annotation(self):
+        import inspect
+
+        sig = inspect.signature(TorchOcMesher.__call__)
+        assert sig.parameters["kernels"].annotation == "KernelSequence"
+
     def test_core_mesher_type_annotation(self):
         import inspect
 
