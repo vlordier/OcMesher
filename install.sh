@@ -69,7 +69,10 @@ fi
 gx1() { "${compiler}" "${CXXFLAGS_ARRAY[@]}" -O3 -std=c++17 ${MARCH_FLAGS} -c -fpic -fopenmp "$@"; }
 gx2() { "${compiler}" "${LDFLAGS_ARRAY[@]}" -O3 -shared -fopenmp "$@"; }
 
+# Clean up intermediate object files on exit (success or failure).
+cleanup() { rm -f ocmesher/lib/core.o; }
+trap cleanup EXIT
+
 mkdir -p ocmesher/lib
 gx1 -o ocmesher/lib/core.o ocmesher/source/core.cpp
 gx2 -o ocmesher/lib/core.so ocmesher/lib/core.o
-rm -f ocmesher/lib/core.o
