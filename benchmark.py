@@ -168,8 +168,8 @@ print(json.dumps(result))
 
 def _parse_last_json_line(stdout: str) -> RunResult:
     """Parse the last JSON object line emitted by benchmark subprocess output."""
-    for line in reversed(stdout.strip().splitlines()):
-        line = line.strip()
+    for raw_line in reversed(stdout.strip().splitlines()):
+        line = raw_line.strip()
         if line.startswith("{"):
             parsed = json.loads(line)
             return {
