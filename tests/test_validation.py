@@ -99,7 +99,7 @@ class TestPreprocessCameras:
 
     def test_multi_camera_shapes(self, sample_camera_pose, sample_intrinsics):
         n = 3
-        inv, intr, hs, ws = preprocess_cameras(
+        inv, intr, _hs, _ws = preprocess_cameras(
             [sample_camera_pose] * n,
             [sample_intrinsics] * n,
             [720] * n,

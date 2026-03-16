@@ -159,7 +159,6 @@ ignore = [
     "PLR2004",  # magic values OK in test assertions
     "PT019",    # @patch-injected args look like unused fixtures
     "SLF001",   # private member access expected in tests
-    "RUF059",   # unused unpacked variables OK in tests
     "E402",     # module-level imports not at top (pytest.importorskip pattern)
     "PLC0415",  # test-local imports for importability checks
     "ERA001",   # section divider comments look like commented-out code

@@ -220,7 +220,7 @@ class TestEndToEnd:
         assert len(tags) == 2
 
     def test_multi_cam_output(self, multi_cam_mesher, sphere_kernel):
-        meshes, tags = multi_cam_mesher([sphere_kernel])
+        meshes, _tags = multi_cam_mesher([sphere_kernel])
         assert len(meshes) == 1
         assert meshes[0].vertices.shape[0] > 0
 
@@ -288,13 +288,13 @@ class TestUseCompile:
         """use_compile=False should leave methods unwrapped."""
         mesher = TorchOcMesher(sample_cameras, sample_bounds, device="cpu", use_compile=False)
         # Methods should still be callable without error
-        coords, levels = mesher._build_coarse_octree()
+        coords, _levels = mesher._build_coarse_octree()
         assert coords.shape[1] == 3
 
     def test_use_compile_true_still_works(self, sample_cameras, sample_bounds, sphere_kernel):
         """use_compile=True should not break correctness on CPU (falls back gracefully)."""
         mesher = TorchOcMesher(sample_cameras, sample_bounds, device="cpu", use_compile=True)
-        meshes, tags = mesher([sphere_kernel])
+        meshes, _tags = mesher([sphere_kernel])
         assert len(meshes) == 1
         assert meshes[0].vertices.shape[0] > 0
 
@@ -449,7 +449,7 @@ class TestSDFCaching:
         s_coords = coords[mask]
         s_levels = levels[mask]
         s_corner_sdf = corner_sdf[mask]
-        r_coords, r_levels, r_corner_sdf = single_cam_mesher._refine_surface_octree(
+        r_coords, _r_levels, r_corner_sdf = single_cam_mesher._refine_surface_octree(
             kernels,
             s_coords,
             s_levels,
@@ -693,14 +693,14 @@ class TestRefineSkipKeptCubes:
         s_levels = levels[mask]
         s_sdf = corner_sdf[mask]
         # Optimised path
-        c_opt, l_opt, sdf_opt = single_cam_mesher._refine_surface_octree(
+        c_opt, l_opt, _sdf_opt = single_cam_mesher._refine_surface_octree(
             kernels,
             s_coords.clone(),
             s_levels.clone(),
             corner_sdf=s_sdf.clone(),
         )
         # Fallback path
-        c_fb, l_fb, sdf_fb = single_cam_mesher._refine_surface_octree(
+        c_fb, l_fb, _sdf_fb = single_cam_mesher._refine_surface_octree(
             kernels,
             s_coords.clone(),
             s_levels.clone(),

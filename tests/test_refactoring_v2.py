@@ -22,7 +22,7 @@ from ocmesher.torch_core import TorchOcMesher
 class TestPreprocessCameras:
     def test_returns_correct_shapes(self, sample_cameras):
         cam_poses, Ks, Hs, Ws = sample_cameras
-        inv_3x4, intrinsics, heights, widths = preprocess_cameras(cam_poses, Ks, Hs, Ws)
+        inv_3x4, intrinsics, _heights, _widths = preprocess_cameras(cam_poses, Ks, Hs, Ws)
         assert inv_3x4.shape == (1, 3, 4)
         assert intrinsics.shape == (1, 3, 3)
         assert inv_3x4.dtype == np.float64
@@ -161,7 +161,7 @@ class TestOctreeExpansionStep:
         levels = torch.zeros(1, dtype=torch.int64)
         result = single_cam_mesher._octree_expansion_step(coords, levels, 1000)
         assert result is not None
-        keep_mask, child_coords, child_levels, proj = result
+        _keep_mask, child_coords, child_levels, _proj = result
         assert child_coords.shape[1] == 3
         assert child_levels.ndim == 1
         # Root is expanded, so children should have level 1
@@ -174,7 +174,7 @@ class TestOctreeExpansionStep:
         # Budget target of 9: keeps 1, expands 1 → 1 + 8 = 9
         result = single_cam_mesher._octree_expansion_step(coords, levels, 9)
         if result is not None:
-            keep_mask, child_coords, child_levels, _ = result
+            keep_mask, child_coords, _child_levels, _ = result
             n_kept = keep_mask.sum().item()
             n_children = len(child_coords)
             assert n_kept + n_children <= 9 + 8  # reasonable bound
@@ -271,7 +271,7 @@ class TestTorchDeviceFixture:
 
     def test_select_device_matches(self, torch_device):
         """_select_device_and_dtype with explicit device must match."""
-        dev, dtype = TorchOcMesher._select_device_and_dtype(torch_device)
+        dev, _dtype = TorchOcMesher._select_device_and_dtype(torch_device)
         assert str(dev) == torch_device
 
 
