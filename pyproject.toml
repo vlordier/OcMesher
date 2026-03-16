@@ -17,6 +17,7 @@ classifiers = [
 ]
 dependencies = [
     "numpy>=1.24.0",
+    "vnoise>=0.1.0",
     "trimesh>=4.0.0",
     "gin-config>=0.5.0",
     "tqdm>=4.65.0",
@@ -34,7 +35,7 @@ dev = [
     "ruff>=0.4.0",
 ]
 benchmark = [
-    "vnoise>=0.1.0",  # Optional noise backend used when available
+    "setuptools<81",  # vnoise currently imports pkg_resources
     "numba>=0.60.0",  # JIT-compiled SDF (Opt-numba tier)
     "mlx>=0.22.0",    # Apple Metal GPU SDF (Opt-metal tier, macOS-only)
 ]
