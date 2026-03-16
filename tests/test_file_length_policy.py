@@ -42,3 +42,9 @@ def test_file_length_violations_reports_offending_file(tmp_path) -> None:
     test_file.write_text("a\n" * 10, encoding="utf-8")
     violations = _file_length_violations(tmp_path, {"example.py": 5})
     assert violations == ["example.py: 11 lines (limit 5)"]
+
+
+def test_line_count_counts_last_line_without_trailing_newline(tmp_path) -> None:
+    test_file = tmp_path / "one_line.py"
+    test_file.write_text("print('hi')", encoding="utf-8")
+    assert _line_count(test_file) == 1
