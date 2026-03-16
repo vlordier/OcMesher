@@ -211,9 +211,10 @@ void computeCenter(T* coords, const Cube& v) {
 void projectedCoords(                         // NOLINT(readability-identifier-length)
     const Cube& c, int k, T* icoords, T* r) { // NOLINT(bugprone-easily-swappable-parameters)
     using namespace params;
-    T pw[3], pc[3]; // NOLINT(modernize-avoid-c-arrays)
+    std::array<T, 3> pw{};
+    std::array<T, 3> pc{};
     T* current_cam = cams + static_cast<ptrdiff_t>(k) * (12 + 9 + 2);
-    computeCenter(pw, c);
+    computeCenter(pw.data(), c);
     for (int i = 0; i < 3; i++) {
         pc[i] = current_cam[static_cast<ptrdiff_t>(i) * 4 + 3];
         for (int j = 0; j < 3; j++) { // NOLINT(readability-identifier-length)
