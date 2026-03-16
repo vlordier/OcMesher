@@ -271,9 +271,7 @@ def run_tier(
     runs: int,
 ) -> list[TierConfigResult]:
     """Benchmark one tier across all selected configs and aggregate run stats."""
-    print(f"\n{'=' * 62}")
-    print(f"  {label}")
-    print(f"{'=' * 62}")
+    _print_tier_banner(label)
     build_time = build(build_script)
     print(f"  Build time: {build_time:.2f}s")
     results = []
@@ -289,6 +287,13 @@ def run_tier(
             print(f"    Run {i + 1}/{runs}: {r['elapsed_s']:.3f}s  ({verts} verts, {faces} faces)")
         results.append(_summarize_tier_config(cfg["label"], times, verts, faces, runs))
     return results
+
+
+def _print_tier_banner(label: str) -> None:
+    """Print heading banner for one benchmark tier."""
+    print(f"\n{'=' * 62}")
+    print(f"  {label}")
+    print(f"{'=' * 62}")
 
 
 def _summarize_tier_config(label: str, times: list[float], n_verts: int, n_faces: int, runs: int) -> TierConfigResult:
