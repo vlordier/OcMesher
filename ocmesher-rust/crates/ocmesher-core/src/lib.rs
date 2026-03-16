@@ -16,6 +16,7 @@
 //! Python calls cannot interleave.
 
 use std::ffi::{c_int, c_void};
+use std::{cell::RefCell, thread_local};
 use std::sync::{Mutex, OnceLock};
 
 use libloading::{Library, Symbol};
@@ -23,6 +24,129 @@ use pyo3::prelude::*;
 use pyo3::types::{PyDict, PyList};
 
 const DLPACK_CAPSULE_NAME: &[u8] = b"dltensor\0";
+
+#[derive(Default)]
+struct TorchObjectCache {
+    torch: Option<Py<PyAny>>,
+    from_dlpack: Option<Py<PyAny>>,
+    to_dlpack: Option<Py<PyAny>>,
+    from_numpy: Option<Py<PyAny>>,
+    as_tensor: Option<Py<PyAny>>,
+    stack: Option<Py<PyAny>>,
+    float32: Option<Py<PyAny>>,
+    float64: Option<Py<PyAny>>,
+}
+
+thread_local! {
+    static TORCH_OBJECT_CACHE: RefCell<TorchObjectCache> = RefCell::new(TorchObjectCache::default());
+}
+
+fn cached_torch(py: Python<'_>) -> PyResult<Py<PyAny>> {
+    TORCH_OBJECT_CACHE.with(|slot| {
+        if let Some(obj) = slot.borrow().torch.as_ref() {
+            return Ok(obj.clone_ref(py));
+        }
+        let torch = py.import_bound("torch")?.into_any().unbind();
+        slot.borrow_mut().torch = Some(torch.clone_ref(py));
+        Ok(torch)
+    })
+}
+
+fn cached_from_dlpack(py: Python<'_>) -> PyResult<Py<PyAny>> {
+    TORCH_OBJECT_CACHE.with(|slot| {
+        if let Some(obj) = slot.borrow().from_dlpack.as_ref() {
+            return Ok(obj.clone_ref(py));
+        }
+        let torch = cached_torch(py)?;
+        let f = torch
+            .bind(py)
+            .getattr("utils")?
+            .getattr("dlpack")?
+            .getattr("from_dlpack")?
+            .unbind();
+        slot.borrow_mut().from_dlpack = Some(f.clone_ref(py));
+        Ok(f)
+    })
+}
+
+fn cached_to_dlpack(py: Python<'_>) -> PyResult<Py<PyAny>> {
+    TORCH_OBJECT_CACHE.with(|slot| {
+        if let Some(obj) = slot.borrow().to_dlpack.as_ref() {
+            return Ok(obj.clone_ref(py));
+        }
+        let torch = cached_torch(py)?;
+        let f = torch
+            .bind(py)
+            .getattr("utils")?
+            .getattr("dlpack")?
+            .getattr("to_dlpack")?
+            .unbind();
+        slot.borrow_mut().to_dlpack = Some(f.clone_ref(py));
+        Ok(f)
+    })
+}
+
+fn cached_from_numpy(py: Python<'_>) -> PyResult<Py<PyAny>> {
+    TORCH_OBJECT_CACHE.with(|slot| {
+        if let Some(obj) = slot.borrow().from_numpy.as_ref() {
+            return Ok(obj.clone_ref(py));
+        }
+        let torch = cached_torch(py)?;
+        let f = torch.bind(py).getattr("from_numpy")?.unbind();
+        slot.borrow_mut().from_numpy = Some(f.clone_ref(py));
+        Ok(f)
+    })
+}
+
+fn cached_as_tensor(py: Python<'_>) -> PyResult<Py<PyAny>> {
+    TORCH_OBJECT_CACHE.with(|slot| {
+        if let Some(obj) = slot.borrow().as_tensor.as_ref() {
+            return Ok(obj.clone_ref(py));
+        }
+        let torch = cached_torch(py)?;
+        let f = torch.bind(py).getattr("as_tensor")?.unbind();
+        slot.borrow_mut().as_tensor = Some(f.clone_ref(py));
+        Ok(f)
+    })
+}
+
+fn cached_stack(py: Python<'_>) -> PyResult<Py<PyAny>> {
+    TORCH_OBJECT_CACHE.with(|slot| {
+        if let Some(obj) = slot.borrow().stack.as_ref() {
+            return Ok(obj.clone_ref(py));
+        }
+        let torch = cached_torch(py)?;
+        let f = torch.bind(py).getattr("stack")?.unbind();
+        slot.borrow_mut().stack = Some(f.clone_ref(py));
+        Ok(f)
+    })
+}
+
+fn cached_torch_dtype(py: Python<'_>, dtype_name: &str) -> PyResult<Py<PyAny>> {
+    TORCH_OBJECT_CACHE.with(|slot| {
+        if dtype_name == "float64" {
+            if let Some(obj) = slot.borrow().float64.as_ref() {
+                return Ok(obj.clone_ref(py));
+            }
+        } else if let Some(obj) = slot.borrow().float32.as_ref() {
+            return Ok(obj.clone_ref(py));
+        }
+
+        let torch = cached_torch(py)?;
+        let attr = if dtype_name == "float64" {
+            torch.bind(py).getattr("float64")?
+        } else {
+            torch.bind(py).getattr("float32")?
+        }
+        .unbind();
+        if dtype_name == "float64" {
+            slot.borrow_mut().float64 = Some(attr.clone_ref(py));
+        } else {
+            slot.borrow_mut().float32 = Some(attr.clone_ref(py));
+        }
+        Ok(attr)
+    })
+}
 
 #[repr(C)]
 struct DLDevice {
@@ -457,12 +581,8 @@ fn extract_sdf_output(py: Python<'_>, raw: Py<PyAny>) -> PyResult<Vec<f32>> {
 
         // Try torch.utils.dlpack.to_dlpack → read raw DLManagedTensor bytes.
         let extracted: Option<Vec<f32>> = (|| {
-            let torch = py.import_bound("torch").ok()?;
-            let to_dlpack = torch
-                .getattr("utils").ok()?
-                .getattr("dlpack").ok()?
-                .getattr("to_dlpack").ok()?;
-            let capsule = to_dlpack.call1((&cpu_tensor,)).ok()?;
+            let to_dlpack = cached_to_dlpack(py).ok()?;
+            let capsule = to_dlpack.bind(py).call1((&cpu_tensor,)).ok()?;
 
             // Get raw pointer from the capsule.
             let ptr = unsafe {
@@ -552,21 +672,16 @@ fn build_torch_xyz_input_from_numpy<'py>(
     torch_eval_dtype: Option<&str>,
     torch_non_blocking: bool,
 ) -> PyResult<Bound<'py, PyAny>> {
-    let torch = py.import_bound("torch")?;
-    let from_numpy = torch.getattr("from_numpy")?;
-    let xyz_t = from_numpy.call1((xyz_np.clone(),))?;
+    let from_numpy = cached_from_numpy(py)?;
+    let xyz_t = from_numpy.bind(py).call1((xyz_np.clone(),))?;
     let dtype_name = torch_eval_dtype.unwrap_or("float32");
-    let dtype_obj = if dtype_name == "float64" {
-        torch.getattr("float64")?
-    } else {
-        torch.getattr("float32")?
-    };
+    let dtype_obj = cached_torch_dtype(py, dtype_name)?;
     if let Some(device) = torch_eval_device {
         let kwargs = PyDict::new_bound(py);
         kwargs.set_item("non_blocking", torch_non_blocking)?;
-        xyz_t.call_method("to", (device, dtype_obj), Some(&kwargs))
+        xyz_t.call_method("to", (device, dtype_obj.bind(py)), Some(&kwargs))
     } else {
-        xyz_t.call_method1("to", (dtype_obj,))
+        xyz_t.call_method1("to", (dtype_obj.bind(py),))
     }
 }
 
@@ -583,11 +698,7 @@ fn build_torch_xyz_input_dlpack<'py>(
     // dtype conversion step from the `.to()` call that follows.
     let use_f32 = torch_eval_dtype.unwrap_or("float32") != "float64";
 
-    let torch = py.import_bound("torch")?;
-    let from_dlpack = torch
-        .getattr("utils")?
-        .getattr("dlpack")?
-        .getattr("from_dlpack")?;
+    let from_dlpack = cached_from_dlpack(py)?;
 
     let xyz_t = if use_f32 {
         let ctx = Box::new(DLPackTensorContextF32 {
@@ -619,7 +730,7 @@ fn build_torch_xyz_input_dlpack<'py>(
                 ),
             )?
         };
-        from_dlpack.call1((capsule,))?
+        from_dlpack.bind(py).call1((capsule,))?
     } else {
         // f64 path: keep original precision
         let ctx = Box::new(DLPackTensorContext {
@@ -651,7 +762,7 @@ fn build_torch_xyz_input_dlpack<'py>(
                 ),
             )?
         };
-        from_dlpack.call1((capsule,))?
+        from_dlpack.bind(py).call1((capsule,))?
     };
 
     // CUDA non-blocking: pin the CPU tensor before the H2D transfer so the
@@ -675,8 +786,8 @@ fn build_torch_xyz_input_dlpack<'py>(
         if use_f32 {
             xyz_t.call_method("to", (device,), Some(&kwargs))
         } else {
-            let dtype_obj = build_torch_dtype(&torch.into_any(), torch_eval_dtype)?;
-            xyz_t.call_method("to", (device, dtype_obj), Some(&kwargs))
+            let dtype_obj = cached_torch_dtype(py, torch_eval_dtype.unwrap_or("float32"))?;
+            xyz_t.call_method("to", (device, dtype_obj.bind(py)), Some(&kwargs))
         }
     } else if use_f32 {
         // CPU path, dtype already correct
@@ -687,18 +798,6 @@ fn build_torch_xyz_input_dlpack<'py>(
     }
 }
 
-fn build_torch_dtype<'py>(
-    torch: &Bound<'py, PyAny>,
-    torch_eval_dtype: Option<&str>,
-) -> PyResult<Bound<'py, PyAny>> {
-    let dtype_name = torch_eval_dtype.unwrap_or("float32");
-    if dtype_name == "float64" {
-        torch.getattr("float64")
-    } else {
-        torch.getattr("float32")
-    }
-}
-
 fn normalize_torch_output<'py>(
     py: Python<'py>,
     value: Py<PyAny>,
@@ -706,17 +805,16 @@ fn normalize_torch_output<'py>(
     torch_eval_dtype: Option<&str>,
     torch_non_blocking: bool,
 ) -> PyResult<Bound<'py, PyAny>> {
-    let torch = py.import_bound("torch")?;
-    let as_tensor = torch.getattr("as_tensor")?;
-    let dtype_obj = build_torch_dtype(&torch.into_any(), torch_eval_dtype)?;
+    let as_tensor = cached_as_tensor(py)?;
+    let dtype_obj = cached_torch_dtype(py, torch_eval_dtype.unwrap_or("float32"))?;
     let kwargs = PyDict::new_bound(py);
-    kwargs.set_item("dtype", dtype_obj)?;
+    kwargs.set_item("dtype", dtype_obj.bind(py))?;
     if let Some(device) = torch_eval_device {
         kwargs.set_item("device", device)?;
         kwargs.set_item("non_blocking", torch_non_blocking)?;
-        as_tensor.call((value.bind(py),), Some(&kwargs))
+        as_tensor.bind(py).call((value.bind(py),), Some(&kwargs))
     } else {
-        as_tensor.call((value.bind(py),), Some(&kwargs))
+        as_tensor.bind(py).call((value.bind(py),), Some(&kwargs))
     }
 }
 
@@ -929,6 +1027,88 @@ fn eval_kernel_py(
     Ok(out)
 }
 
+fn eval_kernel_py_into(
+    py: Python<'_>,
+    kernel: &Py<PyAny>,
+    xyz: &[f64],
+    n_pts: usize,
+    sdf_batch_size: Option<usize>,
+    torch_eval_device: Option<&str>,
+    torch_eval_dtype: Option<&str>,
+    torch_non_blocking: bool,
+    out: &mut [f32],
+) -> PyResult<()> {
+    if out.len() != n_pts {
+        return Err(pyo3::exceptions::PyValueError::new_err(format!(
+            "output buffer length mismatch: got {}, expected {n_pts}",
+            out.len()
+        )));
+    }
+
+    let Some(batch_size) = sdf_batch_size else {
+        let vals = eval_kernel_py_once(
+            py,
+            kernel,
+            xyz,
+            n_pts,
+            torch_eval_device,
+            torch_eval_dtype,
+            torch_non_blocking,
+        )?;
+        if vals.len() != n_pts {
+            return Err(pyo3::exceptions::PyValueError::new_err(format!(
+                "kernel returned {} values for {n_pts} query points",
+                vals.len()
+            )));
+        }
+        out.copy_from_slice(&vals);
+        return Ok(());
+    };
+
+    if batch_size == 0 || n_pts <= batch_size {
+        let vals = eval_kernel_py_once(
+            py,
+            kernel,
+            xyz,
+            n_pts,
+            torch_eval_device,
+            torch_eval_dtype,
+            torch_non_blocking,
+        )?;
+        if vals.len() != n_pts {
+            return Err(pyo3::exceptions::PyValueError::new_err(format!(
+                "kernel returned {} values for {n_pts} query points",
+                vals.len()
+            )));
+        }
+        out.copy_from_slice(&vals);
+        return Ok(());
+    }
+
+    for start in (0..n_pts).step_by(batch_size) {
+        let end = (start + batch_size).min(n_pts);
+        let chunk = &xyz[start * 3..end * 3];
+        let chunk_vals = eval_kernel_py_once(
+            py,
+            kernel,
+            chunk,
+            end - start,
+            torch_eval_device,
+            torch_eval_dtype,
+            torch_non_blocking,
+        )?;
+        if chunk_vals.len() != end - start {
+            return Err(pyo3::exceptions::PyValueError::new_err(format!(
+                "kernel returned {} values for {} query points",
+                chunk_vals.len(),
+                end - start
+            )));
+        }
+        out[start..end].copy_from_slice(&chunk_vals);
+    }
+    Ok(())
+}
+
 /// Evaluate all `kernels` at `xyz` (n_pts × 3 f64) and return a flat f32 array of shape
 /// `(n_pts × n_kernels)` in row-major order: `result[i * n_kernels + k]` = kernel k value at
 /// point i.
@@ -1079,8 +1259,7 @@ fn eval_sdf_min(
     let torch_bundle = torch_bundle.map(|bundle| bundle.bind(py));
 
     if use_fused_torch {
-        let torch = py.import_bound("torch")?;
-        let stack = torch.getattr("stack")?;
+        let stack = cached_stack(py)?;
         let chunk_size = sdf_batch_size.unwrap_or(n_pts).max(1);
         let mut min_sdf = vec![f32::INFINITY; n_pts];
 
@@ -1133,7 +1312,7 @@ fn eval_sdf_min(
                 outputs.append(tensor)?;
             }
 
-            let stacked = stack.call1((outputs, 1))?;
+            let stacked = stack.bind(py).call1((outputs, 1))?;
             let reduced = stacked.call_method1("amin", (1,))?;
             let chunk_vals = extract_sdf_output(py, reduced.unbind())?;
             if chunk_vals.len() != chunk_n {
@@ -1165,36 +1344,88 @@ fn eval_sdf_min(
         return Ok(min_sdf);
     }
 
-    let full = eval_sdf_full(
-        py,
-        kernels,
-        xyz,
-        n_pts,
-        n_kernels,
-        sdf_batch_size,
-        torch_eval_device,
-        torch_eval_dtype,
-        torch_non_blocking,
-        b_min,
-        b_max,
-        enclosed,
-        false,
-        None,
-    )?;
-
     if n_kernels == 1 {
-        return Ok(full);
+        let mut vals = eval_kernel_py(
+            py,
+            &kernels[0],
+            xyz,
+            n_pts,
+            sdf_batch_size,
+            torch_eval_device,
+            torch_eval_dtype,
+            torch_non_blocking,
+        )?;
+        if enclosed {
+            for i in 0..n_pts {
+                let x = xyz[i * 3];
+                let y = xyz[i * 3 + 1];
+                let z = xyz[i * 3 + 2];
+                if x <= b_min[0]
+                    || x >= b_max[0]
+                    || y <= b_min[1]
+                    || y >= b_max[1]
+                    || z <= b_min[2]
+                    || z >= b_max[2]
+                {
+                    vals[i] = 1.0;
+                }
+            }
+        }
+        return Ok(vals);
     }
 
     let mut min_sdf = vec![f32::INFINITY; n_pts];
-    for i in 0..n_pts {
-        for k in 0..n_kernels {
-            let v = full[i * n_kernels + k];
+    for kernel in kernels {
+        let sdf = eval_kernel_py(
+            py,
+            kernel,
+            xyz,
+            n_pts,
+            sdf_batch_size,
+            torch_eval_device,
+            torch_eval_dtype,
+            torch_non_blocking,
+        )?;
+        if sdf.len() != n_pts {
+            return Err(pyo3::exceptions::PyValueError::new_err(format!(
+                "kernel returned {} values for {n_pts} query points",
+                sdf.len()
+            )));
+        }
+
+        let mut all_negative = true;
+        for i in 0..n_pts {
+            let v = sdf[i];
             if v < min_sdf[i] {
                 min_sdf[i] = v;
             }
+            if min_sdf[i] >= 0.0 {
+                all_negative = false;
+            }
+        }
+        // Coarse pass only needs sign. If everything is already inside, stop.
+        if all_negative {
+            break;
         }
     }
+
+    if enclosed {
+        for i in 0..n_pts {
+            let x = xyz[i * 3];
+            let y = xyz[i * 3 + 1];
+            let z = xyz[i * 3 + 2];
+            if x <= b_min[0]
+                || x >= b_max[0]
+                || y <= b_min[1]
+                || y >= b_max[1]
+                || z <= b_min[2]
+                || z >= b_max[2]
+            {
+                min_sdf[i] = 1.0;
+            }
+        }
+    }
+
     Ok(min_sdf)
 }
 
@@ -1271,9 +1502,10 @@ fn construct_element_mesh(
 
     let n_cubes = nv * 8;
     let check_tol = bisection_tol > 0.0;
+    let mut sdf_buf = vec![0.0f32; n_cubes];
 
     for _ in 0..bisection_iters {
-        let sdf_buf = eval_kernel_py(
+        eval_kernel_py_into(
             py,
             kernel,
             &cubes,
@@ -1282,6 +1514,7 @@ fn construct_element_mesh(
             torch_eval_device,
             torch_eval_dtype,
             torch_non_blocking,
+            &mut sdf_buf,
         )?;
 
         py.allow_threads(|| unsafe {
@@ -1430,13 +1663,13 @@ fn refine_extra_vertices(
     let n_bisect = n_elr + n_flr;
     let check_tol = bisection_tol > 0.0;
     let mut bisect_buf = vec![0.0f64; n_bisect * 3];
-    let mut sdf_buf: Vec<f32>;
+    let mut sdf_buf = vec![0.0f32; n_bisect];
 
     for _ in 0..bisection_iters {
         bisect_buf[..n_elr * 3].copy_from_slice(&edge_lr);
         bisect_buf[n_elr * 3..].copy_from_slice(&face_lr);
 
-        sdf_buf = eval_kernel_py(
+        eval_kernel_py_into(
             py,
             kernel,
             &bisect_buf,
@@ -1445,6 +1678,7 @@ fn refine_extra_vertices(
             torch_eval_device,
             torch_eval_dtype,
             torch_non_blocking,
+            &mut sdf_buf,
         )?;
 
         let (e_sdf, f_sdf) = sdf_buf.split_at(n_elr);
