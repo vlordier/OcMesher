@@ -219,8 +219,7 @@ SDF_BLOCKS = {
 
 def _parse_last_json_line(stdout: str) -> RunResult:
     """Parse the last JSON object line emitted by benchmark subprocess output."""
-    for raw_line in reversed(stdout.strip().splitlines()):
-        line = raw_line.strip()
+    for line in _iter_json_candidate_lines(stdout):
         if line.startswith("{"):
             parsed = json.loads(line)
             return {
@@ -229,6 +228,11 @@ def _parse_last_json_line(stdout: str) -> RunResult:
                 "n_faces": int(parsed["n_faces"]),
             }
     raise BenchmarkOutputParseError(stdout)
+
+
+def _iter_json_candidate_lines(stdout: str) -> list[str]:
+    """Return output lines in reverse order, normalized for JSON scanning."""
+    return [line.strip() for line in reversed(stdout.strip().splitlines())]
 
 
 def build(script: str) -> float:
