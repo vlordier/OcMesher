@@ -334,7 +334,7 @@ def print_comparison(tiers: list[tuple[str, list[TierConfigResult]]]) -> None:
 
     for row in range(len(tables[0])):
         cfg_label = tables[0][row]["config"]
-        medians = [tables[i][row]["median"] for i in range(n_cols)]
+        medians = _tier_medians_at_row(tables, row, n_cols)
         print(_comparison_row(cfg_label, medians, cw))
     print()
 
@@ -344,11 +344,19 @@ def _comparison_row(cfg_label: str, medians: list[float], col_width: int) -> str
     line = f"{cfg_label:<{CONFIG_COLUMN_WIDTH}}"
     for median in medians:
         line += f"  {median:>{col_width}.3f}s"
-    baseline = medians[0]
-    for median in medians[1:]:
-        speedup = _speedup_ratio(baseline, median)
-        line += f"  {speedup:>5.2f}x"
+    line += _speedup_cells(medians)
     return line
+
+
+def _tier_medians_at_row(tables: list[list[TierConfigResult]], row: int, n_cols: int) -> list[float]:
+    """Collect median timings for one configuration row across tiers."""
+    return [tables[i][row]["median"] for i in range(n_cols)]
+
+
+def _speedup_cells(medians: list[float]) -> str:
+    """Format speedup cell suffix for a median row."""
+    baseline = medians[0]
+    return "".join(f"  {_speedup_ratio(baseline, median):>5.2f}x" for median in medians[1:])
 
 
 def _comparison_column_width(short_labels: list[str]) -> int:
