@@ -335,14 +335,20 @@ def print_comparison(tiers: list[tuple[str, list[TierConfigResult]]]) -> None:
     for row in range(len(tables[0])):
         cfg_label = tables[0][row]["config"]
         medians = [tables[i][row]["median"] for i in range(n_cols)]
-        line = f"{cfg_label:<{CONFIG_COLUMN_WIDTH}}"
-        for m in medians:
-            line += f"  {m:>{cw}.3f}s"
-        for m in medians[1:]:
-            sp = _speedup_ratio(medians[0], m)
-            line += f"  {sp:>5.2f}x"
-        print(line)
+        print(_comparison_row(cfg_label, medians, cw))
     print()
+
+
+def _comparison_row(cfg_label: str, medians: list[float], col_width: int) -> str:
+    """Format one comparison row with medians and baseline speedups."""
+    line = f"{cfg_label:<{CONFIG_COLUMN_WIDTH}}"
+    for median in medians:
+        line += f"  {median:>{col_width}.3f}s"
+    baseline = medians[0]
+    for median in medians[1:]:
+        speedup = _speedup_ratio(baseline, median)
+        line += f"  {speedup:>5.2f}x"
+    return line
 
 
 def _comparison_column_width(short_labels: list[str]) -> int:
