@@ -305,6 +305,8 @@ int vis_filter( // NOLINT(readability-identifier-naming, modernize-use-trailing-
     bool simplify_occluded, int relax_iters) {
     using namespace params;
     using namespace solid;
+    cubes.clear();
+    cubes.reserve(cubes_set.size());
     for (const auto& key : cubes_set) {
         Cube c;
         keyToCube(c, key);
@@ -383,13 +385,18 @@ int vis_filter( // NOLINT(readability-identifier-naming, modernize-use-trailing-
         }
     }
     visible_set.clear();
+    visible_set.reserve(cubes.size());
     occluded_set.clear();
+    occluded_set.reserve(cubes.size());
     std::unordered_set<KeyCube, KeyCubeHash> new_visible_set, old_visible_set;
+    new_visible_set.reserve(cubes.size());
+    old_visible_set.reserve(cubes.size());
     for (int i = 0; i < static_cast<int>(visible.size()); i++) { // NOLINT(modernize-loop-convert)
+        KeyCube key = cubeToKey(cubes[i]);
         if (visible[i])
-            visible_set.insert(cubeToKey(cubes[i]));
+            visible_set.insert(key);
         else
-            occluded_set.insert(cubeToKey(cubes[i]));
+            occluded_set.insert(key);
     }
     visible.clear();
     cubes.clear();
@@ -404,9 +411,11 @@ int vis_filter( // NOLINT(readability-identifier-naming, modernize-use-trailing-
                 assign(coords[(f / 3 + 2) % 3], c.m_coords[(f / 3 + 2) % 3], 2, 1);
                 Cube new_cube = search(&coarse::nodes[0], coords, c.m_l + 1);
                 if (!isBoundary(new_cube)) {
-                    if (occluded_set.count(cubeToKey(new_cube))) {
-                        occluded_set.erase(cubeToKey(new_cube));
-                        new_visible_set.insert(cubeToKey(new_cube));
+                    KeyCube new_key = cubeToKey(new_cube);
+                    auto occluded_it = occluded_set.find(new_key);
+                    if (occluded_it != occluded_set.end()) {
+                        occluded_set.erase(occluded_it);
+                        new_visible_set.insert(new_key);
                     }
                 }
             }
@@ -426,7 +435,9 @@ int vis_filter( // NOLINT(readability-identifier-naming, modernize-use-trailing-
     final_ns::nodes.clear();
     final_ns::nodes.push_back(root);
     final_ns::visible_nodes_cube.clear();
+    final_ns::visible_nodes_cube.reserve(visible_set.size());
     final_ns::occluded_nodes_id.clear();
+    final_ns::occluded_nodes_id.reserve(occluded_set.size());
     for (const auto& key : visible_set) {
         Cube c;
         keyToCube(c, key);
