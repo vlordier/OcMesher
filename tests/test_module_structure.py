@@ -1,6 +1,7 @@
 """Tests for new module structure: _mc_tables, _validation, _constants, _types."""
 
 from __future__ import annotations
+import pytest
 
 # ---------------------------------------------------------------------------
 # _mc_tables: table integrity
@@ -212,6 +213,7 @@ class TestModuleAllExports:
         assert "OcMesher" in core.__all__
 
     def test_torch_core_has_all(self):
+        pytest.importorskip("torch")
         from ocmesher import torch_core
 
         assert hasattr(torch_core, "__all__")
