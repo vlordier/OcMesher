@@ -90,6 +90,7 @@ Quality policy notes:
 uv run ruff check .
 uv run ruff format .
 uv run pytest
+uv run pytest tests/test_file_length_policy.py
 ```
 
 ### Benchmark Validation Workflow
