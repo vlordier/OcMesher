@@ -7,7 +7,7 @@
 
 import logging
 import os
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from types import TracebackType
 from typing import Self
 
@@ -29,6 +29,12 @@ class Timer:
     """
 
     __slots__ = ("disable_timer", "duration", "end", "name", "start")
+
+    disable_timer: bool
+    duration: timedelta
+    end: datetime
+    name: str
+    start: datetime
 
     def __init__(self, desc: str, disable_timer: bool = False) -> None:
         """Create a timer labelled *desc*."""
