@@ -448,8 +448,7 @@ auto computeBoundary(const Cube& c,
     return instance;
 }
 
-inline auto
-det(T matrix[3][3]) -> T { // NOLINT(modernize-use-trailing-return-type, modernize-avoid-c-arrays)
+inline auto det(const std::array<std::array<T, 3>, 3>& matrix) -> T {
     return matrix[0][0] * (matrix[1][1] * matrix[2][2] - matrix[1][2] * matrix[2][1]) -
            matrix[0][1] * (matrix[1][0] * matrix[2][2] - matrix[1][2] * matrix[2][0]) +
            matrix[0][2] * (matrix[1][0] * matrix[2][1] - matrix[1][1] * matrix[2][0]);
@@ -458,7 +457,7 @@ det(T matrix[3][3]) -> T { // NOLINT(modernize-use-trailing-return-type, moderni
 auto triSegIntersect(T* t1, T* t2, T* t3, T* s1, T* s2)
     -> bool { // NOLINT(modernize-use-trailing-return-type, bugprone-easily-swappable-parameters)
     // note (t1,t3) of the tri is allowed to intersect
-    T m[3][3]; // NOLINT(modernize-avoid-c-arrays)
+    std::array<std::array<T, 3>, 3> m{};
     for (int i = 0; i < 3; i++) {
         m[0][i] = t1[i] - s1[i];
         m[1][i] = t2[i] - s1[i];
