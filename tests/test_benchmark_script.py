@@ -189,3 +189,13 @@ class TestSummarizeTierConfig:
         assert result["n_faces"] == 20
 
 
+class TestTierResultsToDict:
+    def test_preserves_tier_labels(self):
+        results = [
+            ("Baseline", [{"config": "small", "times": [1.0], "mean": 1.0, "median": 1.0, "stdev": 0.0, "min": 1.0, "max": 1.0, "n_verts": 1, "n_faces": 2}]),
+            ("Opt", [{"config": "small", "times": [0.5], "mean": 0.5, "median": 0.5, "stdev": 0.0, "min": 0.5, "max": 0.5, "n_verts": 1, "n_faces": 2}]),
+        ]
+        mapped = benchmark._tier_results_to_dict(results)
+        assert list(mapped.keys()) == ["Baseline", "Opt"]
+
+
