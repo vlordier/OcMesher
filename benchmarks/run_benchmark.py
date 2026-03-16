@@ -532,7 +532,7 @@ def _micro_octree(cameras, bounds, n_runs: int = 3) -> dict[str, object]:
     return results
 
 
-def _micro_visibility(cameras, bounds, n_runs: int = 3):
+def _micro_visibility(cameras, bounds, n_runs: int = 3) -> dict[str, object]:
     """Benchmark visibility filter in isolation."""
     results: dict[str, object] = {}
     try:
@@ -563,7 +563,7 @@ def _micro_visibility(cameras, bounds, n_runs: int = 3):
     return results
 
 
-def _scaling_cameras(bounds, max_cameras: int = 8, n_runs: int = 1):
+def _scaling_cameras(bounds, max_cameras: int = 8, n_runs: int = 1) -> list[dict[str, object]]:
     """Measure how performance scales with number of cameras."""
     results: list[dict[str, object]] = []
     try:
