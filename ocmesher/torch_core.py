@@ -41,6 +41,8 @@ from ._constants import CORNER_QUANT_SCALE, DENOM_EPS, MAX_SDF_WORKERS
 from ._mc_tables import CORNER_OFFSETS, EDGE_TABLE, EDGE_VERTICES, TRI_TABLE
 from ._validation import out_of_bounds_mask as _out_of_bounds_mask
 from ._validation import preprocess_cameras as _preprocess_cameras
+from ._validation import validate_bounds as _validate_bounds
+from ._validation import validate_cameras as _validate_cameras
 from .utils.timer import Timer
 
 logger = logging.getLogger(__name__)
@@ -151,9 +153,9 @@ class TorchOcMesher:
                 one-time compilation cost on the first call; recommended when
                 the mesher is called many times (e.g., in a training loop).
         """
+        cam_poses, Ks, Hs, Ws = _validate_cameras(cameras)
+        bounds = _validate_bounds(bounds)
         self.device, self._fdtype = self._select_device_and_dtype(device)
-
-        cam_poses, Ks, Hs, Ws = cameras
         self.n_cameras = len(cam_poses)
 
         # Use shared camera preprocessing helper — DRY with OcMesher.

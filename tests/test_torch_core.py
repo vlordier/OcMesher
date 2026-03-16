@@ -58,6 +58,21 @@ class TestVectorisedInit:
         assert single_cam_mesher._pix_ang_ppc.shape == (1, 1)
 
 
+class TestConstructorValidation:
+    def test_invalid_cameras_raises(self, sample_bounds):
+        with pytest.raises(ValueError, match="cameras must be"):
+            TorchOcMesher("bad cameras", sample_bounds, device="cpu")
+
+    def test_invalid_bounds_raises(self, sample_cameras):
+        with pytest.raises(ValueError, match="bounds must have 6 elements"):
+            TorchOcMesher(sample_cameras, [0, 1], device="cpu")
+
+    def test_list_inputs_are_normalized(self, sample_cameras_as_lists, sample_bounds):
+        mesher = TorchOcMesher(sample_cameras_as_lists, sample_bounds, device="cpu")
+        assert mesher.cam_inv_poses.shape == (1, 3, 4)
+        assert mesher.cam_intrinsics.shape == (1, 3, 3)
+
+
 # ---------------------------------------------------------------------------
 # Relaxation offset grid
 # ---------------------------------------------------------------------------
