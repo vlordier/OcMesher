@@ -1,7 +1,7 @@
 # Copyright (c) Princeton University.
 # This source code is licensed under the BSD 3-Clause license found in the LICENSE file in the root directory of this source tree.
 
-"""Comprehensive benchmark: original Python + C++ backend vs. PyTorch backend.
+"""Comprehensive benchmark: original Python + C++ backend vs. PyTorch vs Rust.
 
 Run from the repository root::
 
@@ -292,6 +292,69 @@ def _bench_torch(
         backend_tag += "+compile"
     return {
         "backend": backend_tag,
+        "sdf": sdf_name,
+        "times_s": times,
+        **_stats(times),
+        **mesh_info,
+    }
+
+
+def _bench_rust(
+    cameras,
+    bounds,
+    pixels_per_cube: int,
+    sdf_name: str,
+    n_runs: int = 1,
+    warmup: int = 0,
+    device: str | None = None,
+    stream_policy: str = "auto",
+    sdf_batch_size: int | None = None,
+):
+    """Benchmark the Rust OcMesher backend bridge."""
+    try:
+        from ocmesher import make_rust_ocmesher
+    except Exception as exc:  # noqa: BLE001
+        return {"error": f"Could not load Rust backend bridge: {exc}"}
+
+    kernel = _SDF_KERNELS[sdf_name]
+    try:
+        # Warmup
+        for _ in range(warmup):
+            mesher = make_rust_ocmesher(
+                cameras,
+                bounds,
+                pixels_per_cube=pixels_per_cube,
+                device=device,
+                stream_policy=stream_policy,
+                sdf_batch_size=sdf_batch_size,
+            )
+            mesher([kernel])
+
+        times: list[float] = []
+        mesh_info: dict[str, object] = {}
+        for i in range(n_runs):
+            t0 = time.perf_counter()
+            mesher = make_rust_ocmesher(
+                cameras,
+                bounds,
+                pixels_per_cube=pixels_per_cube,
+                device=device,
+                stream_policy=stream_policy,
+                sdf_batch_size=sdf_batch_size,
+            )
+            meshes, _tags = mesher([kernel])
+            elapsed = time.perf_counter() - t0
+            times.append(elapsed)
+            if i == 0:
+                mesh_info = {
+                    "vertices": int(meshes[0].vertices.shape[0]),
+                    "faces": int(meshes[0].faces.shape[0]),
+                }
+    except Exception as exc:  # noqa: BLE001
+        return {"error": f"Rust backend not available: {exc}"}
+
+    return {
+        "backend": f"rust_{device or 'auto'}",
         "sdf": sdf_name,
         "times_s": times,
         **_stats(times),
@@ -965,7 +1028,7 @@ def _print_result(result: dict):
 # ---------------------------------------------------------------------------
 def main():
     """Run benchmarks and log results."""
-    parser = argparse.ArgumentParser(description="OcMesher benchmark: Python+C++ vs PyTorch")
+    parser = argparse.ArgumentParser(description="OcMesher benchmark: Python+C++ vs PyTorch vs Rust")
     parser.add_argument("--full", action="store_true", help="Run full benchmark (slower, higher resolution)")
     parser.add_argument("--profile", action="store_true", help="Run sub-operation micro-benchmarks")
     parser.add_argument("--runs", type=int, default=3, help="Number of end-to-end runs (default 3)")
@@ -992,6 +1055,24 @@ def main():
         "--verbose",
         action="store_true",
         help="Enable DEBUG-level logging (includes per-step mesher output)",
+    )
+    parser.add_argument(
+        "--rust",
+        action="store_true",
+        default=True,
+        help="Include Rust backend in end-to-end comparison",
+    )
+    parser.add_argument(
+        "--no-rust",
+        dest="rust",
+        action="store_false",
+        help="Skip Rust backend in end-to-end comparison",
+    )
+    parser.add_argument(
+        "--rust-sdf-batch-size",
+        type=int,
+        default=None,
+        help="Optional sdf_batch_size forwarded to Rust backend",
     )
     args = parser.parse_args()
 
@@ -1067,6 +1148,22 @@ def main():
             )
             _print_result(r_torch)
             results[f"torch_{dev_str}_{sdf_name}"] = r_torch
+
+            if args.rust:
+                _print_section(f"End-to-end: Rust {label} ({sdf_name})")
+                r_rust = _bench_rust(
+                    cameras,
+                    bounds,
+                    pixels_per_cube,
+                    sdf_name,
+                    n_runs=args.runs,
+                    warmup=args.warmup,
+                    device=dev_str,
+                    stream_policy="auto",
+                    sdf_batch_size=args.rust_sdf_batch_size,
+                )
+                _print_result(r_rust)
+                results[f"rust_{dev_str}_{sdf_name}"] = r_rust
 
     # Micro-benchmarks (only with --profile) --------------------------------
     if args.profile:
@@ -1163,8 +1260,11 @@ def main():
     for sdf_name in sdf_names:
         r_orig = results.get(f"original_{sdf_name}", {})
         r_torch_cpu = results.get(f"torch_cpu_{sdf_name}", {})
+        r_rust_cpu = results.get(f"rust_cpu_{sdf_name}", {})
         r_gpu = results.get(f"torch_cuda_{sdf_name}", {})
+        r_rust_gpu = results.get(f"rust_cuda_{sdf_name}", {})
         r_mps = results.get(f"torch_mps_{sdf_name}", {})
+        r_rust_mps = results.get(f"rust_mps_{sdf_name}", {})
 
         if r_orig and "error" not in r_orig and r_torch_cpu and "error" not in r_torch_cpu:
             sp = r_orig["mean_s"] / max(r_torch_cpu["mean_s"], 1e-6)
@@ -1200,6 +1300,42 @@ def main():
                 r_orig["mean_s"],
             )
 
+        if r_rust_cpu and "error" not in r_rust_cpu and r_orig and "error" not in r_orig:
+            sp_r = r_orig["mean_s"] / max(r_rust_cpu["mean_s"], 1e-6)
+            tag_r = "faster" if sp_r > 1 else "slower"
+            logger.info(
+                "  [%s] Rust CPU     vs C++: %.2fx %s  (%.3fs vs %.3fs)",
+                sdf_name,
+                sp_r,
+                tag_r,
+                r_rust_cpu["mean_s"],
+                r_orig["mean_s"],
+            )
+
+        if r_rust_gpu and "error" not in r_rust_gpu and r_orig and "error" not in r_orig:
+            sp_rg = r_orig["mean_s"] / max(r_rust_gpu["mean_s"], 1e-6)
+            tag_rg = "faster" if sp_rg > 1 else "slower"
+            logger.info(
+                "  [%s] Rust CUDA    vs C++: %.2fx %s  (%.3fs vs %.3fs)",
+                sdf_name,
+                sp_rg,
+                tag_rg,
+                r_rust_gpu["mean_s"],
+                r_orig["mean_s"],
+            )
+
+        if r_rust_mps and "error" not in r_rust_mps and r_orig and "error" not in r_orig:
+            sp_rm = r_orig["mean_s"] / max(r_rust_mps["mean_s"], 1e-6)
+            tag_rm = "faster" if sp_rm > 1 else "slower"
+            logger.info(
+                "  [%s] Rust MPS     vs C++: %.2fx %s  (%.3fs vs %.3fs)",
+                sdf_name,
+                sp_rm,
+                tag_rm,
+                r_rust_mps["mean_s"],
+                r_orig["mean_s"],
+            )
+
         # Cross-device speedup (if multiple GPU devices available)
         if r_gpu and r_torch_cpu and "error" not in r_gpu and "error" not in r_torch_cpu:
             sp_gc = r_torch_cpu["mean_s"] / max(r_gpu["mean_s"], 1e-6)
@@ -1221,6 +1357,18 @@ def main():
                 sp_mc,
                 tag_mc,
                 r_mps["mean_s"],
+                r_torch_cpu["mean_s"],
+            )
+
+        if r_rust_cpu and r_torch_cpu and "error" not in r_rust_cpu and "error" not in r_torch_cpu:
+            sp_rt = r_torch_cpu["mean_s"] / max(r_rust_cpu["mean_s"], 1e-6)
+            tag_rt = "faster" if sp_rt > 1 else "slower"
+            logger.info(
+                "  [%s] Rust CPU vs PyTorch CPU: %.2fx %s  (%.3fs vs %.3fs)",
+                sdf_name,
+                sp_rt,
+                tag_rt,
+                r_rust_cpu["mean_s"],
                 r_torch_cpu["mean_s"],
             )
     logger.info("")
