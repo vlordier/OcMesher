@@ -29,6 +29,18 @@ def torch_device(request):
 
 
 @pytest.fixture
+def torch_mesher_factory(sample_bounds):
+    """Factory for creating TorchOcMesher instances in tests."""
+
+    from ocmesher.torch_core import TorchOcMesher
+
+    def factory(cameras, *, bounds=None, device="cpu", **kwargs):
+        return TorchOcMesher(cameras, sample_bounds if bounds is None else bounds, device=device, **kwargs)
+
+    return factory
+
+
+@pytest.fixture
 def sample_camera_pose():
     """A single 4x4 identity-like camera pose matrix."""
     return np.array(

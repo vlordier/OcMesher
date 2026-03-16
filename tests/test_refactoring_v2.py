@@ -294,6 +294,6 @@ class TestValidationAllUpdated:
 # Local fixtures
 # ---------------------------------------------------------------------------
 @pytest.fixture
-def single_cam_mesher(sample_cameras, sample_bounds):
+def single_cam_mesher(sample_cameras, torch_mesher_factory):
     """TorchOcMesher with a single camera on CPU."""
-    return TorchOcMesher(sample_cameras, sample_bounds, device="cpu")
+    return torch_mesher_factory(sample_cameras)

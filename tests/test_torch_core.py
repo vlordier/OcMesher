@@ -14,13 +14,13 @@ from ocmesher.torch_core import TorchOcMesher
 # Fixtures
 # ---------------------------------------------------------------------------
 @pytest.fixture
-def single_cam_mesher(sample_cameras, sample_bounds):
+def single_cam_mesher(sample_cameras, torch_mesher_factory):
     """TorchOcMesher with a single camera on CPU."""
-    return TorchOcMesher(sample_cameras, sample_bounds, device="cpu")
+    return torch_mesher_factory(sample_cameras)
 
 
 @pytest.fixture
-def multi_cam_mesher(sample_camera_pose, sample_intrinsics, sample_bounds):
+def multi_cam_mesher(sample_camera_pose, sample_intrinsics, torch_mesher_factory):
     """TorchOcMesher with four cameras on CPU."""
     cameras = (
         [sample_camera_pose] * 4,
@@ -28,7 +28,7 @@ def multi_cam_mesher(sample_camera_pose, sample_intrinsics, sample_bounds):
         [720] * 4,
         [1280] * 4,
     )
-    return TorchOcMesher(cameras, sample_bounds, device="cpu")
+    return torch_mesher_factory(cameras)
 
 
 # ---------------------------------------------------------------------------
