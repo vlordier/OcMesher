@@ -26,11 +26,11 @@ use pyo3::prelude::*;
 use pyo3::types::{PyDict, PyList, PyTuple};
 
 use ocmesher_core::{
-    pack_cameras, run_meshing_pipeline, run_meshing_pipeline_native, validate_bounds, BoxedSdfEvaluator, CoreLib,
-    MesherParams, PlaneKernel, SphereKernel,
+    pack_cameras, run_meshing_pipeline, run_meshing_pipeline_native, validate_bounds, CoreError, CoreLib,
+    MesherParams, PlaneKernel, PlaneSpec, PrimitiveSpec, SphereKernel, SphereSpec, build_native_kernels,
 };
 #[cfg(feature = "tch-kernels")]
-use ocmesher_core::tch_kernels::{TchPlaneKernel, TchSphereKernel};
+use ocmesher_core::tch_kernels::{TchPlaneKernel, TchSphereKernel, build_tch_kernels};
 #[cfg(feature = "tch-kernels")]
 use tch::Device;
 
@@ -114,18 +114,27 @@ fn dict_optional_f64(spec: &Bound<'_, PyDict>, key: &str) -> PyResult<Option<f64
     }
 }
 
-fn build_native_primitive(spec: &Bound<'_, PyDict>) -> PyResult<BoxedSdfEvaluator> {
+fn map_scene_validation_error(error: CoreError) -> PyErr {
+    match error {
+        CoreError::Sdf(message) | CoreError::Bounds(message) | CoreError::Camera(message) => {
+            pyo3::exceptions::PyValueError::new_err(message)
+        }
+        other => PyErr::from(other),
+    }
+}
+
+fn parse_native_primitive_spec(spec: &Bound<'_, PyDict>) -> PyResult<PrimitiveSpec> {
     let primitive_type = dict_required_string(spec, "type")?;
     match primitive_type.as_str() {
         "sphere" => {
-            let radius = parse_positive_radius("radius", dict_optional_f64(spec, "radius")?.unwrap_or(1.0))?;
+            let radius = dict_optional_f64(spec, "radius")?.unwrap_or(1.0);
             let center = parse_center_f64(dict_optional_vec_f64(spec, "center")?)?;
-            Ok(Box::new(SphereKernel::new(center, radius)))
+            Ok(PrimitiveSpec::Sphere(SphereSpec::new(center, radius).map_err(map_scene_validation_error)?))
         }
         "plane" => {
             let offset = dict_optional_f64(spec, "offset")?.unwrap_or(0.0);
             let normal = parse_normal_f64(dict_optional_vec_f64(spec, "normal")?)?;
-            Ok(Box::new(PlaneKernel::new(normal, offset).map_err(PyErr::from)?))
+            Ok(PrimitiveSpec::Plane(PlaneSpec::new(normal, offset).map_err(map_scene_validation_error)?))
         }
         other => Err(pyo3::exceptions::PyValueError::new_err(format!(
             "unsupported primitive type: {other}"
@@ -133,7 +142,7 @@ fn build_native_primitive(spec: &Bound<'_, PyDict>) -> PyResult<BoxedSdfEvaluato
     }
 }
 
-fn parse_native_scene_primitives(primitives: &Bound<'_, PyList>) -> PyResult<Vec<BoxedSdfEvaluator>> {
+fn parse_native_scene_primitives(primitives: &Bound<'_, PyList>) -> PyResult<Vec<PrimitiveSpec>> {
     if primitives.is_empty() {
         return Err(pyo3::exceptions::PyValueError::new_err(
             "primitives must be a non-empty list",
@@ -145,7 +154,7 @@ fn parse_native_scene_primitives(primitives: &Bound<'_, PyList>) -> PyResult<Vec
         let spec = item.downcast::<PyDict>().map_err(|_| {
             pyo3::exceptions::PyValueError::new_err(format!("primitives[{index}] must be a dict"))
         })?;
-        kernels.push(build_native_primitive(&spec)?);
+        kernels.push(parse_native_primitive_spec(&spec)?);
     }
     Ok(kernels)
 }
@@ -177,18 +186,18 @@ fn parse_tch_device(device: Option<String>) -> PyResult<Device> {
 }
 
 #[cfg(feature = "tch-kernels")]
-fn build_tch_primitive(spec: &Bound<'_, PyDict>, device: Device) -> PyResult<BoxedSdfEvaluator> {
+fn parse_tch_primitive_spec(spec: &Bound<'_, PyDict>) -> PyResult<PrimitiveSpec> {
     let primitive_type = dict_required_string(spec, "type")?;
     match primitive_type.as_str() {
         "sphere" => {
-            let radius = parse_positive_radius("radius", dict_optional_f64(spec, "radius")?.unwrap_or(1.0))?;
-            let center = parse_vector_f32(dict_optional_vec_f64(spec, "center")?, "center", [0.0, 0.0, 0.0])?;
-            Ok(Box::new(TchSphereKernel::new(center, radius as f32, device)))
+            let radius = dict_optional_f64(spec, "radius")?.unwrap_or(1.0);
+            let center = parse_center_f64(dict_optional_vec_f64(spec, "center")?)?;
+            Ok(PrimitiveSpec::Sphere(SphereSpec::new(center, radius).map_err(map_scene_validation_error)?))
         }
         "plane" => {
             let offset = dict_optional_f64(spec, "offset")?.unwrap_or(0.0);
-            let normal = parse_vector_f32(dict_optional_vec_f64(spec, "normal")?, "normal", [0.0, 0.0, 1.0])?;
-            Ok(Box::new(TchPlaneKernel::new(normal, offset as f32, device).map_err(PyErr::from)?))
+            let normal = parse_normal_f64(dict_optional_vec_f64(spec, "normal")?)?;
+            Ok(PrimitiveSpec::Plane(PlaneSpec::new(normal, offset).map_err(map_scene_validation_error)?))
         }
         other => Err(pyo3::exceptions::PyValueError::new_err(format!(
             "unsupported primitive type: {other}"
@@ -197,7 +206,7 @@ fn build_tch_primitive(spec: &Bound<'_, PyDict>, device: Device) -> PyResult<Box
 }
 
 #[cfg(feature = "tch-kernels")]
-fn parse_tch_scene_primitives(primitives: &Bound<'_, PyList>, device: Device) -> PyResult<Vec<BoxedSdfEvaluator>> {
+fn parse_tch_scene_primitives(primitives: &Bound<'_, PyList>) -> PyResult<Vec<PrimitiveSpec>> {
     if primitives.is_empty() {
         return Err(pyo3::exceptions::PyValueError::new_err(
             "primitives must be a non-empty list",
@@ -209,7 +218,7 @@ fn parse_tch_scene_primitives(primitives: &Bound<'_, PyList>, device: Device) ->
         let spec = item.downcast::<PyDict>().map_err(|_| {
             pyo3::exceptions::PyValueError::new_err(format!("primitives[{index}] must be a dict"))
         })?;
-        kernels.push(build_tch_primitive(&spec, device)?);
+        kernels.push(parse_tch_primitive_spec(&spec)?);
     }
     Ok(kernels)
 }
@@ -481,7 +490,8 @@ impl Backend {
         py: Python<'py>,
         primitives: &Bound<'py, PyList>,
     ) -> PyResult<Bound<'py, PyTuple>> {
-        let kernels = parse_native_scene_primitives(primitives)?;
+        let specs = parse_native_scene_primitives(primitives)?;
+        let kernels = build_native_kernels(&specs).map_err(PyErr::from)?;
         let mesh_data_list = run_meshing_pipeline_native(&self.lib, &self.params, &kernels)
             .map_err(PyErr::from)?;
 
@@ -563,7 +573,8 @@ impl Backend {
         device: Option<String>,
     ) -> PyResult<Bound<'py, PyTuple>> {
         let device = parse_tch_device(device)?;
-        let kernels = parse_tch_scene_primitives(primitives, device)?;
+        let specs = parse_tch_scene_primitives(primitives)?;
+        let kernels = build_tch_kernels(&specs, device).map_err(PyErr::from)?;
         let mesh_data_list = run_meshing_pipeline_native(&self.lib, &self.params, &kernels)
             .map_err(PyErr::from)?;
 

@@ -7,6 +7,63 @@ pub trait SdfEvaluator: Send + Sync {
 pub type BoxedSdfEvaluator = Box<dyn SdfEvaluator>;
 
 #[derive(Clone, Debug)]
+pub struct SphereSpec {
+    pub center: [f64; 3],
+    pub radius: f64,
+}
+
+impl SphereSpec {
+    pub fn new(center: [f64; 3], radius: f64) -> Result<Self, CoreError> {
+        if radius <= 0.0 {
+            return Err(CoreError::Sdf("radius must be positive".to_string()));
+        }
+        Ok(Self { center, radius })
+    }
+}
+
+#[derive(Clone, Debug)]
+pub struct PlaneSpec {
+    pub normal: [f64; 3],
+    pub offset: f64,
+}
+
+impl PlaneSpec {
+    pub fn new(normal: [f64; 3], offset: f64) -> Result<Self, CoreError> {
+        let _ = normalize_normal(normal)?;
+        Ok(Self { normal, offset })
+    }
+}
+
+#[derive(Clone, Debug)]
+pub enum PrimitiveSpec {
+    Sphere(SphereSpec),
+    Plane(PlaneSpec),
+}
+
+fn normalize_normal(normal: [f64; 3]) -> Result<[f64; 3], CoreError> {
+    let norm = (normal[0] * normal[0] + normal[1] * normal[1] + normal[2] * normal[2]).sqrt();
+    if norm <= f64::EPSILON {
+        return Err(CoreError::Sdf("PlaneKernel normal must be non-zero".to_string()));
+    }
+    Ok([normal[0] / norm, normal[1] / norm, normal[2] / norm])
+}
+
+pub fn build_native_kernels(specs: &[PrimitiveSpec]) -> Result<Vec<BoxedSdfEvaluator>, CoreError> {
+    let mut kernels = Vec::with_capacity(specs.len());
+    for spec in specs {
+        match spec {
+            PrimitiveSpec::Sphere(sphere) => {
+                kernels.push(Box::new(SphereKernel::new(sphere.center, sphere.radius)) as BoxedSdfEvaluator);
+            }
+            PrimitiveSpec::Plane(plane) => {
+                kernels.push(Box::new(PlaneKernel::new(plane.normal, plane.offset)?) as BoxedSdfEvaluator);
+            }
+        }
+    }
+    Ok(kernels)
+}
+
+#[derive(Clone, Debug)]
 pub struct PlaneKernel {
     normal: [f64; 3],
     offset: f64,
@@ -14,12 +71,9 @@ pub struct PlaneKernel {
 
 impl PlaneKernel {
     pub fn new(normal: [f64; 3], offset: f64) -> Result<Self, CoreError> {
-        let norm = (normal[0] * normal[0] + normal[1] * normal[1] + normal[2] * normal[2]).sqrt();
-        if norm <= f64::EPSILON {
-            return Err(CoreError::Sdf("PlaneKernel normal must be non-zero".to_string()));
-        }
+        let normal = normalize_normal(normal)?;
         Ok(Self {
-            normal: [normal[0] / norm, normal[1] / norm, normal[2] / norm],
+            normal,
             offset,
         })
     }
@@ -163,9 +217,44 @@ pub(crate) fn eval_sdf_min_native(
 
 #[cfg(feature = "tch-kernels")]
 pub mod tch_kernels {
-    use super::SdfEvaluator;
+    use super::{BoxedSdfEvaluator, PrimitiveSpec, SdfEvaluator};
     use crate::CoreError;
     use tch::{Device, Kind, Tensor};
+
+    fn normalize_normal_f32(normal: [f32; 3]) -> Result<[f32; 3], CoreError> {
+        let norm = (normal[0] * normal[0] + normal[1] * normal[1] + normal[2] * normal[2]).sqrt();
+        if norm <= f32::EPSILON {
+            return Err(CoreError::Sdf("TchPlaneKernel normal must be non-zero".to_string()));
+        }
+        Ok([normal[0] / norm, normal[1] / norm, normal[2] / norm])
+    }
+
+    pub fn build_tch_kernels(specs: &[PrimitiveSpec], device: Device) -> Result<Vec<BoxedSdfEvaluator>, CoreError> {
+        let mut kernels = Vec::with_capacity(specs.len());
+        for spec in specs {
+            match spec {
+                PrimitiveSpec::Sphere(sphere) => {
+                    kernels.push(
+                        Box::new(TchSphereKernel::new(
+                            [sphere.center[0] as f32, sphere.center[1] as f32, sphere.center[2] as f32],
+                            sphere.radius as f32,
+                            device,
+                        )) as BoxedSdfEvaluator,
+                    );
+                }
+                PrimitiveSpec::Plane(plane) => {
+                    kernels.push(
+                        Box::new(TchPlaneKernel::new(
+                            [plane.normal[0] as f32, plane.normal[1] as f32, plane.normal[2] as f32],
+                            plane.offset as f32,
+                            device,
+                        )?) as BoxedSdfEvaluator,
+                    );
+                }
+            }
+        }
+        Ok(kernels)
+    }
 
     #[derive(Clone, Debug)]
     pub struct TchPlaneKernel {
@@ -176,12 +265,9 @@ pub mod tch_kernels {
 
     impl TchPlaneKernel {
         pub fn new(normal: [f32; 3], offset: f32, device: Device) -> Result<Self, CoreError> {
-            let norm = (normal[0] * normal[0] + normal[1] * normal[1] + normal[2] * normal[2]).sqrt();
-            if norm <= f32::EPSILON {
-                return Err(CoreError::Sdf("TchPlaneKernel normal must be non-zero".to_string()));
-            }
+            let normal = normalize_normal_f32(normal)?;
             Ok(Self {
-                normal: [normal[0] / norm, normal[1] / norm, normal[2] / norm],
+                normal,
                 offset,
                 device,
             })
@@ -265,7 +351,26 @@ pub mod tch_kernels {
 
 #[cfg(test)]
 mod tests {
-    use super::{BoxedSdfEvaluator, PlaneKernel, SphereKernel, eval_sdf_full_native, eval_sdf_min_native};
+    use super::{
+        BoxedSdfEvaluator, PlaneKernel, PlaneSpec, PrimitiveSpec, SphereKernel, SphereSpec,
+        build_native_kernels, eval_sdf_full_native, eval_sdf_min_native,
+    };
+
+    #[test]
+    fn build_native_kernels_constructs_scene() {
+        let specs = vec![
+            PrimitiveSpec::Sphere(SphereSpec::new([0.0, 0.0, 0.0], 1.0).unwrap()),
+            PrimitiveSpec::Plane(PlaneSpec::new([0.0, 0.0, 1.0], 0.0).unwrap()),
+        ];
+        let kernels = build_native_kernels(&specs).unwrap();
+        assert_eq!(kernels.len(), 2);
+    }
+
+    #[test]
+    fn sphere_spec_rejects_non_positive_radius() {
+        let err = SphereSpec::new([0.0, 0.0, 0.0], 0.0).unwrap_err();
+        assert_eq!(err.to_string(), "SDF kernel call failed: radius must be positive");
+    }
 
     #[test]
     fn plane_kernel_matches_expected_distances() {
@@ -355,5 +460,19 @@ mod tests {
         assert_eq!(min.len(), 2);
         assert!((min[0] - 1.0).abs() <= 1e-5);
         assert!((min[1] + 2.0).abs() <= 1e-5);
+    }
+
+    #[cfg(feature = "tch-kernels")]
+    #[test]
+    fn build_tch_kernels_constructs_scene() {
+        use super::tch_kernels::build_tch_kernels;
+        use tch::Device;
+
+        let specs = vec![
+            PrimitiveSpec::Sphere(SphereSpec::new([0.0, 0.0, 0.0], 1.0).unwrap()),
+            PrimitiveSpec::Plane(PlaneSpec::new([0.0, 0.0, 1.0], 0.0).unwrap()),
+        ];
+        let kernels = build_tch_kernels(&specs, Device::Cpu).unwrap();
+        assert_eq!(kernels.len(), 2);
     }
 }

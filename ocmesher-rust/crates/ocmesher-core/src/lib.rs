@@ -25,6 +25,7 @@ use pyo3::types::PyDict;
 mod native_kernels;
 
 pub use native_kernels::{BoxedSdfEvaluator, PlaneKernel, SdfEvaluator, SphereKernel};
+pub use native_kernels::{PlaneSpec, PrimitiveSpec, SphereSpec, build_native_kernels};
 #[cfg(feature = "tch-kernels")]
 pub use native_kernels::tch_kernels;
 
