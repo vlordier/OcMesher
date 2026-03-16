@@ -80,6 +80,11 @@ uv sync --extra benchmark
 
 The repo uses Ruff for linting/formatting and Pytest for tests.
 
+Quality policy notes:
+- Naming consistency and general style are enforced by Ruff.
+- Function complexity and branch depth are linted via Ruff/Pylint rule families (for example `C901`, `PLR0912`, `PLR0915`) in files that are not explicitly waived in `pyproject.toml`.
+- Line length is configured at 120 columns; per-file suppressions are documented in `pyproject.toml`.
+
 ```bash
 uv run ruff check .
 uv run ruff format .
