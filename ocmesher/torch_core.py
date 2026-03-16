@@ -146,6 +146,21 @@ class TorchOcMesher:
             torch.backends.cudnn.benchmark = True
         return dev, fdtype
 
+    @staticmethod
+    def _dedup_vertices(verts_flat: torch.Tensor) -> tuple[np.ndarray, np.ndarray]:
+        """Deduplicate flattened triangle vertices via quantised coordinate hashing."""
+        quantized = (verts_flat * _CORNER_QUANT_SCALE).round().long()
+        hash_vals = quantized[:, 0] * HASH_PRIME_X + quantized[:, 1] * HASH_PRIME_Y + quantized[:, 2] * HASH_PRIME_Z
+        _, inverse = torch.unique(hash_vals, return_inverse=True)
+        n_unique = int(inverse.max().item()) + 1
+        n_verts = len(inverse)
+        rep_idx = torch.zeros(n_unique, dtype=torch.long)
+        rev_arange = torch.arange(n_verts - 1, -1, -1)
+        rep_idx.scatter_(0, inverse[rev_arange], rev_arange)
+        dedup_verts = verts_flat[rep_idx].numpy()
+        dedup_faces = inverse.reshape(-1, 3).numpy().astype(np.int32)
+        return dedup_verts, dedup_faces
+
     def __init__(  # noqa: PLR0913, PLR0915
         self,
         cameras: CamerasTuple,
@@ -832,7 +847,7 @@ class TorchOcMesher:
     # Marching cubes (fully vectorised, fused)
     # ------------------------------------------------------------------
     @torch.no_grad()
-    def _marching_cubes(  # noqa: PLR0915
+    def _marching_cubes(
         self,
         corners: torch.Tensor,
         sdf: torch.Tensor,
@@ -917,19 +932,7 @@ class TorchOcMesher:
         tri_verts = torch.stack([v0, v1, v2], dim=1)  # (F, 3, 3)
         verts_flat = tri_verts.reshape(-1, 3)
 
-        # --- Vertex deduplication via quantised coordinate hashing ---
-        # All tensors are already on CPU in float64; quantise directly.
-        quantized = (verts_flat * _CORNER_QUANT_SCALE).round().long()
-        hash_vals = quantized[:, 0] * HASH_PRIME_X + quantized[:, 1] * HASH_PRIME_Y + quantized[:, 2] * HASH_PRIME_Z
-        _, inverse = torch.unique(hash_vals, return_inverse=True)
-        n_unique = int(inverse.max().item()) + 1
-        n_verts = len(inverse)
-        rep_idx = torch.zeros(n_unique, dtype=torch.long)
-        rev_arange = torch.arange(n_verts - 1, -1, -1)
-        rep_idx.scatter_(0, inverse[rev_arange], rev_arange)
-        dedup_verts = verts_flat[rep_idx].numpy()
-        dedup_faces = inverse.reshape(-1, 3).numpy().astype(np.int32)
-        return dedup_verts, dedup_faces
+        return self._dedup_vertices(verts_flat)
 
     # ------------------------------------------------------------------
     # Main pipeline
