@@ -53,3 +53,21 @@ class TestSelectConfigs:
     def test_unknown_config_returns_empty_list(self):
         selected = benchmark._select_configs("unknown", benchmark.DEMO_CONFIGS)
         assert selected == []
+
+
+class TestBenchmarkArgValidation:
+    def test_validate_runs_accepts_positive(self):
+        benchmark._validate_runs(1)
+        benchmark._validate_runs(3)
+
+    def test_validate_runs_rejects_zero(self):
+        with pytest.raises(ValueError, match="--runs must be >= 1"):
+            benchmark._validate_runs(0)
+
+    def test_validate_selected_configs_accepts_non_empty(self):
+        selected = benchmark._select_configs("small", benchmark.DEMO_CONFIGS)
+        benchmark._validate_selected_configs("small", selected)
+
+    def test_validate_selected_configs_rejects_empty(self):
+        with pytest.raises(ValueError, match="No benchmark configs selected"):
+            benchmark._validate_selected_configs("unknown", [])
