@@ -229,15 +229,18 @@ def run_mesher_subprocess(pixels_per_cube: int, coarse_count: int, sdf_type: str
         ppc=pixels_per_cube,
         coarse=coarse_count,
     )
-    result = subprocess.run(
-        [PYTHON, "-c", script],
-        capture_output=True,
-        text=True,
-        cwd=str(Path(__file__).parent),
-    )
-    if result.returncode != 0:
-        print(f"  ERROR:\n{result.stderr}", file=sys.stderr)
-        raise MesherSubprocessError(result.stderr)
+    try:
+        result = subprocess.run(
+            [PYTHON, "-c", script],
+            capture_output=True,
+            text=True,
+            cwd=str(Path(__file__).parent),
+            check=True,
+        )
+    except subprocess.CalledProcessError as exc:
+        stderr = exc.stderr or str(exc)
+        print(f"  ERROR:\n{stderr}", file=sys.stderr)
+        raise MesherSubprocessError(stderr) from exc
     return _parse_last_json_line(result.stdout)
 
 
