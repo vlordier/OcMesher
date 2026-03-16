@@ -20,7 +20,7 @@ use std::sync::{Mutex, OnceLock};
 
 use libloading::{Library, Symbol};
 use pyo3::prelude::*;
-use pyo3::types::{PyDict, PyList};
+use pyo3::types::{PyByteArray, PyDict, PyList};
 
 // ---------------------------------------------------------------------------
 // Error type
@@ -397,7 +397,7 @@ fn extract_sdf_output(py: Python<'_>, raw: Py<PyAny>) -> PyResult<Vec<f32>> {
     ))
 }
 
-fn build_torch_xyz_input<'py>(
+fn build_torch_xyz_input_from_numpy<'py>(
     py: Python<'py>,
     xyz_np: &Bound<'py, PyAny>,
     torch_eval_device: Option<&str>,
@@ -417,6 +417,39 @@ fn build_torch_xyz_input<'py>(
     } else {
         xyz_t.call_method1("to", (dtype_obj,))
     }
+}
+
+fn build_torch_xyz_input_direct<'py>(
+    py: Python<'py>,
+    xyz: &[f64],
+    n_pts: usize,
+    torch_eval_device: Option<&str>,
+    torch_eval_dtype: Option<&str>,
+) -> PyResult<(Bound<'py, PyByteArray>, Bound<'py, PyAny>)> {
+    let byte_len = std::mem::size_of_val(xyz);
+    let xyz_buf = PyByteArray::new_bound_with(py, byte_len, |bytes| {
+        let src = unsafe { std::slice::from_raw_parts(xyz.as_ptr().cast::<u8>(), byte_len) };
+        bytes.copy_from_slice(src);
+        Ok(())
+    })?;
+
+    let torch = py.import_bound("torch")?;
+    let frombuffer = torch.getattr("frombuffer")?;
+    let kwargs = PyDict::new_bound(py);
+    kwargs.set_item("dtype", torch.getattr("float64")?)?;
+    kwargs.set_item("count", xyz.len())?;
+    let flat = frombuffer.call((xyz_buf.clone(),), Some(&kwargs))?;
+    let xyz_t = flat.call_method1("reshape", ((n_pts, 3),))?;
+    let dtype_obj = build_torch_dtype(&torch.into_any(), torch_eval_dtype)?;
+    let xyz_t = if let Some(device) = torch_eval_device {
+        xyz_t.call_method1("to", (device, dtype_obj))?
+    } else if torch_eval_dtype.unwrap_or("float32") == "float64" {
+        xyz_t
+    } else {
+        xyz_t.call_method1("to", (dtype_obj,))?
+    };
+
+    Ok((xyz_buf, xyz_t))
 }
 
 fn build_torch_dtype<'py>(
@@ -512,7 +545,7 @@ fn eval_kernel_py_once(
         .map_err(|e| pyo3::exceptions::PyValueError::new_err(e.to_string()))?;
     let xyz_np = xyz_arr.into_pyarray_bound(py).into_any();
     let xyz_torch = if torch_eval_device.is_some() {
-        Some(build_torch_xyz_input(
+        Some(build_torch_xyz_input_from_numpy(
             py,
             &xyz_np,
             torch_eval_device,
@@ -592,7 +625,13 @@ fn eval_sdf_full(
             let xyz_arr = Array2::from_shape_vec((chunk_n, 3), chunk_xyz.to_vec())
                 .map_err(|e| pyo3::exceptions::PyValueError::new_err(e.to_string()))?;
             let xyz_np = xyz_arr.into_pyarray_bound(py).into_any();
-            let xyz_torch = build_torch_xyz_input(py, &xyz_np, torch_eval_device, torch_eval_dtype)?;
+            let (_xyz_buf, xyz_torch) = build_torch_xyz_input_direct(
+                py,
+                chunk_xyz,
+                chunk_n,
+                torch_eval_device,
+                torch_eval_dtype,
+            )?;
 
             for (k_idx, kernel) in kernels.iter().enumerate() {
                 let sdf = eval_kernel_from_inputs(py, kernel, &xyz_np, Some(&xyz_torch))?;
@@ -688,7 +727,13 @@ fn eval_sdf_min(
             let xyz_arr = Array2::from_shape_vec((chunk_n, 3), chunk_xyz.to_vec())
                 .map_err(|e| pyo3::exceptions::PyValueError::new_err(e.to_string()))?;
             let xyz_np = xyz_arr.into_pyarray_bound(py).into_any();
-            let xyz_torch = build_torch_xyz_input(py, &xyz_np, torch_eval_device, torch_eval_dtype)?;
+            let (_xyz_buf, xyz_torch) = build_torch_xyz_input_direct(
+                py,
+                chunk_xyz,
+                chunk_n,
+                torch_eval_device,
+                torch_eval_dtype,
+            )?;
             let outputs = PyList::empty_bound(py);
 
             for kernel in kernels {
