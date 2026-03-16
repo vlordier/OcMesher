@@ -287,6 +287,7 @@ class RustOcMesher:
         self._device_caps = caps
         self._backend = backend
         self.adaptive_batching = adaptive_batching
+        self._torch_warmed = False  # Track if we've warmed up the device
 
     def capabilities(self) -> dict[str, Any]:
         """Return runtime capability flags used by Infinigen integration."""
@@ -322,6 +323,15 @@ class RustOcMesher:
 
     def __call__(self, kernels: Sequence[Any]) -> tuple[Any, Any]:
         """Execute extraction via configured Rust backend bridge."""
+        # Warm up torch device on first call to avoid JIT overhead in user runtime
+        if not self._torch_warmed:
+            try:
+                from ocmesher.torch_warmup import warmup_torch_device
+                warmup_torch_device(self.device)
+                self._torch_warmed = True
+            except Exception:
+                self._torch_warmed = True  # Don't try again even on error
+        
         _validate_kernels(kernels)
         if self._backend is None:
             msg = (
