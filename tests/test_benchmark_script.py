@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import importlib.util
+import json
 from pathlib import Path
 
 import pytest
@@ -111,5 +112,17 @@ class TestBenchmarkExceptions:
 class TestSdfBlocks:
     def test_registry_contains_expected_keys(self):
         assert set(benchmark.SDF_BLOCKS) == {"vnoise", "numba", "mlx"}
+
+
+class TestWriteResultsJson:
+    def test_writes_named_tier_results(self, tmp_path):
+        out_path = tmp_path / "results.json"
+        benchmark._write_results_json(
+            str(out_path),
+            [("Baseline", [{"config": "small", "times": [1.0], "mean": 1.0, "median": 1.0, "stdev": 0.0, "min": 1.0, "max": 1.0, "n_verts": 10, "n_faces": 20}])],
+        )
+        data = json.loads(out_path.read_text())
+        assert list(data) == ["Baseline"]
+        assert data["Baseline"][0]["n_verts"] == 10
 
 
