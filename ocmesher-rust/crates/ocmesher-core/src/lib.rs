@@ -536,7 +536,7 @@ fn construct_element_mesh(
 
     // ---- centers --------------------------------------------------------
     let mut centers = vec![0.0f64; nv * 3];
-    unsafe { (lib.get_verts_center)(element, centers.as_mut_ptr()) };
+    py.allow_threads(|| unsafe { (lib.get_verts_center)(element, centers.as_mut_ptr()) });
 
     let center_sdf = eval_kernel_py(py, kernel, &centers, nv, sdf_batch_size)?;
     if center_sdf.len() != nv {
@@ -549,14 +549,14 @@ fn construct_element_mesh(
     // ---- cube corners (initial, then bisection) --------------------------
     let mut cubes = vec![0.0f64; nv * 8 * 3];
     // First call with null pointers fills cubes with initial corner positions.
-    unsafe {
+    py.allow_threads(|| unsafe {
         (lib.update_verts)(
             element,
             std::ptr::null(),
             std::ptr::null(),
             cubes.as_mut_ptr(),
         )
-    };
+    });
 
     let n_cubes = nv * 8;
     let mut sdf_buf = vec![0.0f32; n_cubes];
@@ -566,14 +566,14 @@ fn construct_element_mesh(
         let sdf_cubes = eval_kernel_py(py, kernel, &cubes, n_cubes, sdf_batch_size)?;
         sdf_buf.copy_from_slice(&sdf_cubes);
 
-        unsafe {
+        py.allow_threads(|| unsafe {
             (lib.update_verts)(
                 element,
                 sdf_buf.as_ptr(),
                 center_sdf.as_ptr(),
                 cubes.as_mut_ptr(),
             )
-        };
+        });
 
         if check_tol {
             let max_abs = sdf_buf.iter().fold(0.0f32, |acc, &v| acc.max(v.abs()));
@@ -585,29 +585,29 @@ fn construct_element_mesh(
 
     // ---- LR positions + finalize vertex positions -----------------------
     let mut cubes_r = vec![0.0f64; n_cubes * 3];
-    unsafe { (lib.get_lr_verts)(element, cubes.as_mut_ptr(), cubes_r.as_mut_ptr()) };
+    py.allow_threads(|| unsafe { (lib.get_lr_verts)(element, cubes.as_mut_ptr(), cubes_r.as_mut_ptr()) });
 
     let sdf_l = eval_kernel_py(py, kernel, &cubes, n_cubes, sdf_batch_size)?;
     let sdf_r = eval_kernel_py(py, kernel, &cubes_r, n_cubes, sdf_batch_size)?;
 
     let mut vertices = vec![0.0f64; nv * 3];
-    unsafe {
+    py.allow_threads(|| unsafe {
         (lib.finalize_verts)(
             element,
             sdf_l.as_ptr(),
             sdf_r.as_ptr(),
             vertices.as_mut_ptr(),
         )
-    };
+    });
 
     // ---- Extra vertices (edge + face) + faces ---------------------------
     let mut cnts = [0i32; 3];
-    unsafe { (lib.construct_faces)(element, vertices.as_mut_ptr(), cnts.as_mut_ptr()) };
+    py.allow_threads(|| unsafe { (lib.construct_faces)(element, vertices.as_mut_ptr(), cnts.as_mut_ptr()) });
     let (nve, nvf, nf) = (cnts[0] as usize, cnts[1] as usize, cnts[2] as usize);
 
     let (final_vertices, faces) = if nve == 0 && nvf == 0 {
         let mut f = vec![0i32; nf * 3];
-        unsafe { (lib.get_faces)(f.as_mut_ptr()) };
+        py.allow_threads(|| unsafe { (lib.get_faces)(f.as_mut_ptr()) });
         (vertices, f)
     } else {
         refine_extra_vertices(
@@ -619,7 +619,7 @@ fn construct_element_mesh(
     // ---- In-view tag ----------------------------------------------------
     let n_final_verts = final_vertices.len() / 3;
     let mut in_view_tag = vec![false; n_final_verts];
-    unsafe { (lib.get_in_view_tag)(element, in_view_tag.as_mut_ptr()) };
+    py.allow_threads(|| unsafe { (lib.get_in_view_tag)(element, in_view_tag.as_mut_ptr()) });
 
     Ok(MeshData {
         vertices: final_vertices,
@@ -650,7 +650,7 @@ fn refine_extra_vertices(
 ) -> PyResult<(Vec<f64>, Vec<i32>)> {
     let mut edge_centers = vec![0.0f64; nve * 3];
     let mut face_centers = vec![0.0f64; nvf * 3];
-    unsafe { (lib.get_extra_verts_center)(edge_centers.as_mut_ptr(), face_centers.as_mut_ptr()) };
+    py.allow_threads(|| unsafe { (lib.get_extra_verts_center)(edge_centers.as_mut_ptr(), face_centers.as_mut_ptr()) });
 
     // Fused center SDF
     let ef_n = nve + nvf;
@@ -664,7 +664,7 @@ fn refine_extra_vertices(
     // Initial LR positions
     let mut edge_lr = vec![0.0f64; nve * 2 * 3];
     let mut face_lr = vec![0.0f64; nvf * 4 * 3];
-    unsafe {
+    py.allow_threads(|| unsafe {
         (lib.update_extra_verts)(
             std::ptr::null(),
             std::ptr::null(),
@@ -673,7 +673,7 @@ fn refine_extra_vertices(
             edge_lr.as_mut_ptr(),
             face_lr.as_mut_ptr(),
         )
-    };
+    });
 
     let n_elr = nve * 2;
     let n_flr = nvf * 4;
@@ -690,7 +690,7 @@ fn refine_extra_vertices(
         sdf_buf.copy_from_slice(&sdf_all);
 
         let (e_sdf, f_sdf) = sdf_buf.split_at(n_elr);
-        unsafe {
+        py.allow_threads(|| unsafe {
             (lib.update_extra_verts)(
                 e_sdf.as_ptr(),
                 f_sdf.as_ptr(),
@@ -699,7 +699,7 @@ fn refine_extra_vertices(
                 edge_lr.as_mut_ptr(),
                 face_lr.as_mut_ptr(),
             )
-        };
+        });
 
         if check_tol {
             let max_abs = sdf_buf.iter().fold(0.0f32, |acc, &v| acc.max(v.abs()));
@@ -712,14 +712,14 @@ fn refine_extra_vertices(
     // Fused LR extra eval
     let mut edge_r = vec![0.0f64; nve * 2 * 3];
     let mut face_r = vec![0.0f64; nvf * 4 * 3];
-    unsafe {
+    py.allow_threads(|| unsafe {
         (lib.get_lr_extra_verts)(
             edge_lr.as_mut_ptr(),
             edge_r.as_mut_ptr(),
             face_lr.as_mut_ptr(),
             face_r.as_mut_ptr(),
         )
-    };
+    });
 
     let n_all_lr = n_elr * 2 + n_flr * 2;
     let mut all_lr = vec![0.0f64; n_all_lr * 3];
@@ -736,7 +736,7 @@ fn refine_extra_vertices(
 
     let mut edge_verts = vec![0.0f64; nve * 3];
     let mut face_verts = vec![0.0f64; nvf * 3];
-    unsafe {
+    py.allow_threads(|| unsafe {
         (lib.finalize_extra_verts)(
             esdf_l.as_ptr(),
             esdf_r.as_ptr(),
@@ -745,7 +745,7 @@ fn refine_extra_vertices(
             fsdf_r.as_ptr(),
             face_verts.as_mut_ptr(),
         )
-    };
+    });
 
     // Assemble final vertex array: base | edge | face
     let n_final = n_base + nve + nvf;
@@ -755,7 +755,7 @@ fn refine_extra_vertices(
     final_v[(n_base + nve) * 3..].copy_from_slice(&face_verts);
 
     let mut faces = vec![0i32; nf * 3];
-    unsafe { (lib.get_faces)(faces.as_mut_ptr()) };
+    py.allow_threads(|| unsafe { (lib.get_faces)(faces.as_mut_ptr()) });
 
     Ok((final_v, faces))
 }
@@ -809,7 +809,7 @@ pub fn run_meshing_pipeline(
     let mut center_arr = params.center;
     let mut cams_arr = params.cameras_data.clone();
 
-    let _n_blocks = unsafe {
+    let _n_blocks = py.allow_threads(|| unsafe {
         (lib.run_coarse)(
             center_arr.as_mut_ptr(),
             params.size,
@@ -822,24 +822,24 @@ pub fn run_meshing_pipeline(
             params.memory_limit_mb,
             n_elements,
         )
-    };
+    });
 
     // ------------------------------------------------------------------
     // Step 2: Coarse SDF evaluation (mark solid/empty)
     // ------------------------------------------------------------------
     loop {
-        let inc = unsafe { (lib.fine_group)() };
+        let inc = py.allow_threads(|| unsafe { (lib.fine_group)() });
         if inc == 0 {
             break;
         }
 
         // First call with null: fill output_vertices list, return count.
-        let mut n = unsafe { (lib.fine_iteration)(std::ptr::null_mut()) };
+        let mut n = py.allow_threads(|| unsafe { (lib.fine_iteration)(std::ptr::null_mut()) });
 
         while n > 0 {
             let n_pts = n as usize;
             let mut xyz = vec![0.0f64; n_pts * 3];
-            unsafe { (lib.fine_iteration_output)(xyz.as_mut_ptr()) };
+            py.allow_threads(|| unsafe { (lib.fine_iteration_output)(xyz.as_mut_ptr()) });
 
             let mut sdf_min = eval_sdf_min(
                 py,
@@ -852,14 +852,14 @@ pub fn run_meshing_pipeline(
                 params.enclosed,
             )?;
 
-            n = unsafe { (lib.fine_iteration)(sdf_min.as_mut_ptr()) };
+            n = py.allow_threads(|| unsafe { (lib.fine_iteration)(sdf_min.as_mut_ptr()) });
         }
     }
 
     // ------------------------------------------------------------------
     // Step 3: Visibility filter
     // ------------------------------------------------------------------
-    let _n_vis = unsafe { (lib.vis_filter)(params.simplify_occluded, params.visible_relax_iter) };
+    let _n_vis = py.allow_threads(|| unsafe { (lib.vis_filter)(params.simplify_occluded, params.visible_relax_iter) });
 
     // ------------------------------------------------------------------
     // Step 4: Fine octree subdivision near the surface
@@ -867,13 +867,13 @@ pub fn run_meshing_pipeline(
     let mut nv = vec![0i32; n_kerns];
 
     loop {
-        let n = unsafe { (lib.final_iteration)(nv.as_mut_ptr()) };
+        let n = py.allow_threads(|| unsafe { (lib.final_iteration)(nv.as_mut_ptr()) });
         if n == 0 {
             break;
         }
         let n_pts = n as usize;
         let mut xyz = vec![0.0f64; n_pts * 3];
-        unsafe { (lib.final_iteration2)(xyz.as_mut_ptr()) };
+        py.allow_threads(|| unsafe { (lib.final_iteration2)(xyz.as_mut_ptr()) });
 
         let mut sdf_full = eval_sdf_full(
             py,
@@ -887,15 +887,15 @@ pub fn run_meshing_pipeline(
             params.enclosed,
         )?;
 
-        unsafe { (lib.final_iteration3)(sdf_full.as_mut_ptr()) };
+        py.allow_threads(|| unsafe { (lib.final_iteration3)(sdf_full.as_mut_ptr()) });
     }
 
     // Occluded cells
-    let n = unsafe { (lib.final_iteration_occluded)(nv.as_mut_ptr()) };
+    let n = py.allow_threads(|| unsafe { (lib.final_iteration_occluded)(nv.as_mut_ptr()) });
     if n > 0 {
         let n_pts = n as usize;
         let mut xyz = vec![0.0f64; n_pts * 3];
-        unsafe { (lib.final_iteration2)(xyz.as_mut_ptr()) };
+        py.allow_threads(|| unsafe { (lib.final_iteration2)(xyz.as_mut_ptr()) });
 
         let mut sdf_full = eval_sdf_full(
             py,
@@ -909,10 +909,10 @@ pub fn run_meshing_pipeline(
             params.enclosed,
         )?;
 
-        unsafe { (lib.final_iteration3_occluded)(sdf_full.as_mut_ptr()) };
+        py.allow_threads(|| unsafe { (lib.final_iteration3_occluded)(sdf_full.as_mut_ptr()) });
     }
 
-    unsafe { (lib.final_remaining)(nv.as_mut_ptr()) };
+    py.allow_threads(|| unsafe { (lib.final_remaining)(nv.as_mut_ptr()) });
 
     // ------------------------------------------------------------------
     // Step 5: Per-element mesh construction
