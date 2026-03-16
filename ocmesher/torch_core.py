@@ -520,38 +520,46 @@ class TorchOcMesher:
             # --- Fast path for the common single-kernel case ---
             kernel = kernels[0]
 
-            def _eval_chunk(chunk_np):
+            def _fill_chunk(chunk_np: np.ndarray, out_chunk: np.ndarray) -> None:
                 _n = len(chunk_np)
                 sdf = _coerce_kernel_sdf(kernel(chunk_np), _n, "kernels[0]")
                 if enclosed:
                     sdf[_out_of_bounds_mask(chunk_np, b_min, b_max)] = 1
-                return sdf.astype(np.float32).reshape(-1, 1)
+                out_chunk[:, 0] = sdf
         else:
             kernel_labels = tuple(f"kernels[{k_idx}]" for k_idx in range(n_kernels))
 
-            def _eval_chunk(chunk_np):
+            def _fill_chunk(chunk_np: np.ndarray, out_chunk: np.ndarray) -> None:
                 _n = len(chunk_np)
                 if enclosed:
                     out_bound = _out_of_bounds_mask(chunk_np, b_min, b_max)
-                cols = [None] * n_kernels
                 for k_idx, (kernel, kernel_label) in enumerate(zip(kernels, kernel_labels, strict=False)):
                     sdf = _coerce_kernel_sdf(kernel(chunk_np), _n, kernel_label)
                     if enclosed:
                         sdf[out_bound] = 1
-                    cols[k_idx] = sdf
-                return np.stack(cols, axis=-1).astype(np.float32)
+                    out_chunk[:, k_idx] = sdf
 
         # Single-chunk fast path: skip list/pool/concat overhead.
+        result_np = np.empty((n, n_kernels), dtype=np.float32)
         if n <= step:
-            result_np = _eval_chunk(xyz_np)
+            _fill_chunk(xyz_np, result_np)
+        elif self.n_sdf_workers > 1:
+            chunk_ranges = [(i, min(i + step, n)) for i in range(0, n, step)]
+            with ThreadPoolExecutor(max_workers=min(self.n_sdf_workers, len(chunk_ranges))) as pool:
+                futures = [
+                    pool.submit(
+                        _fill_chunk,
+                        xyz_np[start:end],
+                        result_np[start:end],
+                    )
+                    for start, end in chunk_ranges
+                ]
+                for future in futures:
+                    future.result()
         else:
-            chunks = [xyz_np[i : i + step] for i in range(0, n, step)]
-            if self.n_sdf_workers > 1:
-                with ThreadPoolExecutor(max_workers=min(self.n_sdf_workers, len(chunks))) as pool:
-                    parts = list(pool.map(_eval_chunk, chunks))
-            else:
-                parts = [_eval_chunk(c) for c in chunks]
-            result_np = np.concatenate(parts, axis=0)
+            for start in range(0, n, step):
+                end = min(start + step, n)
+                _fill_chunk(xyz_np[start:end], result_np[start:end])
 
         # Use pinned memory for CUDA transfers to overlap copy with compute
         if _use_pinned:

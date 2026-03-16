@@ -7,6 +7,7 @@ import pytest
 
 torch = pytest.importorskip("torch", reason="torch not installed")
 
+from ocmesher import torch_core
 from ocmesher.torch_core import TorchOcMesher
 
 
@@ -608,6 +609,37 @@ class TestEvaluateSDFSingleChunk:
         # Sphere SDF at origin: -1+0.5 = -0.5; plane SDF at z=0.5: 0.5
         np.testing.assert_allclose(result[0, 0].item(), np.linalg.norm([0, 0, 0.5]) - 1, atol=1e-5)
         np.testing.assert_allclose(result[0, 1].item(), 0.5, atol=1e-5)
+
+
+class TestEvaluateSDFChunkedPrealloc:
+    def test_multiple_kernels_multi_chunk_matches_expected(self, sample_cameras, sphere_kernel, plane_kernel, monkeypatch):
+        monkeypatch.setattr(torch_core, "TORCH_SDF_CHUNK_SIZE", 2)
+        mesher = TorchOcMesher(sample_cameras, [-5, 5, -5, 5, -5, 5], device="cpu", n_sdf_workers=1)
+        pts = torch.tensor(
+            [[0, 0, 0.5], [1, 0, 0], [0, 0, -0.5], [2, 0, 1.0], [3, 0, 0.0]],
+            dtype=mesher._fdtype,
+            device=mesher.device,
+        )
+
+        result = mesher._evaluate_sdf([sphere_kernel, plane_kernel], pts).cpu().numpy()
+
+        expected_sphere = np.linalg.norm(pts.cpu().numpy(), axis=1) - 1.0
+        expected_plane = pts.cpu().numpy()[:, 2]
+        np.testing.assert_allclose(result[:, 0], expected_sphere, atol=1e-5)
+        np.testing.assert_allclose(result[:, 1], expected_plane, atol=1e-5)
+
+    def test_single_kernel_multi_chunk_threaded_matches_expected(self, sample_cameras, sphere_kernel, monkeypatch):
+        monkeypatch.setattr(torch_core, "TORCH_SDF_CHUNK_SIZE", 2)
+        mesher = TorchOcMesher(sample_cameras, [-5, 5, -5, 5, -5, 5], device="cpu", n_sdf_workers=2)
+        pts = torch.tensor(
+            [[0, 0, 0], [1, 0, 0], [2, 0, 0], [3, 0, 0], [4, 0, 0]],
+            dtype=mesher._fdtype,
+            device=mesher.device,
+        )
+
+        result = mesher._evaluate_sdf([sphere_kernel], pts).cpu().numpy()[:, 0]
+
+        np.testing.assert_allclose(result, np.linalg.norm(pts.cpu().numpy(), axis=1) - 1.0, atol=1e-5)
 
 
 # ---------------------------------------------------------------------------
