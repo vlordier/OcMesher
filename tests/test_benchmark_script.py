@@ -45,6 +45,12 @@ class TestParseLastJsonLine:
             benchmark._parse_last_json_line("hello\nworld\n")
 
 
+class TestJsonCandidateLines:
+    def test_returns_reversed_stripped_lines(self):
+        lines = benchmark._iter_json_candidate_lines(" a \n b\n")
+        assert lines == ["b", "a"]
+
+
 class TestSelectConfigs:
     def test_all_returns_all_configs(self):
         selected = benchmark._select_configs("all", benchmark.DEMO_CONFIGS)
