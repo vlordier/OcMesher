@@ -125,7 +125,6 @@ ignore = [
 ]
 # top-level benchmark runner
 "benchmark.py" = [
-    "INP001",   # implicit namespace package
 ]
 # Python overhead micro-benchmark
 "benchmarks/bench_python_overhead.py" = [
