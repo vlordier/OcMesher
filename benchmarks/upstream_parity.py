@@ -19,6 +19,13 @@ class MeshSignature(TypedDict):
     faces_sum: int
 
 
+class ParityMeshConfig(TypedDict):
+    """Mesh configuration used for parity signature generation."""
+
+    pixels_per_cube: int
+    coarse_count: int
+
+
 _GIT_BIN = shutil.which("git") or "git"
 _SH_BIN = "/bin/sh"
 
@@ -88,11 +95,12 @@ def run_upstream_parity(
     *,
     upstream_ref: str = "main",
     python_exe: str,
-    pixels_per_cube: int = 32,
-    coarse_count: int = 100_000,
+    mesh_config: ParityMeshConfig | None = None,
+    atol: float = 1e-12,
 ) -> dict[str, MeshSignature | dict[str, float | int | bool]]:
     """Compare current checkout numerical signature against an upstream Git ref."""
     repo_root = repo_root.resolve()
+    mesh_config = mesh_config or {"pixels_per_cube": 32, "coarse_count": 100_000}
     subprocess.run(  # noqa: S603
         [_SH_BIN, "install.sh"],
         check=True,
@@ -103,8 +111,8 @@ def run_upstream_parity(
     current = _compute_signature_in_repo(
         repo_root,
         python_exe=python_exe,
-        pixels_per_cube=pixels_per_cube,
-        coarse_count=coarse_count,
+        pixels_per_cube=mesh_config["pixels_per_cube"],
+        coarse_count=mesh_config["coarse_count"],
     )
 
     tmpdir = Path(tempfile.mkdtemp(prefix="ocmesher-upstream-"))
@@ -126,8 +134,8 @@ def run_upstream_parity(
         upstream = _compute_signature_in_repo(
             tmpdir,
             python_exe=python_exe,
-            pixels_per_cube=pixels_per_cube,
-            coarse_count=coarse_count,
+            pixels_per_cube=mesh_config["pixels_per_cube"],
+            coarse_count=mesh_config["coarse_count"],
         )
     finally:
         subprocess.run(  # noqa: S603
@@ -142,5 +150,5 @@ def run_upstream_parity(
     return {
         "current": current,
         "upstream": upstream,
-        "delta": compare_signatures(current, upstream),
+        "delta": compare_signatures(current, upstream, atol=atol),
     }

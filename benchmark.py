@@ -440,8 +440,11 @@ def main() -> None:
             Path.cwd(),
             upstream_ref=args.upstream_parity,
             python_exe=PYTHON,
-            pixels_per_cube=args.parity_pixels_per_cube,
-            coarse_count=args.parity_coarse_count,
+            mesh_config={
+                "pixels_per_cube": args.parity_pixels_per_cube,
+                "coarse_count": args.parity_coarse_count,
+            },
+            atol=args.parity_atol,
         )
         _write_stdout(json.dumps(parity, indent=2, sort_keys=True))
         return
@@ -484,6 +487,12 @@ def _create_parser() -> argparse.ArgumentParser:
         type=int,
         default=100_000,
         help="coarse_count for --upstream-parity (default: 100000)",
+    )
+    parser.add_argument(
+        "--parity-atol",
+        type=float,
+        default=1e-12,
+        help="absolute tolerance for verts_sum parity match (default: 1e-12)",
     )
     return parser
 

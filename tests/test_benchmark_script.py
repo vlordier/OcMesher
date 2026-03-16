@@ -165,6 +165,7 @@ class TestCreateParser:
         assert args.upstream_parity is None
         assert args.parity_pixels_per_cube == 32
         assert args.parity_coarse_count == 100_000
+        assert args.parity_atol == 1e-12
 
     def test_upstream_parity_default_ref(self):
         parser = benchmark._create_parser()
@@ -186,10 +187,13 @@ class TestCreateParser:
                 "24",
                 "--parity-coarse-count",
                 "200000",
+                "--parity-atol",
+                "1e-9",
             ]
         )
         assert args.parity_pixels_per_cube == 24
         assert args.parity_coarse_count == 200000
+        assert args.parity_atol == 1e-9
 
     def test_config_choices_include_expected_values(self):
         parser = benchmark._create_parser()
@@ -300,7 +304,7 @@ class TestMainUpstreamParityMode:
 
         out = capsys.readouterr().out
         assert '"matches": true' in out
-        assert calls[0]["pixels_per_cube"] == 32
-        assert calls[0]["coarse_count"] == 100_000
+        assert calls[0]["mesh_config"] == {"pixels_per_cube": 32, "coarse_count": 100_000}
+        assert calls[0]["atol"] == 1e-12
 
 

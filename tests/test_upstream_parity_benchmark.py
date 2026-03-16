@@ -72,3 +72,29 @@ def test_run_upstream_parity_orchestrates_build_and_worktree(monkeypatch) -> Non
     assert any("install.sh" in c for c in flat_calls)
     assert any("worktree add" in c for c in flat_calls)
     assert any("worktree remove" in c for c in flat_calls)
+
+
+def test_run_upstream_parity_forwards_atol(monkeypatch) -> None:
+    signatures = [
+        {"verts": 10, "faces": 20, "verts_sum": 1.0, "faces_sum": 120},
+        {"verts": 10, "faces": 20, "verts_sum": 1.0, "faces_sum": 120},
+    ]
+    observed: dict[str, float] = {}
+
+    def _fake_compare(lhs, rhs, *, atol):
+        observed["atol"] = atol
+        return compare_signatures(lhs, rhs, atol=atol)
+
+    monkeypatch.setattr(upstream.subprocess, "run", lambda *_args, **_kwargs: object())
+    monkeypatch.setattr(upstream, "_compute_signature_in_repo", lambda *_args, **_kwargs: signatures.pop(0))
+    monkeypatch.setattr(
+        upstream.tempfile,
+        "mkdtemp",
+        lambda **_kwargs: str(Path(upstream.tempfile.gettempdir()) / "ocmesher-upstream-atol-test"),
+    )
+    monkeypatch.setattr(upstream.shutil, "rmtree", lambda *_args, **_kwargs: None)
+    monkeypatch.setattr(upstream, "compare_signatures", _fake_compare)
+
+    upstream.run_upstream_parity(Path(), upstream_ref="main", python_exe="python", atol=1e-9)
+
+    assert observed["atol"] == 1e-9
