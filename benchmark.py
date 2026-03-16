@@ -287,20 +287,23 @@ def run_tier(
             verts = r["n_verts"]
             faces = r["n_faces"]
             print(f"    Run {i + 1}/{runs}: {r['elapsed_s']:.3f}s  ({verts} verts, {faces} faces)")
-        results.append(
-            {
-                "config": cfg["label"],
-                "times": times,
-                "mean": statistics.mean(times),
-                "median": statistics.median(times),
-                "stdev": statistics.stdev(times) if runs > 1 else 0.0,
-                "min": min(times),
-                "max": max(times),
-                "n_verts": verts,
-                "n_faces": faces,
-            }
-        )
+        results.append(_summarize_tier_config(cfg["label"], times, verts, faces, runs))
     return results
+
+
+def _summarize_tier_config(label: str, times: list[float], n_verts: int, n_faces: int, runs: int) -> TierConfigResult:
+    """Build one tier/config summary row from run timings and mesh sizes."""
+    return {
+        "config": label,
+        "times": times,
+        "mean": statistics.mean(times),
+        "median": statistics.median(times),
+        "stdev": statistics.stdev(times) if runs > 1 else 0.0,
+        "min": min(times),
+        "max": max(times),
+        "n_verts": n_verts,
+        "n_faces": n_faces,
+    }
 
 
 def _short_tier_label(name: str) -> str:
