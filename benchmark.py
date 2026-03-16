@@ -166,6 +166,20 @@ print(json.dumps(result))
 """
 
 
+def _parse_last_json_line(stdout: str) -> RunResult:
+    """Parse the last JSON object line emitted by benchmark subprocess output."""
+    for line in reversed(stdout.strip().splitlines()):
+        line = line.strip()
+        if line.startswith("{"):
+            parsed = json.loads(line)
+            return {
+                "elapsed_s": float(parsed["elapsed_s"]),
+                "n_verts": int(parsed["n_verts"]),
+                "n_faces": int(parsed["n_faces"]),
+            }
+    raise RuntimeError(f"No JSON output.\nstdout:\n{stdout}")
+
+
 def build(script: str) -> float:
     t0 = time.perf_counter()
     subprocess.check_call(["bash", script], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
@@ -189,11 +203,7 @@ def run_mesher_subprocess(pixels_per_cube: int, coarse_count: int, sdf_type: str
     if result.returncode != 0:
         print(f"  ERROR:\n{result.stderr}", file=sys.stderr)
         raise RuntimeError("Mesher subprocess failed")
-    for line in reversed(result.stdout.strip().splitlines()):
-        line = line.strip()
-        if line.startswith("{"):
-            return json.loads(line)
-    raise RuntimeError(f"No JSON output.\nstdout:\n{result.stdout}")
+    return _parse_last_json_line(result.stdout)
 
 
 def run_tier(
