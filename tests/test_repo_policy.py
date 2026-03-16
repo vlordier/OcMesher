@@ -21,6 +21,12 @@ def test_static_analysis_targets_main_and_develop() -> None:
     assert 'branches: ["main", "master"]' not in workflow
 
 
+def test_static_analysis_does_not_soft_ignore_iwyu() -> None:
+    workflow = _read(".github/workflows/static-analysis.yml")
+
+    assert "|| true" not in workflow
+
+
 def test_cpp_tests_targets_main_and_develop() -> None:
     workflow = _read(".github/workflows/cpp-tests.yml")
 
