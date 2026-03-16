@@ -22,6 +22,44 @@ except ImportError:  # pragma: no cover - optional dependency
 RESULT_ARITY = 2
 
 
+class _TorchKernelBundle:
+    def __init__(self, kernels: Sequence[Any]):
+        self._kernels = list(kernels)
+
+    def evaluate_many_torch(self, xyz: Any) -> Any:
+        if torch is None:  # pragma: no cover - torchless environments use numpy path
+            msg = "torch is required for evaluate_many_torch"
+            raise RuntimeError(msg)
+        outputs = [
+            _extract_sdf(getattr(kernel, "evaluate_batch_torch")(xyz))
+            for kernel in self._kernels
+        ]
+        tensors = [
+            value if isinstance(value, torch.Tensor) else torch.as_tensor(value, device=xyz.device)
+            for value in outputs
+        ]
+        return torch.stack(tensors, dim=1)
+
+
+class _TorchKernelBundleEntry:
+    def __init__(self, kernel: Any, bundle: _TorchKernelBundle):
+        self._kernel = kernel
+        self._ocmesher_torch_bundle = bundle
+
+    def __call__(self, xyz: Any) -> Any:
+        return self._kernel(xyz)
+
+    def evaluate_batch(self, xyz: Any) -> Any:
+        eval_batch = getattr(self._kernel, "evaluate_batch", None)
+        if callable(eval_batch):
+            return eval_batch(xyz)
+        return self._kernel(xyz)
+
+    def evaluate_batch_torch(self, xyz: Any) -> Any:
+        eval_batch_torch = getattr(self._kernel, "evaluate_batch_torch")
+        return eval_batch_torch(xyz)
+
+
 def _torch_device_capabilities() -> dict[str, bool]:
     supports_cuda = False
     supports_mps = False
@@ -132,6 +170,15 @@ def build_batched_sdf_kernels(
         return _extract_sdf(kernel(xyz))
 
     return [(lambda x, k0=k: _evaluate(k0, x)) for k in kernels]
+
+
+def build_torch_kernel_bundle(kernels: Sequence[Any]) -> list[Any] | None:
+    if torch is None or len(kernels) <= 1:
+        return None
+    if not all(callable(getattr(kernel, "evaluate_batch_torch", None)) for kernel in kernels):
+        return None
+    bundle = _TorchKernelBundle(kernels)
+    return [_TorchKernelBundleEntry(kernel, bundle) for kernel in kernels]
 
 
 class RustBackendProtocol(Protocol):
@@ -278,9 +325,14 @@ class RustOcMesher:
             except (AttributeError, TypeError, ValueError, RuntimeError):
                 backend_caps = {}
 
+        if bool(backend_caps.get("supports_fused_torch_bundle", False)):
+            bundled_kernels = build_torch_kernel_bundle(kernels)
+        else:
+            bundled_kernels = None
+
         if bool(backend_caps.get("native_batching", False)):
             # The Rust extension handles SDF batch chunking internally.
-            sdf_kernels = list(kernels)
+            sdf_kernels = bundled_kernels or list(kernels)
         else:
             sdf_kernels = build_batched_sdf_kernels(
                 list(kernels),

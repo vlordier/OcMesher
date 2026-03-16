@@ -9,7 +9,12 @@ from unittest.mock import MagicMock, patch
 import numpy as np
 import pytest
 
-from ocmesher.rust_backend import RustOcMesher, build_batched_sdf_kernels, make_rust_ocmesher
+from ocmesher.rust_backend import (
+    RustOcMesher,
+    build_batched_sdf_kernels,
+    build_torch_kernel_bundle,
+    make_rust_ocmesher,
+)
 
 
 class DummyRustBackend:
@@ -194,3 +199,42 @@ def test_native_batching_capability_bypasses_python_wrapper_batching(
 
     assert kernel.evaluate_batch_called == 0
     assert kernel.call_called > 0
+
+
+def test_build_torch_kernel_bundle_exposes_shared_owner():
+    class Kernel:
+        def evaluate_batch_torch(self, xyz):
+            return xyz[:, 0]
+
+        def __call__(self, xyz):
+            return np.zeros((len(xyz),), dtype=np.float32)
+
+    bundled = build_torch_kernel_bundle([Kernel(), Kernel()])
+
+    assert bundled is not None
+    assert len(bundled) == 2
+    assert bundled[0]._ocmesher_torch_bundle is bundled[1]._ocmesher_torch_bundle
+
+
+def test_native_torch_bundle_capability_wraps_kernels(sample_cameras, sample_bounds):
+    class Kernel:
+        def __call__(self, xyz):
+            return np.zeros((len(xyz),), dtype=np.float32)
+
+        def evaluate_batch_torch(self, xyz):
+            return np.zeros((len(xyz),), dtype=np.float32)
+
+    class BundleBackend(DummyRustBackend):
+        def get_capabilities(self) -> dict[str, Any]:
+            caps = super().get_capabilities()
+            caps["native_batching"] = True
+            caps["supports_fused_torch_bundle"] = True
+            return caps
+
+        def extract_meshes(self, sdf_kernels: list[Any]) -> tuple[list[str], list[np.ndarray[Any, Any]]]:
+            assert hasattr(sdf_kernels[0], "_ocmesher_torch_bundle")
+            return super().extract_meshes(sdf_kernels)
+
+    backend = BundleBackend()
+    mesher = RustOcMesher(sample_cameras, sample_bounds, backend=backend, batch_size=2)
+    mesher([Kernel(), Kernel()])

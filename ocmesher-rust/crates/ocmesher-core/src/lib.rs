@@ -616,6 +616,50 @@ fn all_kernels_support_torch_eval(py: Python<'_>, kernels: &[Py<PyAny>]) -> bool
     })
 }
 
+fn shared_torch_bundle<'py>(py: Python<'py>, kernels: &[Py<PyAny>]) -> Option<Bound<'py, PyAny>> {
+    if kernels.len() <= 1 {
+        return None;
+    }
+    let mut shared_bundle: Option<Py<PyAny>> = None;
+    for kernel in kernels {
+        let Ok(bundle) = kernel.bind(py).getattr("_ocmesher_torch_bundle") else {
+            return None;
+        };
+        match &shared_bundle {
+            None => shared_bundle = Some(bundle.unbind()),
+            Some(existing) => {
+                if !bundle.is(existing.bind(py)) {
+                    return None;
+                }
+            }
+        }
+    }
+    shared_bundle.map(|bundle| bundle.into_bound(py))
+}
+
+fn eval_bundle_raw_from_inputs<'py>(
+    _py: Python<'py>,
+    bundle: &Bound<'py, PyAny>,
+    xyz_np: &Bound<'py, PyAny>,
+    xyz_torch: Option<&Bound<'py, PyAny>>,
+) -> PyResult<Py<PyAny>> {
+    if let Some(xyz_t) = xyz_torch {
+        if let Ok(eval_many_torch) = bundle.getattr("evaluate_many_torch") {
+            if eval_many_torch.is_callable() {
+                return Ok(eval_many_torch.call1((xyz_t.clone(),))?.unbind());
+            }
+        }
+    }
+    if let Ok(eval_many) = bundle.getattr("evaluate_many") {
+        if eval_many.is_callable() {
+            return Ok(eval_many.call1((xyz_np.clone(),))?.unbind());
+        }
+    }
+    Err(pyo3::exceptions::PyTypeError::new_err(
+        "shared torch bundle must provide evaluate_many_torch or evaluate_many",
+    ))
+}
+
 /// Call a single Python SDF kernel with `xyz` (n_pts × 3 f64) and return f32 values.
 ///
 /// Prefers `kernel.evaluate_batch(xyz)` when available, otherwise falls back to
@@ -703,6 +747,7 @@ fn eval_sdf_full(
     let mut result = vec![0.0f32; n_pts * n_kernels];
 
     let use_fused_torch = torch_eval_device.is_some() && n_kernels > 1 && all_kernels_support_torch_eval(py, kernels);
+    let torch_bundle = if use_fused_torch { shared_torch_bundle(py, kernels) } else { None };
 
     if use_fused_torch {
         use ndarray::Array2;
@@ -723,6 +768,28 @@ fn eval_sdf_full(
                 torch_eval_device,
                 torch_eval_dtype,
             )?;
+
+            if let Some(bundle) = &torch_bundle {
+                let raw = eval_bundle_raw_from_inputs(py, bundle, &xyz_np, Some(&xyz_torch))?;
+                let value = extract_sdf_value(py, raw)?;
+                let tensor = normalize_torch_output(py, value, torch_eval_device, torch_eval_dtype)?;
+                let chunk_vals = extract_sdf_output(py, tensor.unbind())?;
+                if chunk_vals.len() != chunk_n * n_kernels {
+                    return Err(pyo3::exceptions::PyValueError::new_err(format!(
+                        "fused torch bundle returned {} values for {}x{} query matrix",
+                        chunk_vals.len(),
+                        chunk_n,
+                        n_kernels,
+                    )));
+                }
+                for local_i in 0..chunk_n {
+                    let global_i = start + local_i;
+                    let src = &chunk_vals[local_i * n_kernels..(local_i + 1) * n_kernels];
+                    let dst = &mut result[global_i * n_kernels..(global_i + 1) * n_kernels];
+                    dst.copy_from_slice(src);
+                }
+                continue;
+            }
 
             for (k_idx, kernel) in kernels.iter().enumerate() {
                 let sdf = eval_kernel_from_inputs(py, kernel, &xyz_np, Some(&xyz_torch))?;
@@ -801,6 +868,7 @@ fn eval_sdf_min(
 ) -> PyResult<Vec<f32>> {
     let n_kernels = kernels.len();
     let use_fused_torch = torch_eval_device.is_some() && n_kernels > 1 && all_kernels_support_torch_eval(py, kernels);
+    let torch_bundle = if use_fused_torch { shared_torch_bundle(py, kernels) } else { None };
 
     if use_fused_torch {
         use ndarray::Array2;
@@ -825,6 +893,22 @@ fn eval_sdf_min(
                 torch_eval_device,
                 torch_eval_dtype,
             )?;
+
+            if let Some(bundle) = &torch_bundle {
+                let raw = eval_bundle_raw_from_inputs(py, bundle, &xyz_np, Some(&xyz_torch))?;
+                let value = extract_sdf_value(py, raw)?;
+                let tensor = normalize_torch_output(py, value, torch_eval_device, torch_eval_dtype)?;
+                let reduced = tensor.call_method1("amin", (1,))?;
+                let chunk_vals = extract_sdf_output(py, reduced.unbind())?;
+                if chunk_vals.len() != chunk_n {
+                    return Err(pyo3::exceptions::PyValueError::new_err(format!(
+                        "fused torch bundle reduction returned {} values for {chunk_n} query points",
+                        chunk_vals.len()
+                    )));
+                }
+                min_sdf[start..end].copy_from_slice(&chunk_vals);
+                continue;
+            }
             let outputs = PyList::empty_bound(py);
 
             for kernel in kernels {
