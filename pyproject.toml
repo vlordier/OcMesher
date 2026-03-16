@@ -129,7 +129,6 @@ ignore = [
     "INP001",   # implicit namespace package
     "T201",     # print statements (benchmark output)
     "S603",     # subprocess calls are intentional in benchmark harness
-    "S607",     # partial executable path (uses system bash intentionally)
     "PLW1510",  # subprocess.run check handling is explicit
     "D",        # no docstring enforcement in benchmark script
 ]

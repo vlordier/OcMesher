@@ -218,7 +218,7 @@ def _parse_last_json_line(stdout: str) -> RunResult:
 
 def build(script: str) -> float:
     t0 = time.perf_counter()
-    subprocess.check_call(["bash", script], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+    subprocess.check_call(["/bin/bash", script], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
     return time.perf_counter() - t0
 
 
