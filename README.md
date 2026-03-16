@@ -189,8 +189,7 @@ Build the PyO3 extension into the active environment with:
 
 ```bash
 uv sync --extra rust
-cd ocmesher-rust
-uv run maturin develop --release
+uv run maturin develop --release --manifest-path ocmesher-rust/crates/ocmesher-py/Cargo.toml
 ```
 
 Then use it from Python like this:

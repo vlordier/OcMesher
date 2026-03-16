@@ -76,8 +76,8 @@ type FnFineGroup = unsafe extern "C" fn() -> c_int;
 type FnFineIteration = unsafe extern "C" fn(*mut f32) -> c_int;
 type FnFineIterationOutput = unsafe extern "C" fn(*mut f64);
 type FnVisFilter = unsafe extern "C" fn(bool, c_int) -> c_int;
-type FnFinalIteration = unsafe extern "C" fn(*mut c_int) -> c_int;
-type FnFinalIterationOccluded = unsafe extern "C" fn(*mut c_int) -> c_int;
+type FnFinalIteration = unsafe extern "C" fn() -> c_int;
+type FnFinalIterationOccluded = unsafe extern "C" fn() -> c_int;
 type FnFinalIteration2 = unsafe extern "C" fn(*mut f64);
 type FnFinalIteration3 = unsafe extern "C" fn(*mut f32) -> c_int;
 type FnFinalIteration3Occluded = unsafe extern "C" fn(*mut f32);
@@ -826,7 +826,7 @@ pub fn run_meshing_pipeline(
     let mut nv = vec![0i32; n_kerns];
 
     loop {
-        let n = unsafe { (lib.final_iteration)(nv.as_mut_ptr()) };
+        let n = unsafe { (lib.final_iteration)() };
         if n == 0 {
             break;
         }
@@ -849,7 +849,7 @@ pub fn run_meshing_pipeline(
     }
 
     // Occluded cells
-    let n = unsafe { (lib.final_iteration_occluded)(nv.as_mut_ptr()) };
+    let n = unsafe { (lib.final_iteration_occluded)() };
     if n > 0 {
         let n_pts = n as usize;
         let mut xyz = vec![0.0f64; n_pts * 3];

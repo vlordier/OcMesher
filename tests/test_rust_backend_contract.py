@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import sys
+from pathlib import Path
 from typing import Any
 from unittest.mock import MagicMock, patch
 
@@ -143,3 +144,35 @@ def test_make_rust_ocmesher_exported_from_package():
 
     fn = ocmesher.make_rust_ocmesher
     assert callable(fn)
+
+
+@pytest.mark.integration
+def test_make_rust_ocmesher_runs_with_compiled_extension(sample_cameras, sample_bounds, sphere_kernel):
+    pytest.importorskip("ocmesher_rust", reason="compiled Rust extension not installed")
+
+    core_so = Path(__file__).resolve().parents[1] / "ocmesher" / "lib" / "core.so"
+    if not core_so.exists():
+        pytest.skip("compiled core.so not available")
+
+    mesher = make_rust_ocmesher(
+        sample_cameras,
+        sample_bounds,
+        lib_path=str(core_so),
+        pixels_per_cube=32,
+        coarse_count=20_000,
+    )
+
+    meshes, tags = mesher([sphere_kernel])
+
+    assert len(meshes) == 1
+    assert len(tags) == 1
+    assert hasattr(meshes[0], "vertices")
+    assert hasattr(meshes[0], "faces")
+    assert meshes[0].vertices.ndim == 2
+    assert meshes[0].vertices.shape[1] == 3
+    assert meshes[0].faces.ndim == 2
+    assert meshes[0].faces.shape[1] == 3
+    assert meshes[0].vertices.shape[0] > 0
+    assert meshes[0].faces.shape[0] > 0
+    assert tags[0].dtype == np.bool_
+    assert tags[0].shape == (meshes[0].vertices.shape[0],)

@@ -9,17 +9,13 @@ compatible with Infinigen's runtime backend loading.
 
 from __future__ import annotations
 
+import sys
 from typing import TYPE_CHECKING, Any, Protocol
 
 import numpy as np
 
 if TYPE_CHECKING:
     from collections.abc import Callable, Sequence
-
-try:
-    import torch
-except ImportError:  # pragma: no cover - optional dependency
-    torch = None  # type: ignore[assignment]
 
 
 RESULT_ARITY = 2
@@ -28,6 +24,7 @@ RESULT_ARITY = 2
 def _torch_device_capabilities() -> dict[str, bool]:
     supports_cuda = False
     supports_mps = False
+    torch = sys.modules.get("torch")
     if torch is not None:
         supports_cuda = bool(torch.cuda.is_available())
         supports_mps = bool(
@@ -294,11 +291,12 @@ def make_rust_ocmesher(
 ) -> RustOcMesher:
     """Create a :class:`RustOcMesher` using the compiled ``ocmesher_rust`` extension."""
     try:
-        import ocmesher_rust  # type: ignore[import-not-found]
+        import ocmesher_rust  # type: ignore[import-not-found,import-untyped]
     except ImportError as exc:  # pragma: no cover - optional build artifact
         msg = (
             "ocmesher_rust is not installed.  Build the Rust extension with:\n"
-            "  cd ocmesher-rust && maturin develop"
+            "  uv run maturin develop --release --manifest-path "
+            "ocmesher-rust/crates/ocmesher-py/Cargo.toml"
         )
         raise ImportError(msg) from exc
 

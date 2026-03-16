@@ -265,9 +265,18 @@ impl Backend {
 // ---------------------------------------------------------------------------
 
 fn detect_torch_capabilities(py: Python<'_>) -> (bool, bool) {
-    let Ok(torch) = py.import_bound("torch") else {
+    let Ok(sys) = py.import_bound("sys") else {
         return (false, false);
     };
+    let Ok(modules) = sys.getattr("modules") else {
+        return (false, false);
+    };
+    let Ok(torch) = modules.get_item("torch") else {
+        return (false, false);
+    };
+    if torch.is_none() {
+        return (false, false);
+    }
     let cuda = torch
         .getattr("cuda")
         .and_then(|c| c.call_method0("is_available"))
