@@ -83,6 +83,21 @@ class TestBenchmarkArgValidation:
         with pytest.raises(ValueError, match="No benchmark configs selected"):
             benchmark._validate_selected_configs("unknown", [])
 
+    def test_validate_parity_args_accepts_valid_values(self):
+        benchmark._validate_parity_args(pixels_per_cube=32, coarse_count=100_000, atol=1e-12)
+
+    def test_validate_parity_args_rejects_bad_pixels_per_cube(self):
+        with pytest.raises(ValueError, match="--parity-pixels-per-cube"):
+            benchmark._validate_parity_args(pixels_per_cube=0, coarse_count=100_000, atol=1e-12)
+
+    def test_validate_parity_args_rejects_bad_coarse_count(self):
+        with pytest.raises(ValueError, match="--parity-coarse-count"):
+            benchmark._validate_parity_args(pixels_per_cube=32, coarse_count=0, atol=1e-12)
+
+    def test_validate_parity_args_rejects_negative_atol(self):
+        with pytest.raises(ValueError, match="--parity-atol"):
+            benchmark._validate_parity_args(pixels_per_cube=32, coarse_count=100_000, atol=-1.0)
+
 
 class TestShortTierLabel:
     def test_trims_suffix_in_parentheses(self):

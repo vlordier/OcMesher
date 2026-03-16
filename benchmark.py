@@ -411,6 +411,19 @@ def _validate_selected_configs(config_choice: str, configs: list[DemoConfig]) ->
         raise ValueError(msg)
 
 
+def _validate_parity_args(*, pixels_per_cube: int, coarse_count: int, atol: float) -> None:
+    """Validate numeric arguments used by upstream parity mode."""
+    if pixels_per_cube < 1:
+        msg = f"--parity-pixels-per-cube must be >= 1, got {pixels_per_cube}"
+        raise ValueError(msg)
+    if coarse_count < 1:
+        msg = f"--parity-coarse-count must be >= 1, got {coarse_count}"
+        raise ValueError(msg)
+    if atol < 0:
+        msg = f"--parity-atol must be >= 0, got {atol}"
+        raise ValueError(msg)
+
+
 def _write_results_json(output_path: str, results: list[tuple[str, list[TierConfigResult]]]) -> None:
     """Serialize benchmark results to a JSON file."""
     data = _tier_results_to_dict(results)
@@ -441,6 +454,11 @@ def main() -> None:
     os.chdir(Path(__file__).parent)
 
     if args.upstream_parity:
+        _validate_parity_args(
+            pixels_per_cube=args.parity_pixels_per_cube,
+            coarse_count=args.parity_coarse_count,
+            atol=args.parity_atol,
+        )
         parity = run_upstream_parity(
             Path.cwd(),
             upstream_ref=args.upstream_parity,
