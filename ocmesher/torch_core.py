@@ -31,7 +31,7 @@ from __future__ import annotations
 
 import logging
 from concurrent.futures import ThreadPoolExecutor
-from typing import ClassVar
+from typing import TYPE_CHECKING, ClassVar
 
 import numpy as np
 import torch
@@ -39,7 +39,6 @@ import trimesh
 
 from ._constants import CORNER_QUANT_SCALE, DENOM_EPS, MAX_SDF_WORKERS
 from ._mc_tables import CORNER_OFFSETS, EDGE_TABLE, EDGE_VERTICES, TRI_TABLE
-from ._types import MeshResult
 from ._validation import bounds_min_max as _bounds_min_max
 from ._validation import coerce_kernel_sdf as _coerce_kernel_sdf
 from ._validation import out_of_bounds_mask as _out_of_bounds_mask
@@ -48,6 +47,9 @@ from ._validation import validate_bounds as _validate_bounds
 from ._validation import validate_cameras as _validate_cameras
 from ._validation import validate_mesher_params as _validate_mesher_params
 from .utils.timer import Timer
+
+if TYPE_CHECKING:
+    from ._types import MeshResult
 
 logger = logging.getLogger(__name__)
 

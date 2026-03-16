@@ -8,9 +8,12 @@ here avoids duplication and ensures consistent error messages.
 
 from __future__ import annotations
 
+from typing import TYPE_CHECKING
+
 import numpy as np
 
-from ._types import BoundsLike, CamerasTuple, KernelSequence
+if TYPE_CHECKING:
+    from ._types import BoundsLike, CamerasTuple, KernelSequence
 
 __all__ = [
     "bounds_min_max",
@@ -26,7 +29,7 @@ __all__ = [
 _AXIS_NAMES = ("x", "y", "z")
 
 
-def validate_cameras(cameras: CamerasTuple) -> CamerasTuple:
+def validate_cameras(cameras: CamerasTuple) -> CamerasTuple:  # noqa: C901
     """Validate and normalise camera tuple, returning ``(cam_poses, Ks, Hs, Ws)``.
 
     Args:
@@ -181,7 +184,7 @@ def preprocess_cameras(cam_poses, Ks, Hs, Ws):
     return inv_poses_3x4, intrinsics, heights, widths
 
 
-def validate_mesher_params(
+def validate_mesher_params(  # noqa: PLR0913
     *,
     pixels_per_cube,
     inv_scale,

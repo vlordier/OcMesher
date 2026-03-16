@@ -10,22 +10,16 @@ from __future__ import annotations
 import logging
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
+from typing import TYPE_CHECKING
 
 import gin
 import numpy as np
 import trimesh
 from tqdm import tqdm
 
-from ._constants import (
-    CAMERA_DATA_STRIDE,
-)
-from ._types import MeshResult
-from ._constants import (
-    MAX_SDF_WORKERS as _MAX_SDF_WORKERS,
-)
-from ._constants import (
-    SDF_BATCH_SIZE as _SDF_BATCH_SIZE,
-)
+from ._constants import CAMERA_DATA_STRIDE
+from ._constants import MAX_SDF_WORKERS as _MAX_SDF_WORKERS
+from ._constants import SDF_BATCH_SIZE as _SDF_BATCH_SIZE
 from .utils.interface import (
     POINTER,
     AsBool,
@@ -40,6 +34,9 @@ from .utils.interface import (
     register_func,
 )
 from .utils.timer import Timer
+
+if TYPE_CHECKING:
+    from ._types import MeshResult
 
 logger = logging.getLogger(__name__)
 

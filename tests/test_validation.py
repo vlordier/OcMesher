@@ -5,13 +5,13 @@ from __future__ import annotations
 import numpy as np
 import pytest
 
+from ocmesher._validation import bounds_min_max, coerce_kernel_sdf
 from ocmesher.core import (
     _AXIS_NAMES,
     _validate_bounds,
     _validate_cameras,
     _validate_kernels,
 )
-from ocmesher._validation import bounds_min_max, coerce_kernel_sdf
 
 # ---------------------------------------------------------------------------
 # _validate_cameras
