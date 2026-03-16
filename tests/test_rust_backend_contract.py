@@ -176,3 +176,37 @@ def test_make_rust_ocmesher_runs_with_compiled_extension(sample_cameras, sample_
     assert meshes[0].faces.shape[0] > 0
     assert tags[0].dtype == np.bool_
     assert tags[0].shape == (meshes[0].vertices.shape[0],)
+
+
+@pytest.mark.integration
+def test_compiled_extension_extract_native_sphere(sample_cameras, sample_bounds):
+    ocmesher_rust = pytest.importorskip("ocmesher_rust", reason="compiled Rust extension not installed")
+
+    core_so = Path(__file__).resolve().parents[1] / "ocmesher" / "lib" / "core.so"
+    if not core_so.exists():
+        pytest.skip("compiled core.so not available")
+
+    cam_poses, ks, hs, ws = sample_cameras
+    backend = ocmesher_rust.Backend(
+        lib_path=str(core_so),
+        cameras=(
+            [np.asarray(p, dtype=np.float64).ravel().tolist() for p in cam_poses],
+            [np.asarray(k, dtype=np.float64).ravel().tolist() for k in ks],
+            [float(h) for h in hs],
+            [float(w) for w in ws],
+        ),
+        bounds=np.asarray(sample_bounds, dtype=np.float64).tolist(),
+        pixels_per_cube=32,
+        coarse_count=20_000,
+    )
+
+    meshes, tags = backend.extract_native_sphere(radius=1.0)
+
+    assert len(meshes) == 1
+    assert len(tags) == 1
+    assert meshes[0].vertices.shape[1] == 3
+    assert meshes[0].faces.shape[1] == 3
+    assert meshes[0].vertices.shape[0] > 0
+    assert meshes[0].faces.shape[0] > 0
+    assert tags[0].shape == (meshes[0].vertices.shape[0],)
+    assert tags[0].dtype == np.bool_

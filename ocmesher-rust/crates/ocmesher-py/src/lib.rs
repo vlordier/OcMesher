@@ -25,7 +25,10 @@ use std::sync::Arc;
 use pyo3::prelude::*;
 use pyo3::types::{PyDict, PyList, PyTuple};
 
-use ocmesher_core::{pack_cameras, run_meshing_pipeline, validate_bounds, CoreLib, MesherParams};
+use ocmesher_core::{
+    pack_cameras, run_meshing_pipeline, run_meshing_pipeline_native, validate_bounds, CoreLib,
+    MesherParams, SphereKernel,
+};
 
 // ---------------------------------------------------------------------------
 // Backend PyO3 class
@@ -240,6 +243,41 @@ impl Backend {
 
         let result = PyTuple::new_bound(py, [meshes_list.into_any(), tags_list.into_any()]);
         Ok(result)
+    }
+
+    /// Run the meshing pipeline with a built-in Rust-native sphere SDF.
+    #[pyo3(signature = (radius = 1.0, center = None))]
+    fn extract_native_sphere<'py>(
+        &self,
+        py: Python<'py>,
+        radius: f64,
+        center: Option<Vec<f64>>,
+    ) -> PyResult<Bound<'py, PyTuple>> {
+        let center_arr = match center {
+            Some(values) => {
+                if values.len() != 3 {
+                    return Err(pyo3::exceptions::PyValueError::new_err(
+                        "center must contain exactly 3 values",
+                    ));
+                }
+                [values[0], values[1], values[2]]
+            }
+            None => [0.0, 0.0, 0.0],
+        };
+        let kernels = vec![Box::new(SphereKernel::new(center_arr, radius)) as _];
+        let mesh_data_list = run_meshing_pipeline_native(&self.lib, &self.params, &kernels)
+            .map_err(PyErr::from)?;
+
+        let meshes_list = PyList::empty_bound(py);
+        let tags_list = PyList::empty_bound(py);
+
+        for mesh_data in mesh_data_list {
+            let (mesh_obj, tag_np) = ocmesher_core::mesh_data_to_python(py, mesh_data)?;
+            meshes_list.append(mesh_obj)?;
+            tags_list.append(tag_np)?;
+        }
+
+        Ok(PyTuple::new_bound(py, [meshes_list.into_any(), tags_list.into_any()]))
     }
 
     /// Convenience: same as ``get_capabilities()`` for protocol compatibility.
