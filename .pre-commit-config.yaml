@@ -45,3 +45,5 @@ repos:
         args:
           - "--extra-arg=-std=c++17"
           - "--extra-arg=-fopenmp"
+          - "--warnings-as-errors=*"
+          - "--header-filter=^ocmesher/source/.*"
