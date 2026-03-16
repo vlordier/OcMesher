@@ -12,6 +12,7 @@ Usage:
 """
 
 import argparse
+import importlib.util
 import json
 import os
 import statistics
@@ -22,7 +23,18 @@ import time
 from pathlib import Path
 from typing import TypeAlias, TypedDict
 
-from benchmarks.upstream_parity import run_upstream_parity
+try:
+    from benchmarks.upstream_parity import run_upstream_parity
+except ModuleNotFoundError as err:
+    # Some test import modes set sys.path to the repo parent; fall back to file-based import.
+    _UPSTREAM_PARITY_PATH = Path(__file__).parent / "benchmarks" / "upstream_parity.py"
+    _UPSTREAM_PARITY_SPEC = importlib.util.spec_from_file_location("ocmesher_upstream_parity", _UPSTREAM_PARITY_PATH)
+    if _UPSTREAM_PARITY_SPEC is None or _UPSTREAM_PARITY_SPEC.loader is None:
+        msg = f"Failed to load upstream parity module from {_UPSTREAM_PARITY_PATH}"
+        raise RuntimeError(msg) from err
+    _UPSTREAM_PARITY_MODULE = importlib.util.module_from_spec(_UPSTREAM_PARITY_SPEC)
+    _UPSTREAM_PARITY_SPEC.loader.exec_module(_UPSTREAM_PARITY_MODULE)
+    run_upstream_parity = _UPSTREAM_PARITY_MODULE.run_upstream_parity
 
 
 class DemoConfig(TypedDict):
