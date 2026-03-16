@@ -29,7 +29,7 @@ __all__ = [
 ]
 
 
-def _checked_ptr(x: Any, ctype) -> Any:
+def _checked_ptr(x: Any, ctype: type) -> Any:
     """Convert a numpy array to a ctypes pointer, validating the input type."""
     if not isinstance(x, np.ndarray):
         msg = f"Expected a numpy array, got {type(x).__name__}"
