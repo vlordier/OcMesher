@@ -53,6 +53,14 @@ uv sync
 bash install.sh
 ```
 
+If you want to use the PyTorch backend as well, install the optional torch
+dependency group before running the demo or tests that import
+`ocmesher.TorchOcMesher`:
+
+```bash
+uv sync --extra torch
+```
+
 
 ### Demo
 
@@ -61,3 +69,13 @@ uv run python demo.py
 ```
 
 This example uses one camera and the Perlin Noise from the Python library `vnoise` and outputs the resulting mesh in `results/demo.obj`.
+
+### Development Checks
+
+The repo uses Ruff for linting/formatting and Pytest for tests.
+
+```bash
+uv run ruff check .
+uv run ruff format .
+uv run pytest
+```
