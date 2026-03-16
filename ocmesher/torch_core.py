@@ -97,6 +97,23 @@ class TorchOcMesher:
     _mc_cache: ClassVar[dict[torch.device, dict[str, torch.Tensor]]] = {}
 
     @staticmethod
+    def _build_mc_cache(device: torch.device) -> dict[str, torch.Tensor]:
+        """Build marching-cubes lookup tables on the requested device."""
+        edge_table_t = torch.tensor(EDGE_TABLE, dtype=torch.int32, device=device)
+        max_tri_entries = max(len(row) for row in TRI_TABLE)
+        tri_table_np = np.full((256, max_tri_entries), -1, dtype=np.int16)
+        for i, row in enumerate(TRI_TABLE):
+            tri_table_np[i, : len(row)] = row
+        tri_table_t = torch.from_numpy(tri_table_np).to(device)
+        bit_shifts = torch.tensor([1 << i for i in range(8)], dtype=torch.int32, device=device)
+        return {
+            "edge_table": edge_table_t,
+            "tri_table": tri_table_t,
+            "max_tri_entries": torch.tensor(max_tri_entries),
+            "bit_shifts": bit_shifts,
+        }
+
+    @staticmethod
     def _select_device_and_dtype(device=None) -> tuple[torch.device, torch.dtype]:
         """Auto-detect the best device and matching floating-point dtype.
 
@@ -313,24 +330,7 @@ class TorchOcMesher:
         """Lazily build marching-cubes lookup tables on *self.device*."""
         if self.device in TorchOcMesher._mc_cache:
             return
-        edge_table_t = torch.tensor(EDGE_TABLE, dtype=torch.int32, device=self.device)
-        max_tri_entries = max(len(row) for row in TRI_TABLE)
-        # int16 stores all entry values (range [-1, 11]) in half the memory of
-        # int32, reducing GPU memory bandwidth when the table is indexed.
-        tri_table_np = np.full((256, max_tri_entries), -1, dtype=np.int16)
-        for i, row in enumerate(TRI_TABLE):
-            tri_table_np[i, : len(row)] = row
-        tri_table_t = torch.from_numpy(tri_table_np).to(self.device)
-
-        # Pre-compute bit-shift values for cube configuration
-        bit_shifts = torch.tensor([1 << i for i in range(8)], dtype=torch.int32, device=self.device)
-
-        TorchOcMesher._mc_cache[self.device] = {
-            "edge_table": edge_table_t,
-            "tri_table": tri_table_t,
-            "max_tri_entries": torch.tensor(max_tri_entries),
-            "bit_shifts": bit_shifts,
-        }
+        TorchOcMesher._mc_cache[self.device] = self._build_mc_cache(self.device)
 
     # ------------------------------------------------------------------
     # Coordinate helpers
@@ -829,19 +829,7 @@ class TorchOcMesher:
         device_cpu = torch.device("cpu")
         # Build / retrieve CPU-side MC cache (separate from the GPU cache).
         if device_cpu not in TorchOcMesher._mc_cache:
-            edge_table_t = torch.tensor(EDGE_TABLE, dtype=torch.int32)
-            max_tri_entries = max(len(row) for row in TRI_TABLE)
-            tri_table_np = np.full((256, max_tri_entries), -1, dtype=np.int16)
-            for i, row in enumerate(TRI_TABLE):
-                tri_table_np[i, : len(row)] = row
-            tri_table_t = torch.from_numpy(tri_table_np)
-            bit_shifts = torch.tensor([1 << i for i in range(8)], dtype=torch.int32)
-            TorchOcMesher._mc_cache[device_cpu] = {
-                "edge_table": edge_table_t,
-                "tri_table": tri_table_t,
-                "max_tri_entries": torch.tensor(max_tri_entries),
-                "bit_shifts": bit_shifts,
-            }
+            TorchOcMesher._mc_cache[device_cpu] = self._build_mc_cache(device_cpu)
 
         cache = TorchOcMesher._mc_cache[device_cpu]
         edge_table_t = cache["edge_table"]

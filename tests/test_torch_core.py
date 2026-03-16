@@ -342,6 +342,10 @@ class TestDepthBufPreallocation:
 # Refactoring: int16 tri_table in MC cache (commit 5)
 # ---------------------------------------------------------------------------
 class TestMCCacheInt16:
+    def test_build_mc_cache_returns_expected_keys(self):
+        cache = TorchOcMesher._build_mc_cache(torch.device("cpu"))
+        assert set(cache) == {"edge_table", "tri_table", "max_tri_entries", "bit_shifts"}
+
     def test_tri_table_dtype_is_int16(self, single_cam_mesher):
         """tri_table in MC cache must use int16 to reduce memory bandwidth."""
         cache = TorchOcMesher._mc_cache[single_cam_mesher.device]
