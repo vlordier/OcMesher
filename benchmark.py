@@ -342,11 +342,10 @@ def print_comparison(tiers: list[tuple[str, list[TierConfigResult]]]) -> None:
 
 def _comparison_row(cfg_label: str, medians: list[float], col_width: int) -> str:
     """Format one comparison row with medians and baseline speedups."""
-    line = f"{cfg_label:<{CONFIG_COLUMN_WIDTH}}"
-    for median in medians:
-        line += f"  {median:>{col_width}.3f}s"
-    line += _speedup_cells(medians)
-    return line
+    cells = [f"{cfg_label:<{CONFIG_COLUMN_WIDTH}}"]
+    cells.extend(f"  {median:>{col_width}.3f}s" for median in medians)
+    cells.append(_speedup_cells(medians))
+    return "".join(cells)
 
 
 def _tier_medians_at_row(tables: list[list[TierConfigResult]], row: int, n_cols: int) -> list[float]:
