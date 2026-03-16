@@ -54,6 +54,10 @@ except ImportError:
 
 _HAS_SLOTS = hasattr(OcMesher, "__slots__")
 
+_BOUNDS_ABS_LIMIT = 10
+_SPEEDUP_FAST_THRESHOLD = 1.05
+_SPEEDUP_NEUTRAL_THRESHOLD = 0.95
+
 
 # ---------------------------------------------------------------------------
 # Mock SDF kernels (pure-Python — no C++ dependency)
@@ -425,7 +429,7 @@ def regression_check() -> list[str]:
         failures.append(f"single/enclosed: expected dtype float32, got {sdf.dtype}")
 
     # out-of-bounds points should be clamped to 1.0
-    oob = np.any((pts <= -10) | (pts >= 10), axis=1)
+    oob = np.any((pts <= -_BOUNDS_ABS_LIMIT) | (pts >= _BOUNDS_ABS_LIMIT), axis=1)
     if oob.any():
         oob_vals = sdf[oob, 0]
         if not np.all(oob_vals == 1.0):
@@ -517,7 +521,11 @@ def compare_results(file_a: str, file_b: str) -> None:
                 ta = sa["mean_us"]
                 tb = sb["mean_us"]
                 speedup = ta / tb if tb > 0 else float("inf")
-                marker = "✓" if speedup > 1.05 else ("≈" if speedup > 0.95 else "✗")
+                marker = (
+                    "✓"
+                    if speedup > _SPEEDUP_FAST_THRESHOLD
+                    else ("≈" if speedup > _SPEEDUP_NEUTRAL_THRESHOLD else "✗")
+                )
                 print(f"  {name:<38s}  {sz:>8s}  {ta:>10.1f}  {tb:>10.1f}  {speedup:>7.2f}x {marker}")
             elif "speedup" in sa and "speedup" in sb:
                 print(f"  {name:<38s}  {sz:>8s}  (A speedup={sa['speedup']:.2f}x  B speedup={sb['speedup']:.2f}x)")

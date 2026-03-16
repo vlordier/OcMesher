@@ -138,7 +138,6 @@ ignore = [
 "benchmarks/bench_e2e.py" = [
     "SLF001",   # private member access (benchmarking internal methods)
     "T201",     # print statements (benchmark output)
-    "PLR2004",  # magic values OK in benchmarks
     "C901",     # complex functions OK in benchmark main/regression_check
     "PLR0912",  # too-many-branches in regression_check
     "PLR0915",  # too-many-statements in main
