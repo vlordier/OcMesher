@@ -145,10 +145,10 @@ class TestConstantsModule:
 
     def test_core_imports_stride(self):
         """CAMERA_DATA_STRIDE re-exported from core must match _constants."""
-        from ocmesher._constants import CAMERA_DATA_STRIDE as const_stride
-        from ocmesher.core import CAMERA_DATA_STRIDE as core_stride
+        from ocmesher._constants import CAMERA_DATA_STRIDE as CONST_STRIDE
+        from ocmesher.core import CAMERA_DATA_STRIDE as CORE_STRIDE
 
-        assert core_stride == const_stride
+        assert CORE_STRIDE == CONST_STRIDE
 
 
 # ---------------------------------------------------------------------------

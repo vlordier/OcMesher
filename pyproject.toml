@@ -171,7 +171,6 @@ ignore = [
     "RUF059",   # unused unpacked variables OK in tests
     "E402",     # module-level imports not at top (pytest.importorskip pattern)
     "PLC0415",  # test-local imports for importability checks
-    "N811",     # constant imported as non-constant alias in assertions
     "ERA001",   # section divider comments look like commented-out code
 ]
 
