@@ -51,3 +51,10 @@ def test_ci_workflow_pins_python_311() -> None:
 
     assert "actions/setup-python@v5" in workflow
     assert 'python-version: "3.11"' in workflow
+
+
+def test_docs_workflow_pins_python_311() -> None:
+    workflow = _read(".github/workflows/docs.yml")
+
+    assert workflow.count("actions/setup-python@v5") == 2
+    assert workflow.count('python-version: "3.11"') == 2
