@@ -375,12 +375,14 @@ auto divideToCube(std::vector<Node>& nodes,
 void findEdges(const Node& n, std::unordered_map<KeyCube, int, KeyCubeHash>& vertices, sdfT* sdf,
                std::vector<std::vector<KeyEdge>>& bipolar_edges) {
     int s = gridNodeLevel(n), ss = 1 << s;
-    Vertex v[cubex(ss + 1)]; // NOLINT(cppcoreguidelines-avoid-c-arrays, modernize-avoid-c-arrays)
-    // NOLINTNEXTLINE(cppcoreguidelines-avoid-c-arrays, modernize-avoid-c-arrays)
-    sdfT* sdf_v[cubex(ss + 1)];
-    enumerateVertices(v, n);
-    for (int i = 0; i < cubex(ss + 1); i++) {
-        sdf_v[i] = sdf + static_cast<ptrdiff_t>(vertices[cubeToKey(v[i])]) * params::n_elements;
+    const int n_vertices = cubex(ss + 1);
+    std::vector<Vertex> vertices_local(static_cast<size_t>(n_vertices));
+    std::vector<sdfT*> sdf_vertices(static_cast<size_t>(n_vertices));
+    enumerateVertices(vertices_local.data(), n);
+    for (int i = 0; i < n_vertices; i++) {
+        sdf_vertices[static_cast<size_t>(i)] =
+            sdf + static_cast<ptrdiff_t>(vertices[cubeToKey(vertices_local[static_cast<size_t>(i)])]) *
+                      params::n_elements;
     }
     for (int edir = 0; edir < 3; edir++)
         for (int i = 0; i < ss; i++)
@@ -391,10 +393,10 @@ void findEdges(const Node& n, std::unordered_map<KeyCube, int, KeyCubeHash>& ver
                     coords[(edir + 1) % 3] = j;
                     coords[(edir + 2) % 3] = k;
                     int vid = coords[0] + coords[1] * (ss + 1) + coords[2] * (ss + 1) * (ss + 1);
-                    sdfT* sdf1 = sdf_v[vid];
+                    sdfT* sdf1 = sdf_vertices[static_cast<size_t>(vid)];
                     coords[edir]--;
                     vid = coords[0] + coords[1] * (ss + 1) + coords[2] * (ss + 1) * (ss + 1);
-                    sdfT* sdf2 = sdf_v[vid];
+                    sdfT* sdf2 = sdf_vertices[static_cast<size_t>(vid)];
                     sdfT sdf1_min = std::numeric_limits<sdfT>::infinity(),
                          sdf2_min = std::numeric_limits<sdfT>::infinity();
                     for (int e = 0; e < params::n_elements;

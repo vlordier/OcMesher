@@ -143,10 +143,10 @@ ignore = [
 "tests/**/*.py" = [
     "S101",     # assert usage expected in tests
     "D",        # no docstring enforcement in tests
-    "PLR2004",  # magic values OK in test assertions
+    "PLR2004",  # magic values used intentionally in test assertions
     "PT019",    # @patch-injected args look like unused fixtures
-    "SLF001",   # private member access expected in tests
-    "E402",     # module-level imports not at top (pytest.importorskip pattern)
+    "SLF001",   # internal-method tests validate non-public fast paths
+    "E402",     # module-level pytest.importorskip patterns in torch-only tests
     "PLC0415",  # test-local imports for importability checks
 ]
 
