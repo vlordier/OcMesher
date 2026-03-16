@@ -148,7 +148,7 @@ def bench_kernel_caller_single_enclosed(sizes: list[int], repeats: int) -> dict:
     for n in sizes:
         pts = np.random.default_rng(42).standard_normal((n, 3)).astype(np.float64)
         results[str(n)] = _time_fn(
-            lambda: stub.kernel_caller([_sdf_sphere], pts),
+            lambda pts=pts: stub.kernel_caller([_sdf_sphere], pts),
             repeats=repeats,
         )
     return results
@@ -164,7 +164,7 @@ def bench_kernel_caller_single_open(sizes: list[int], repeats: int) -> dict:
     for n in sizes:
         pts = np.random.default_rng(42).standard_normal((n, 3)).astype(np.float64)
         results[str(n)] = _time_fn(
-            lambda: stub.kernel_caller([_sdf_sphere], pts),
+            lambda pts=pts: stub.kernel_caller([_sdf_sphere], pts),
             repeats=repeats,
         )
     return results
@@ -181,7 +181,7 @@ def bench_kernel_caller_multi_3k(sizes: list[int], repeats: int) -> dict:
     for n in sizes:
         pts = np.random.default_rng(42).standard_normal((n, 3)).astype(np.float64)
         results[str(n)] = _time_fn(
-            lambda: stub.kernel_caller(kernels, pts),
+            lambda pts=pts: stub.kernel_caller(kernels, pts),
             repeats=repeats,
         )
     return results
@@ -201,12 +201,12 @@ def bench_kernel_caller_out_reuse(sizes: list[int], repeats: int) -> dict:
         if has_out:
             out = np.empty((n, 1), dtype=np.float32)
             results[str(n)] = _time_fn(
-                lambda: stub.kernel_caller([_sdf_sphere], pts, out=out),
+                lambda pts=pts, out=out: stub.kernel_caller([_sdf_sphere], pts, out=out),
                 repeats=repeats,
             )
         else:
             results[str(n)] = _time_fn(
-                lambda: stub.kernel_caller([_sdf_sphere], pts),
+                lambda pts=pts: stub.kernel_caller([_sdf_sphere], pts),
                 repeats=repeats,
             )
         results[str(n)]["has_out_param"] = has_out
@@ -228,14 +228,14 @@ def bench_bounds_mask(sizes: list[int], repeats: int) -> dict:
         pts = np.random.default_rng(42).standard_normal((n, 3)).astype(np.float64) * 15.0
         if has_static:
             results[str(n)] = _time_fn(
-                lambda: OcMesher._out_of_bounds_mask(pts, b_min, b_max),
+                lambda pts=pts: OcMesher._out_of_bounds_mask(pts, b_min, b_max),
                 repeats=repeats,
             )
         else:
             # Reference implementation matching develop/main
             bounds = (-10, 10, -10, 10, -10, 10)
 
-            def _mask():
+            def _mask(pts: np.ndarray = pts, bounds: tuple[int, int, int, int, int, int] = bounds) -> np.ndarray:
                 out_bound = np.zeros(len(pts), dtype=bool)
                 for c in range(3):
                     out_bound |= pts[:, c] <= bounds[c * 2]
@@ -267,9 +267,11 @@ def bench_camera_packing(_sizes: list[int], repeats: int) -> dict:
         ws = [1280] * n_cameras
 
         np_float_type = np.float64
+        pack_inputs = (cam_poses, ks, hs, ws, n_cameras, np_float_type)
 
-        def _pack_vectorized():
+        def _pack_vectorized(pack_inputs=pack_inputs) -> np.ndarray:
             """Vectorized camera packing (optimized branch style)."""
+            cam_poses, ks, hs, ws, n_cameras, np_float_type = pack_inputs
             inv_poses = np.linalg.inv(np.stack(cam_poses))[:, :3, :4].reshape(n_cameras, -1)
             ks_flat = np.array(ks).reshape(n_cameras, -1)
             h_arr = np.array(hs, dtype=np_float_type).reshape(n_cameras, 1)
@@ -281,8 +283,9 @@ def bench_camera_packing(_sizes: list[int], repeats: int) -> dict:
             packed[:, 22:23] = w_arr
             return packed.ravel()
 
-        def _pack_loop():
+        def _pack_loop(pack_inputs=pack_inputs) -> np.ndarray:
             """Per-camera loop packing (develop/main style)."""
+            cam_poses, ks, hs, ws, n_cameras, np_float_type = pack_inputs
             cameras = np.zeros(23 * n_cameras, dtype=np_float_type)
             for i in range(n_cameras):
                 cameras[23 * i : 23 * (i + 1)] = np.concatenate(
@@ -317,11 +320,14 @@ def bench_concatenate_vs_slice_fill(sizes: list[int], repeats: int) -> dict:
         b = np.random.default_rng(43).standard_normal((n, 3)).astype(np.float64)
         c = np.random.default_rng(44).standard_normal((n, 3)).astype(np.float64)
         d = np.random.default_rng(45).standard_normal((n, 3)).astype(np.float64)
+        slice_inputs = (a, b, c, d, n)
 
-        def _concat():
+        def _concat(slice_inputs=slice_inputs) -> np.ndarray:
+            a, b, c, d, _ = slice_inputs
             return np.concatenate((a, b, c, d))
 
-        def _slice():
+        def _slice(slice_inputs=slice_inputs) -> np.ndarray:
+            a, b, c, d, n = slice_inputs
             buf = np.empty((4 * n, 3), dtype=np.float64)
             buf[:n] = a
             buf[n : 2 * n] = b
@@ -352,9 +358,11 @@ def bench_bisection_simulation(sizes: list[int], repeats: int) -> dict:
     results = {}
     for n in sizes:
         pts = np.random.default_rng(42).standard_normal((n, 3)).astype(np.float64)
+        bisection_inputs = (pts, n, has_out, n_iters)
 
-        def _bisection():
+        def _bisection(bisection_inputs=bisection_inputs) -> None:
             """Simulate bisection: 15 iterations of kernel_caller + update."""
+            pts, n, has_out, n_iters = bisection_inputs
             if has_out:
                 out_buf = np.empty((n, 1), dtype=np.float32)
                 for _ in range(n_iters):
@@ -382,8 +390,10 @@ def bench_multi_kernel_bisection(sizes: list[int], repeats: int) -> dict:
     results = {}
     for n in sizes:
         pts = np.random.default_rng(42).standard_normal((n, 3)).astype(np.float64)
+        bisection_inputs = (pts, n, n_iters)
 
-        def _bisection():
+        def _bisection(bisection_inputs=bisection_inputs) -> None:
+            pts, n, n_iters = bisection_inputs
             for _ in range(n_iters):
                 stub.kernel_caller(kernels, pts)  # timing the call itself
                 pts[:] += np.random.default_rng(0).standard_normal((n, 3)) * 0.01
