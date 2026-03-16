@@ -269,10 +269,23 @@ class RustOcMesher:
                 msg
             )
 
-        sdf_kernels = build_batched_sdf_kernels(
-            list(kernels),
-            batch_size=self._effective_batch_size,
-        )
+        backend_caps: dict[str, Any] = {}
+        if hasattr(self._backend, "get_capabilities"):
+            try:
+                caps_value = self._backend.get_capabilities()
+                if isinstance(caps_value, dict):
+                    backend_caps = caps_value
+            except (AttributeError, TypeError, ValueError, RuntimeError):
+                backend_caps = {}
+
+        if bool(backend_caps.get("native_batching", False)):
+            # The Rust extension handles SDF batch chunking internally.
+            sdf_kernels = list(kernels)
+        else:
+            sdf_kernels = build_batched_sdf_kernels(
+                list(kernels),
+                batch_size=self._effective_batch_size,
+            )
 
         result = cast(tuple[Any, Any] | list[Any], self._backend.extract_meshes(sdf_kernels))
         if len(result) != RESULT_ARITY:

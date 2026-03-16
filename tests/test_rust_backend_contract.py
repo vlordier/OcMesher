@@ -162,3 +162,35 @@ def test_make_rust_ocmesher_exported_from_package():
 
     fn = ocmesher.make_rust_ocmesher
     assert callable(fn)
+
+
+def test_native_batching_capability_bypasses_python_wrapper_batching(
+    sample_cameras,
+    sample_bounds,
+):
+    class Kernel:
+        def __init__(self):
+            self.evaluate_batch_called = 0
+            self.call_called = 0
+
+        def evaluate_batch(self, xyz):
+            self.evaluate_batch_called += 1
+            return np.zeros((len(xyz),), dtype=np.float32)
+
+        def __call__(self, xyz):
+            self.call_called += 1
+            return np.zeros((len(xyz),), dtype=np.float32)
+
+    class NativeBatchBackend(DummyRustBackend):
+        def get_capabilities(self) -> dict[str, Any]:
+            caps = super().get_capabilities()
+            caps["native_batching"] = True
+            return caps
+
+    kernel = Kernel()
+    backend = NativeBatchBackend()
+    mesher = RustOcMesher(sample_cameras, sample_bounds, backend=backend, batch_size=2)
+    mesher([kernel])
+
+    assert kernel.evaluate_batch_called == 0
+    assert kernel.call_called > 0

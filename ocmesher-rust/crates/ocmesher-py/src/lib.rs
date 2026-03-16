@@ -255,6 +255,7 @@ impl Backend {
             Some(v) => d.set_item("max_batch", v)?,
             None => d.set_item("max_batch", py.None())?,
         }
+        d.set_item("native_batching", true)?;
         d.set_item("supports_async", self.device == "cuda" || self.device == "mps")?;
         d.set_item("default_stream_policy", self.stream_policy.as_str())?;
         d.set_item("version", self.version.as_str())?;
