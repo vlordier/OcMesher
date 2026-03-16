@@ -1,4 +1,13 @@
 repos:
+  - repo: local
+    hooks:
+      - id: file-length-policy
+        name: file-length-policy
+        entry: python tests/file_length_guard.py
+        language: python
+        pass_filenames: false
+        always_run: true
+
   - repo: https://github.com/pre-commit/pre-commit-hooks
     rev: v5.0.0
     hooks:

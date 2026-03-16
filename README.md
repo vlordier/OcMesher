@@ -84,13 +84,13 @@ Quality policy notes:
 - Naming consistency and general style are enforced by Ruff.
 - Function complexity and branch depth are linted via Ruff/Pylint rule families (for example `C901`, `PLR0912`, `PLR0915`) in files that are not explicitly waived in `pyproject.toml`.
 - Line length is configured at 120 columns; per-file suppressions are documented in `pyproject.toml`.
-- File-size guardrails for high-churn scripts are enforced in `tests/test_file_length_policy.py`.
+- File-size guardrails for high-churn scripts are enforced by `tests/file_length_guard.py` in pre-commit and CI.
 
 ```bash
 uv run ruff check .
 uv run ruff format .
 uv run pytest
-uv run pytest tests/test_file_length_policy.py
+uv run python tests/file_length_guard.py
 ```
 
 ### Benchmark Validation Workflow

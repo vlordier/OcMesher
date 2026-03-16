@@ -6,12 +6,14 @@ on:
     paths:
       - "**.py"
       - "pyproject.toml"
+      - ".pre-commit-config.yaml"
       - ".github/workflows/lint.yml"
   pull_request:
     branches: ["main", "develop"]
     paths:
       - "**.py"
       - "pyproject.toml"
+      - ".pre-commit-config.yaml"
       - ".github/workflows/lint.yml"
 
 permissions:
@@ -35,3 +37,6 @@ jobs:
 
       - name: Run ruff format check
         run: uv run ruff format --check .
+
+      - name: Run file-length policy guard
+        run: uv run python tests/file_length_guard.py
