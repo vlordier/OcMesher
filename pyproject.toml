@@ -112,9 +112,6 @@ ignore = [
 ]
 # PyTorch mesher – complex scientific code with GPU tensor ops
 "ocmesher/torch_core.py" = [
-    "PLR0913",  # too-many-arguments (constructor mirrors original API)
-    "PLR0915",  # too-many-statements (__call__ orchestrates meshing)
-    "C901",     # complex methods (meshing is inherently complex)
     "FBT002",   # boolean default positional args (API backwards-compat)
 ]
 # benchmark script – standalone runner

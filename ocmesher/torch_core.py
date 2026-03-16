@@ -138,7 +138,7 @@ class TorchOcMesher:
             torch.backends.cudnn.benchmark = True
         return dev, fdtype
 
-    def __init__(
+    def __init__(  # noqa: PLR0913, PLR0915
         self,
         cameras,
         bounds,
@@ -456,7 +456,7 @@ class TorchOcMesher:
     # Threaded SDF evaluation
     # ------------------------------------------------------------------
     @torch.no_grad()
-    def _evaluate_sdf(
+    def _evaluate_sdf(  # noqa: C901
         self,
         kernels: list,
         positions: torch.Tensor,
@@ -823,7 +823,7 @@ class TorchOcMesher:
     # Marching cubes (fully vectorised, fused)
     # ------------------------------------------------------------------
     @torch.no_grad()
-    def _marching_cubes(
+    def _marching_cubes(  # noqa: PLR0915
         self,
         corners: torch.Tensor,
         sdf: torch.Tensor,
@@ -996,7 +996,7 @@ class TorchOcMesher:
         return meshes, in_view_tags
 
     @torch.no_grad()
-    def _construct_element_mesh(
+    def _construct_element_mesh(  # noqa: PLR0913
         self,
         kernels: list,
         coords: torch.Tensor,
