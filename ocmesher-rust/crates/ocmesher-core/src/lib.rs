@@ -20,7 +20,7 @@ use std::sync::{Mutex, OnceLock};
 
 use libloading::{Library, Symbol};
 use pyo3::prelude::*;
-use pyo3::types::PyDict;
+use pyo3::types::{PyDict, PyList};
 
 // ---------------------------------------------------------------------------
 // Error type
@@ -309,25 +309,27 @@ pub fn validate_bounds(bounds: &[f64]) -> Result<([f64; 3], [f64; 3], [f64; 3], 
 // SDF evaluation helpers
 // ---------------------------------------------------------------------------
 
+fn extract_sdf_value(py: Python<'_>, raw: Py<PyAny>) -> PyResult<Py<PyAny>> {
+    let raw_bound = raw.bind(py);
+    if let Ok(dict) = raw_bound.downcast::<PyDict>() {
+        if let Ok(Some(v)) = dict.get_item("sdf") {
+            Ok(v.unbind())
+        } else if let Ok(Some(v)) = dict.get_item("SDF") {
+            Ok(v.unbind())
+        } else {
+            Err(pyo3::exceptions::PyKeyError::new_err(
+                "SDF output dict must contain 'sdf' or 'SDF'",
+            ))
+        }
+    } else {
+        Ok(raw.clone_ref(py))
+    }
+}
+
 fn extract_sdf_output(py: Python<'_>, raw: Py<PyAny>) -> PyResult<Vec<f32>> {
     use numpy::PyReadonlyArray1;
 
-    let raw = {
-        let raw_bound = raw.bind(py);
-        if let Ok(dict) = raw_bound.downcast::<PyDict>() {
-            if let Ok(Some(v)) = dict.get_item("sdf") {
-                v.unbind()
-            } else if let Ok(Some(v)) = dict.get_item("SDF") {
-                v.unbind()
-            } else {
-                return Err(pyo3::exceptions::PyKeyError::new_err(
-                    "SDF output dict must contain 'sdf' or 'SDF'",
-                ));
-            }
-        } else {
-            raw.clone_ref(py)
-        }
-    };
+    let raw = extract_sdf_value(py, raw)?;
 
     if let Ok(arr) = raw.extract::<PyReadonlyArray1<f32>>(py) {
         return arr
@@ -417,46 +419,66 @@ fn build_torch_xyz_input<'py>(
     }
 }
 
+fn build_torch_dtype<'py>(
+    torch: &Bound<'py, PyAny>,
+    torch_eval_dtype: Option<&str>,
+) -> PyResult<Bound<'py, PyAny>> {
+    let dtype_name = torch_eval_dtype.unwrap_or("float32");
+    if dtype_name == "float64" {
+        torch.getattr("float64")
+    } else {
+        torch.getattr("float32")
+    }
+}
+
+fn normalize_torch_output<'py>(
+    py: Python<'py>,
+    value: Py<PyAny>,
+    torch_eval_device: Option<&str>,
+    torch_eval_dtype: Option<&str>,
+) -> PyResult<Bound<'py, PyAny>> {
+    let torch = py.import_bound("torch")?;
+    let as_tensor = torch.getattr("as_tensor")?;
+    let tensor = as_tensor.call1((value.bind(py),))?;
+    let dtype_obj = build_torch_dtype(&torch.into_any(), torch_eval_dtype)?;
+    if let Some(device) = torch_eval_device {
+        tensor.call_method1("to", (device, dtype_obj))
+    } else {
+        tensor.call_method1("to", (dtype_obj,))
+    }
+}
+
+fn eval_kernel_raw_from_inputs<'py>(
+    py: Python<'py>,
+    kernel: &Py<PyAny>,
+    xyz_np: &Bound<'py, PyAny>,
+    xyz_torch: Option<&Bound<'py, PyAny>>,
+) -> PyResult<Py<PyAny>> {
+    let kernel_bound = kernel.bind(py);
+    if let Some(xyz_t) = xyz_torch {
+        if let Ok(eval_batch_torch) = kernel_bound.getattr("evaluate_batch_torch") {
+            if eval_batch_torch.is_callable() {
+                return Ok(eval_batch_torch.call1((xyz_t.clone(),))?.unbind());
+            }
+        }
+    }
+
+    if let Ok(eval_batch) = kernel_bound.getattr("evaluate_batch") {
+        if eval_batch.is_callable() {
+            return Ok(eval_batch.call1((xyz_np.clone(),))?.unbind());
+        }
+    }
+
+    Ok(kernel_bound.call1((xyz_np.clone(),))?.unbind())
+}
+
 fn eval_kernel_from_inputs<'py>(
     py: Python<'py>,
     kernel: &Py<PyAny>,
     xyz_np: &Bound<'py, PyAny>,
     xyz_torch: Option<&Bound<'py, PyAny>>,
 ) -> PyResult<Vec<f32>> {
-    let raw = {
-        let kernel_bound = kernel.bind(py);
-        if let Some(xyz_t) = xyz_torch {
-            if let Ok(eval_batch_torch) = kernel_bound.getattr("evaluate_batch_torch") {
-                if eval_batch_torch.is_callable() {
-                    eval_batch_torch.call1((xyz_t.clone(),))?.unbind()
-                } else if let Ok(eval_batch) = kernel_bound.getattr("evaluate_batch") {
-                    if eval_batch.is_callable() {
-                        eval_batch.call1((xyz_np.clone(),))?.unbind()
-                    } else {
-                        kernel_bound.call1((xyz_np.clone(),))?.unbind()
-                    }
-                } else {
-                    kernel_bound.call1((xyz_np.clone(),))?.unbind()
-                }
-            } else if let Ok(eval_batch) = kernel_bound.getattr("evaluate_batch") {
-                if eval_batch.is_callable() {
-                    eval_batch.call1((xyz_np.clone(),))?.unbind()
-                } else {
-                    kernel_bound.call1((xyz_np.clone(),))?.unbind()
-                }
-            } else {
-                kernel_bound.call1((xyz_np.clone(),))?.unbind()
-            }
-        } else if let Ok(eval_batch) = kernel_bound.getattr("evaluate_batch") {
-            if eval_batch.is_callable() {
-                eval_batch.call1((xyz_np.clone(),))?.unbind()
-            } else {
-                kernel_bound.call1((xyz_np.clone(),))?.unbind()
-            }
-        } else {
-            kernel_bound.call1((xyz_np.clone(),))?.unbind()
-        }
-    };
+    let raw = eval_kernel_raw_from_inputs(py, kernel, xyz_np, xyz_torch)?;
     extract_sdf_output(py, raw)
 }
 
@@ -648,6 +670,66 @@ fn eval_sdf_min(
     enclosed: bool,
 ) -> PyResult<Vec<f32>> {
     let n_kernels = kernels.len();
+    let use_fused_torch = torch_eval_device.is_some() && n_kernels > 1 && all_kernels_support_torch_eval(py, kernels);
+
+    if use_fused_torch {
+        use ndarray::Array2;
+        use numpy::IntoPyArray;
+
+        let torch = py.import_bound("torch")?;
+        let stack = torch.getattr("stack")?;
+        let chunk_size = sdf_batch_size.unwrap_or(n_pts).max(1);
+        let mut min_sdf = vec![f32::INFINITY; n_pts];
+
+        for start in (0..n_pts).step_by(chunk_size) {
+            let end = (start + chunk_size).min(n_pts);
+            let chunk_n = end - start;
+            let chunk_xyz = &xyz[start * 3..end * 3];
+            let xyz_arr = Array2::from_shape_vec((chunk_n, 3), chunk_xyz.to_vec())
+                .map_err(|e| pyo3::exceptions::PyValueError::new_err(e.to_string()))?;
+            let xyz_np = xyz_arr.into_pyarray_bound(py).into_any();
+            let xyz_torch = build_torch_xyz_input(py, &xyz_np, torch_eval_device, torch_eval_dtype)?;
+            let outputs = PyList::empty_bound(py);
+
+            for kernel in kernels {
+                let raw = eval_kernel_raw_from_inputs(py, kernel, &xyz_np, Some(&xyz_torch))?;
+                let value = extract_sdf_value(py, raw)?;
+                let tensor = normalize_torch_output(py, value, torch_eval_device, torch_eval_dtype)?;
+                outputs.append(tensor)?;
+            }
+
+            let stacked = stack.call1((outputs, 1))?;
+            let reduced = stacked.call_method1("amin", (1,))?;
+            let chunk_vals = extract_sdf_output(py, reduced.unbind())?;
+            if chunk_vals.len() != chunk_n {
+                return Err(pyo3::exceptions::PyValueError::new_err(format!(
+                    "fused torch reduction returned {} values for {chunk_n} query points",
+                    chunk_vals.len()
+                )));
+            }
+            min_sdf[start..end].copy_from_slice(&chunk_vals);
+        }
+
+        if enclosed {
+            for i in 0..n_pts {
+                let x = xyz[i * 3];
+                let y = xyz[i * 3 + 1];
+                let z = xyz[i * 3 + 2];
+                if x <= b_min[0]
+                    || x >= b_max[0]
+                    || y <= b_min[1]
+                    || y >= b_max[1]
+                    || z <= b_min[2]
+                    || z >= b_max[2]
+                {
+                    min_sdf[i] = 1.0;
+                }
+            }
+        }
+
+        return Ok(min_sdf);
+    }
+
     let full = eval_sdf_full(
         py,
         kernels,
