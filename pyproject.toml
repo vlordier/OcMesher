@@ -157,7 +157,6 @@ ignore = [
     "S101",     # assert usage expected in tests
     "D",        # no docstring enforcement in tests
     "PLR2004",  # magic values OK in test assertions
-    "T201",     # print statements for debugging
     "PT019",    # @patch-injected args look like unused fixtures
     "SLF001",   # private member access expected in tests
     "RUF059",   # unused unpacked variables OK in tests
