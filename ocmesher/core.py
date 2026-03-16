@@ -686,6 +686,20 @@ class OcMesher:
     def _refine_extra_vertices(self, e, k_e, vertices):
         """Compute edge/face extra vertices and assemble final faces.
 
+        After the main bisection loop in :meth:`_construct_element_mesh`
+        positions the primary vertices, this method refines *extra*
+        vertices that lie on cube edges and faces.  It runs an identical
+        bisection loop for edge/face vertices, then assembles the final
+        vertex and face arrays.
+
+        Args:
+            e: Element index (0-based).
+            k_e: Single-element kernel tuple ``(kernels[e],)``.
+            vertices: ``(num_verts, 3)`` float64 primary vertex positions.
+
+        Returns:
+            ``(final_vertices, faces)`` as numpy arrays.
+
         Optimisations:
         - Fused edge + face SDF evaluation per bisection iteration: a single
           ``kernel_caller`` call replaces two, halving Python→SDF round trips
