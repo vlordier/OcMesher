@@ -6,12 +6,8 @@ import numpy as np
 import pytest
 
 from ocmesher._validation import bounds_min_max, coerce_kernel_sdf, preprocess_cameras, validate_mesher_params
-from ocmesher.core import (
-    _AXIS_NAMES,
-    _validate_bounds,
-    _validate_cameras,
-    _validate_kernels,
-)
+from ocmesher._validation import _AXIS_NAMES
+from ocmesher.core import _validate_bounds, _validate_cameras, _validate_kernels
 
 # ---------------------------------------------------------------------------
 # _validate_cameras
