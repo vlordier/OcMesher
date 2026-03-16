@@ -163,3 +163,18 @@ class TestCreateParser:
         assert set(config_arg.choices) == {"small", "medium", "large", "all"}
 
 
+class TestComparisonHelpers:
+    def test_column_width_has_minimum_padding(self):
+        assert benchmark._comparison_column_width(["A", "BB"]) == 7
+
+    def test_column_width_expands_for_long_labels(self):
+        assert benchmark._comparison_column_width(["very-long-label"]) == len("very-long-label")
+
+    def test_header_contains_tiers_and_speedup_columns(self):
+        header = benchmark._comparison_header(["Baseline", "Opt"], 8)
+        assert "Config" in header
+        assert "Baseline" in header
+        assert "Opt" in header
+        assert "x/base" in header
+
+
