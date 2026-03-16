@@ -373,14 +373,17 @@ int vis_filter( // NOLINT(readability-identifier-naming, modernize-use-trailing-
                 if (x >= -relax_iters && y >= -relax_iters && x < width + relax_iters &&
                     y < height + relax_iters) {
                     if (simplify_occluded) {
-                        for (int dx = -relax_iters; dx <= relax_iters; dx++)
+                        bool is_visible = false;
+                        for (int dx = -relax_iters; dx <= relax_iters && !is_visible; dx++)
                             for (int dy = -relax_iters; dy <= relax_iters; dy++) {
                                 int nx = x + dx, ny = y + dy;
                                 if (nx >= 0 && ny >= 0 && nx < width && ny < height) {
                                     std::size_t cell_idx = static_cast<std::size_t>(nx) * height_sz +
                                                            static_cast<std::size_t>(ny);
                                     if (z <= canvas[cell_idx]) {
+                                        is_visible = true;
                                         visible[i] = true;
+                                        break;
                                     }
                                 }
                             }
@@ -428,7 +431,7 @@ int vis_filter( // NOLINT(readability-identifier-naming, modernize-use-trailing-
             }
         }
         old_visible_set.insert(visible_set.begin(), visible_set.end());
-        visible_set = new_visible_set;
+        visible_set.swap(new_visible_set);
         new_visible_set.clear();
     }
     visible_set.insert(old_visible_set.begin(), old_visible_set.end());
