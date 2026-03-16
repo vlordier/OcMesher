@@ -96,5 +96,5 @@ jobs:
               -std=c++17 \
               -fopenmp \
               -I ocmesher/source \
-              "$f" || true
+              "$f"
           done
