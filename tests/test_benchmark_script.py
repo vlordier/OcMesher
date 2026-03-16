@@ -5,11 +5,15 @@ from __future__ import annotations
 import importlib.util
 import json
 from pathlib import Path
+from typing import TYPE_CHECKING
 
 import pytest
 
+if TYPE_CHECKING:
+    from types import ModuleType
 
-def _load_benchmark_module():
+
+def _load_benchmark_module() -> ModuleType:
     module_path = Path(__file__).resolve().parents[1] / "benchmark.py"
     spec = importlib.util.spec_from_file_location("benchmark_script", module_path)
     if spec is None or spec.loader is None:
