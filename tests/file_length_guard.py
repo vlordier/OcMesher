@@ -44,9 +44,14 @@ def main() -> int:
     if not violations:
         return 0
 
+    _write_violations(violations)
+    return 1
+
+
+def _write_violations(violations: list[str]) -> None:
+    """Emit one violation per line to stderr."""
     for violation in violations:
         sys.stderr.write(f"{violation}\n")
-    return 1
 
 
 if __name__ == "__main__":
