@@ -262,7 +262,7 @@ def print_comparison(tiers: list[tuple[str, list[TierConfigResult]]]) -> None:
     tables = [t[1] for t in tiers]
     n_cols = len(tiers)
     short = [_short_tier_label(n) for n in names]
-    cw = max(7, max(len(s) for s in short))
+    cw = max([7, *[len(s) for s in short]])
 
     line_w = 20 + (cw + 3) * n_cols + 7 * max(0, n_cols - 1)
     print(f"\n{'=' * line_w}")
