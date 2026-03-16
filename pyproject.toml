@@ -146,9 +146,6 @@ ignore = [
     "PLR0912",  # too-many-branches in regression_check
     "PLR0915",  # too-many-statements in main
 ]
-# benchmark __init__
-"benchmarks/__init__.py" = [
-]
 # tests - allow assertions, magic values, no docstrings, etc.
 "tests/**/*.py" = [
     "S101",     # assert usage expected in tests
