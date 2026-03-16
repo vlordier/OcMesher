@@ -91,3 +91,17 @@ class TestTierSpec:
         assert scripts == {benchmark.BASELINE_BUILD, benchmark.OPTIMISED_BUILD}
 
 
+class TestBenchmarkExceptions:
+    def test_output_parse_error_str_contains_stdout(self):
+        err = benchmark.BenchmarkOutputParseError("line1\nline2")
+        text = str(err)
+        assert "No JSON output" in text
+        assert "line1" in text
+
+    def test_mesher_subprocess_error_str_contains_stderr(self):
+        err = benchmark.MesherSubprocessError("traceback")
+        text = str(err)
+        assert "Mesher subprocess failed" in text
+        assert "traceback" in text
+
+
