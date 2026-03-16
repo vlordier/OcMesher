@@ -435,10 +435,7 @@ def main() -> None:
     configs = _select_configs(args.configs, DEMO_CONFIGS)
     _validate_selected_configs(args.configs, configs)
 
-    all_results = []
-    for label, build_script, sdf_type in TIERS_SPEC:
-        results = run_tier(label, build_script, sdf_type, configs, args.runs)
-        all_results.append((label, results))
+    all_results = _collect_tier_results(configs, args.runs)
 
     print_comparison(all_results)
 
@@ -454,6 +451,15 @@ def _create_parser() -> argparse.ArgumentParser:
     parser.add_argument("--configs", default="all", choices=CONFIG_CHOICES)
     parser.add_argument("--json", help="Write results to JSON file")
     return parser
+
+
+def _collect_tier_results(configs: list[DemoConfig], runs: int) -> list[tuple[str, list[TierConfigResult]]]:
+    """Run all configured tiers and return their aggregated results."""
+    all_results: list[tuple[str, list[TierConfigResult]]] = []
+    for label, build_script, sdf_type in TIERS_SPEC:
+        results = run_tier(label, build_script, sdf_type, configs, runs)
+        all_results.append((label, results))
+    return all_results
 
 
 if __name__ == "__main__":
