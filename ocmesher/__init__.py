@@ -12,7 +12,7 @@ from .core import OcMesher
 # "No handlers could be found for logger 'ocmesher'" warnings.
 logging.getLogger(__name__).addHandler(logging.NullHandler())
 
-__all__ = ["OcMesher", "TorchOcMesher"]
+__all__ = ["OcMesher", "TorchOcMesher", "RustOcMesher"]
 __version__ = "1.0.0"
 
 
@@ -22,5 +22,9 @@ def __getattr__(name: str):
         from .torch_core import TorchOcMesher
 
         return TorchOcMesher
+    if name == "RustOcMesher":
+        from .rust_backend import RustOcMesher
+
+        return RustOcMesher
     msg = f"module {__name__!r} has no attribute {name!r}"
     raise AttributeError(msg)
