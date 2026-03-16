@@ -575,7 +575,7 @@ fn normalize_torch_output<'py>(
 fn eval_kernel_raw_from_inputs<'py>(
     py: Python<'py>,
     kernel: &Py<PyAny>,
-    xyz_np: &Bound<'py, PyAny>,
+    xyz_np: Option<&Bound<'py, PyAny>>,
     xyz_torch: Option<&Bound<'py, PyAny>>,
 ) -> PyResult<Py<PyAny>> {
     let kernel_bound = kernel.bind(py);
@@ -589,17 +589,25 @@ fn eval_kernel_raw_from_inputs<'py>(
 
     if let Ok(eval_batch) = kernel_bound.getattr("evaluate_batch") {
         if eval_batch.is_callable() {
-            return Ok(eval_batch.call1((xyz_np.clone(),))?.unbind());
+            if let Some(xyz_np) = xyz_np {
+                return Ok(eval_batch.call1((xyz_np.clone(),))?.unbind());
+            }
         }
     }
 
-    Ok(kernel_bound.call1((xyz_np.clone(),))?.unbind())
+    if let Some(xyz_np) = xyz_np {
+        return Ok(kernel_bound.call1((xyz_np.clone(),))?.unbind());
+    }
+
+    Err(pyo3::exceptions::PyTypeError::new_err(
+        "kernel requires numpy input but no numpy query matrix was provided",
+    ))
 }
 
 fn eval_kernel_from_inputs<'py>(
     py: Python<'py>,
     kernel: &Py<PyAny>,
-    xyz_np: &Bound<'py, PyAny>,
+    xyz_np: Option<&Bound<'py, PyAny>>,
     xyz_torch: Option<&Bound<'py, PyAny>>,
 ) -> PyResult<Vec<f32>> {
     let raw = eval_kernel_raw_from_inputs(py, kernel, xyz_np, xyz_torch)?;
@@ -640,7 +648,7 @@ fn shared_torch_bundle<'py>(py: Python<'py>, kernels: &[Py<PyAny>]) -> Option<Bo
 fn eval_bundle_raw_from_inputs<'py>(
     _py: Python<'py>,
     bundle: &Bound<'py, PyAny>,
-    xyz_np: &Bound<'py, PyAny>,
+    xyz_np: Option<&Bound<'py, PyAny>>,
     xyz_torch: Option<&Bound<'py, PyAny>>,
 ) -> PyResult<Py<PyAny>> {
     if let Some(xyz_t) = xyz_torch {
@@ -652,11 +660,13 @@ fn eval_bundle_raw_from_inputs<'py>(
     }
     if let Ok(eval_many) = bundle.getattr("evaluate_many") {
         if eval_many.is_callable() {
-            return Ok(eval_many.call1((xyz_np.clone(),))?.unbind());
+            if let Some(xyz_np) = xyz_np {
+                return Ok(eval_many.call1((xyz_np.clone(),))?.unbind());
+            }
         }
     }
     Err(pyo3::exceptions::PyTypeError::new_err(
-        "shared torch bundle must provide evaluate_many_torch or evaluate_many",
+        "shared torch bundle must provide evaluate_many_torch or provide evaluate_many with numpy input",
     ))
 }
 
@@ -689,7 +699,7 @@ fn eval_kernel_py_once(
     } else {
         None
     };
-    eval_kernel_from_inputs(py, kernel, &xyz_np, xyz_torch.as_ref())
+    eval_kernel_from_inputs(py, kernel, Some(&xyz_np), xyz_torch.as_ref())
 }
 
 fn eval_kernel_py(
@@ -750,17 +760,11 @@ fn eval_sdf_full(
     let torch_bundle = if use_fused_torch { shared_torch_bundle(py, kernels) } else { None };
 
     if use_fused_torch {
-        use ndarray::Array2;
-        use numpy::IntoPyArray;
-
         let chunk_size = sdf_batch_size.unwrap_or(n_pts).max(1);
         for start in (0..n_pts).step_by(chunk_size) {
             let end = (start + chunk_size).min(n_pts);
             let chunk_n = end - start;
             let chunk_xyz = &xyz[start * 3..end * 3];
-            let xyz_arr = Array2::from_shape_vec((chunk_n, 3), chunk_xyz.to_vec())
-                .map_err(|e| pyo3::exceptions::PyValueError::new_err(e.to_string()))?;
-            let xyz_np = xyz_arr.into_pyarray_bound(py).into_any();
             let xyz_torch = build_torch_xyz_input_dlpack(
                 py,
                 chunk_xyz,
@@ -770,7 +774,7 @@ fn eval_sdf_full(
             )?;
 
             if let Some(bundle) = &torch_bundle {
-                let raw = eval_bundle_raw_from_inputs(py, bundle, &xyz_np, Some(&xyz_torch))?;
+                let raw = eval_bundle_raw_from_inputs(py, bundle, None, Some(&xyz_torch))?;
                 let value = extract_sdf_value(py, raw)?;
                 let tensor = normalize_torch_output(py, value, torch_eval_device, torch_eval_dtype)?;
                 let chunk_vals = extract_sdf_output(py, tensor.unbind())?;
@@ -792,7 +796,7 @@ fn eval_sdf_full(
             }
 
             for (k_idx, kernel) in kernels.iter().enumerate() {
-                let sdf = eval_kernel_from_inputs(py, kernel, &xyz_np, Some(&xyz_torch))?;
+                let sdf = eval_kernel_from_inputs(py, kernel, None, Some(&xyz_torch))?;
                 if sdf.len() != chunk_n {
                     return Err(pyo3::exceptions::PyValueError::new_err(format!(
                         "kernels[{k_idx}] returned {} values for {chunk_n} query points",
@@ -871,9 +875,6 @@ fn eval_sdf_min(
     let torch_bundle = if use_fused_torch { shared_torch_bundle(py, kernels) } else { None };
 
     if use_fused_torch {
-        use ndarray::Array2;
-        use numpy::IntoPyArray;
-
         let torch = py.import_bound("torch")?;
         let stack = torch.getattr("stack")?;
         let chunk_size = sdf_batch_size.unwrap_or(n_pts).max(1);
@@ -883,9 +884,6 @@ fn eval_sdf_min(
             let end = (start + chunk_size).min(n_pts);
             let chunk_n = end - start;
             let chunk_xyz = &xyz[start * 3..end * 3];
-            let xyz_arr = Array2::from_shape_vec((chunk_n, 3), chunk_xyz.to_vec())
-                .map_err(|e| pyo3::exceptions::PyValueError::new_err(e.to_string()))?;
-            let xyz_np = xyz_arr.into_pyarray_bound(py).into_any();
             let xyz_torch = build_torch_xyz_input_dlpack(
                 py,
                 chunk_xyz,
@@ -895,7 +893,7 @@ fn eval_sdf_min(
             )?;
 
             if let Some(bundle) = &torch_bundle {
-                let raw = eval_bundle_raw_from_inputs(py, bundle, &xyz_np, Some(&xyz_torch))?;
+                let raw = eval_bundle_raw_from_inputs(py, bundle, None, Some(&xyz_torch))?;
                 let value = extract_sdf_value(py, raw)?;
                 let tensor = normalize_torch_output(py, value, torch_eval_device, torch_eval_dtype)?;
                 let reduced = tensor.call_method1("amin", (1,))?;
@@ -912,7 +910,7 @@ fn eval_sdf_min(
             let outputs = PyList::empty_bound(py);
 
             for kernel in kernels {
-                let raw = eval_kernel_raw_from_inputs(py, kernel, &xyz_np, Some(&xyz_torch))?;
+                let raw = eval_kernel_raw_from_inputs(py, kernel, None, Some(&xyz_torch))?;
                 let value = extract_sdf_value(py, raw)?;
                 let tensor = normalize_torch_output(py, value, torch_eval_device, torch_eval_dtype)?;
                 outputs.append(tensor)?;
