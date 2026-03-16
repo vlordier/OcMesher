@@ -725,59 +725,62 @@ class OcMesher:
         _sdf_dtype = self.sdf_np_float_type
         _empty = _np_empty  # module-level cache avoids LOAD_ATTR on np
 
-        # np.empty avoids zero-init since the C function fills these immediately.
-        centers = _empty((num_verts, 3), dtype=_np_float)
-        self.get_verts_center(e, _af(centers))
-        center_sdf = _kernel_caller(k_e[0], centers)
-        cubes = _empty((num_verts * 8, 3), dtype=_np_float)
-        self.update_verts(e, _sdf_null, _sdf_null, _af(cubes))
-        center_sdf_ptr = _sdf_af(center_sdf)
-        tol = self.bisection_tol
-        check_tol = tol > 0
-        _update_verts = self.update_verts
-        _bisection_iters = self.bisection_iters
-        # Cache ctypes pointer for cubes — the buffer is modified in-place
-        # by C but never re-allocated, so the pointer remains valid.
-        cubes_ptr = _af(cubes)
-        # Pre-allocate SDF result buffer for the bisection loop to avoid
-        # creating a fresh (N, 1) array on every iteration.
-        _n_cubes = num_verts * 8  # 8 cube corners per vertex; avoids len(cubes)
-        _n_ke = len(k_e)
-        _sdf_buf = _empty((_n_cubes, _n_ke), dtype=_sdf_dtype)
-        # Cache ctypes pointer for _sdf_buf — kernel_caller returns _sdf_buf
-        # (via out=), so the pointer is stable across all iterations.
-        _sdf_buf_ptr = _sdf_af(_sdf_buf)
-        # Pre-allocate fabs buffer reused by tolerance check to avoid
-        # allocating a temporary array on each of the ~15 iterations.
-        _fabs_buf = _empty((_n_cubes, _n_ke), dtype=_sdf_dtype) if check_tol else None
-        _fabs = _np_fabs  # module-level cache
-        for _ in range(_bisection_iters):
-            _kernel_caller(k_e[0], cubes, out=_sdf_buf)
-            _update_verts(e, _sdf_buf_ptr, center_sdf_ptr, cubes_ptr)
-            # Early-exit: if all SDF residuals are below tolerance the
-            # surface has been located to sufficient accuracy.
-            if check_tol and _fabs(_sdf_buf, out=_fabs_buf).max() < tol:
-                break
-        cubes_r = _empty((num_verts * 8, 3), dtype=_np_float)
-        self.get_lr_verts(e, cubes_ptr, _af(cubes_r))
-        # Fused left/right SDF evaluation: single kernel_caller call instead
-        # of two, halving the Python→SDF round-trip overhead.
-        # Pre-allocated buffer avoids np.concatenate allocation overhead.
-        lr_combined = _empty((_n_cubes * 2, 3), dtype=_np_float)
-        lr_combined[:_n_cubes] = cubes
-        lr_combined[_n_cubes:] = cubes_r
-        lr_sdf = _kernel_caller(k_e[0], lr_combined)
-        sdf_l = lr_sdf[:_n_cubes]
-        sdf_r = lr_sdf[_n_cubes:]
-        # np.empty is safe: finalize_verts writes every element before use.
-        vertices = _empty((num_verts, 3), dtype=_np_float)
-        self.finalize_verts(e, _sdf_af(sdf_l), _sdf_af(sdf_r), _af(vertices))
+        with self._track_phase("mesh_primary_vertices"):
+            # np.empty avoids zero-init since the C function fills these immediately.
+            centers = _empty((num_verts, 3), dtype=_np_float)
+            self.get_verts_center(e, _af(centers))
+            center_sdf = _kernel_caller(k_e[0], centers)
+            cubes = _empty((num_verts * 8, 3), dtype=_np_float)
+            self.update_verts(e, _sdf_null, _sdf_null, _af(cubes))
+            center_sdf_ptr = _sdf_af(center_sdf)
+            tol = self.bisection_tol
+            check_tol = tol > 0
+            _update_verts = self.update_verts
+            _bisection_iters = self.bisection_iters
+            # Cache ctypes pointer for cubes — the buffer is modified in-place
+            # by C but never re-allocated, so the pointer remains valid.
+            cubes_ptr = _af(cubes)
+            # Pre-allocate SDF result buffer for the bisection loop to avoid
+            # creating a fresh (N, 1) array on every iteration.
+            _n_cubes = num_verts * 8  # 8 cube corners per vertex; avoids len(cubes)
+            _n_ke = len(k_e)
+            _sdf_buf = _empty((_n_cubes, _n_ke), dtype=_sdf_dtype)
+            # Cache ctypes pointer for _sdf_buf — kernel_caller returns _sdf_buf
+            # (via out=), so the pointer is stable across all iterations.
+            _sdf_buf_ptr = _sdf_af(_sdf_buf)
+            # Pre-allocate fabs buffer reused by tolerance check to avoid
+            # allocating a temporary array on each of the ~15 iterations.
+            _fabs_buf = _empty((_n_cubes, _n_ke), dtype=_sdf_dtype) if check_tol else None
+            _fabs = _np_fabs  # module-level cache
+            for _ in range(_bisection_iters):
+                _kernel_caller(k_e[0], cubes, out=_sdf_buf)
+                _update_verts(e, _sdf_buf_ptr, center_sdf_ptr, cubes_ptr)
+                # Early-exit: if all SDF residuals are below tolerance the
+                # surface has been located to sufficient accuracy.
+                if check_tol and _fabs(_sdf_buf, out=_fabs_buf).max() < tol:
+                    break
+            cubes_r = _empty((num_verts * 8, 3), dtype=_np_float)
+            self.get_lr_verts(e, cubes_ptr, _af(cubes_r))
+            # Fused left/right SDF evaluation: single kernel_caller call instead
+            # of two, halving the Python→SDF round-trip overhead.
+            # Pre-allocated buffer avoids np.concatenate allocation overhead.
+            lr_combined = _empty((_n_cubes * 2, 3), dtype=_np_float)
+            lr_combined[:_n_cubes] = cubes
+            lr_combined[_n_cubes:] = cubes_r
+            lr_sdf = _kernel_caller(k_e[0], lr_combined)
+            sdf_l = lr_sdf[:_n_cubes]
+            sdf_r = lr_sdf[_n_cubes:]
+            # np.empty is safe: finalize_verts writes every element before use.
+            vertices = _empty((num_verts, 3), dtype=_np_float)
+            self.finalize_verts(e, _sdf_af(sdf_l), _sdf_af(sdf_r), _af(vertices))
 
-        vertices, faces = self._refine_extra_vertices(e, k_e, vertices)
+        with self._track_phase("mesh_extra_vertices"):
+            vertices, faces = self._refine_extra_vertices(e, k_e, vertices)
 
-        # np.empty: get_in_view_tag fills every element before Python reads.
-        in_view_tag = _empty(vertices.shape[0], dtype=bool)
-        self.get_in_view_tag(e, AsBool(in_view_tag))
+        with self._track_phase("mesh_visibility_tags"):
+            # np.empty: get_in_view_tag fills every element before Python reads.
+            in_view_tag = _empty(vertices.shape[0], dtype=bool)
+            self.get_in_view_tag(e, AsBool(in_view_tag))
         return trimesh.Trimesh(vertices=vertices, faces=faces, process=False), in_view_tag
 
     def _refine_extra_vertices(self, e, k_e, vertices):
@@ -832,13 +835,15 @@ class OcMesher:
 
         # np.empty: construct_faces fills all 3 counts before Python reads.
         cnts = _empty(3, dtype=np.int32)
-        self.construct_faces(e, _af(vertices), AsInt(cnts))
+        with self._track_phase("mesh_face_topology"):
+            self.construct_faces(e, _af(vertices), AsInt(cnts))
         nve, nvf, nf = cnts
         # Early-exit: when there are no extra vertices, skip all SDF
         # evaluation and bisection — just return the faces.
         if not (nve | nvf):
             faces = _empty((nf, 3), dtype=np.int32)
-            self.get_faces(AsInt(faces))
+            with self._track_phase("mesh_face_topology"):
+                self.get_faces(AsInt(faces))
             return vertices, faces
         # np.empty avoids zero-init: C functions fill all elements immediately.
         edge_vertices_c = _empty((nve, 3), dtype=_np_float)
@@ -947,14 +952,15 @@ class OcMesher:
             _sdf_af(fsdf_r),
             _af(face_vertices),
         )
-        faces = _empty((nf, 3), dtype=np.int32)
-        self.get_faces(AsInt(faces))
-        # Pre-allocated final vertex array avoids np.concatenate overhead.
-        # Reuse nve/nvf (from construct_faces) instead of .shape[0] lookups.
-        n_base = vertices.shape[0]
-        off_edge = n_base + nve
-        final_vertices = _empty((off_edge + nvf, 3), dtype=_np_float)
-        final_vertices[:n_base] = vertices
-        final_vertices[n_base:off_edge] = edge_vertices
-        final_vertices[off_edge:] = face_vertices
+        with self._track_phase("mesh_face_output"):
+            faces = _empty((nf, 3), dtype=np.int32)
+            self.get_faces(AsInt(faces))
+            # Pre-allocated final vertex array avoids np.concatenate overhead.
+            # Reuse nve/nvf (from construct_faces) instead of .shape[0] lookups.
+            n_base = vertices.shape[0]
+            off_edge = n_base + nve
+            final_vertices = _empty((off_edge + nvf, 3), dtype=_np_float)
+            final_vertices[:n_base] = vertices
+            final_vertices[n_base:off_edge] = edge_vertices
+            final_vertices[off_edge:] = face_vertices
         return final_vertices, faces

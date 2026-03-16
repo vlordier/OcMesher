@@ -864,3 +864,81 @@ class TestSpecializedKernelCallerHelpers:
         direct = obj._kernel_caller_multi(kernels, pts)
 
         np.testing.assert_array_equal(direct, public)
+
+
+class TestMeshPhaseAttribution:
+    def test_refine_extra_vertices_records_face_topology_phase(self):
+        obj = object.__new__(OcMesher)
+        obj.AF = lambda x: x
+        obj.sdf_AF = lambda x: x
+        obj.np_float_type = np.float64
+        obj.sdf_np_float_type = np.float32
+        obj._sdf_null = object()
+        obj.bisection_tol = 0.0
+        obj.bisection_iters = 1
+        obj._phase_tracker = PhaseTracker("mesh phases")
+
+        def _construct_faces(_e, _vertices_ptr, cnts_ptr):
+            cnts_ptr[0] = 0
+            cnts_ptr[1] = 0
+            cnts_ptr[2] = 1
+
+        def _get_faces(faces_ptr):
+            faces_ptr[0] = 0
+            faces_ptr[1] = 0
+            faces_ptr[2] = 0
+
+        obj.construct_faces = _construct_faces
+        obj.get_faces = _get_faces
+
+        vertices = np.zeros((1, 3), dtype=np.float64)
+        final_vertices, faces = obj._refine_extra_vertices(0, (_constant_kernel(0.0),), vertices)
+
+        snapshot = obj._phase_tracker.snapshot_millis()
+        assert snapshot["mesh_face_topology"] > 0.0
+        np.testing.assert_array_equal(final_vertices, vertices)
+        np.testing.assert_array_equal(faces, np.array([[0, 0, 0]], dtype=np.int32))
+
+    def test_construct_element_mesh_records_primary_and_visibility_phases(self):
+        obj = object.__new__(OcMesher)
+        obj.AF = lambda x: x
+        obj.sdf_AF = lambda x: x
+        obj.np_float_type = np.float64
+        obj.sdf_np_float_type = np.float32
+        obj._sdf_null = object()
+        obj.bisection_tol = 0.0
+        obj.bisection_iters = 1
+        obj._phase_tracker = PhaseTracker("mesh phases")
+
+        def _kernel(self, _kernel_fn, xyz, out=None):
+            result = out if out is not None else np.zeros((len(xyz), 1), dtype=np.float32)
+            result[:] = 0.0
+            return result
+
+        obj.get_verts_center = lambda e, centers_ptr: centers_ptr.fill(0.0)
+        obj.update_verts = lambda e, sdf_l, sdf_r, cubes_ptr: cubes_ptr.fill(0.0)
+        obj.get_lr_verts = lambda e, cubes_ptr, cubes_r_ptr: cubes_r_ptr.fill(0.0)
+        obj.finalize_verts = lambda e, sdf_l, sdf_r, vertices_ptr: vertices_ptr.fill(0.0)
+
+        def _get_in_view_tag(_e, out_ptr):
+            out_ptr[0] = True
+
+        obj.get_in_view_tag = _get_in_view_tag
+
+        with (
+            patch.object(OcMesher, "_kernel_caller_single", new=_kernel),
+            patch.object(
+                OcMesher,
+                "_refine_extra_vertices",
+                new=lambda self, e, k_e, vertices: (vertices, np.array([[0, 0, 0]], dtype=np.int32)),
+            ),
+        ):
+            mesh, in_view = obj._construct_element_mesh(0, (_constant_kernel(0.0),), 1)
+
+        snapshot = obj._phase_tracker.snapshot_millis()
+        assert snapshot["mesh_primary_vertices"] > 0.0
+        assert snapshot["mesh_extra_vertices"] > 0.0
+        assert snapshot["mesh_visibility_tags"] > 0.0
+        assert mesh.vertices.shape == (1, 3)
+        assert mesh.faces.shape == (1, 3)
+        np.testing.assert_array_equal(in_view, np.array([True]))
