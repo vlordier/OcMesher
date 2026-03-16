@@ -39,6 +39,7 @@ import trimesh
 
 from ._constants import CORNER_QUANT_SCALE, DENOM_EPS, MAX_SDF_WORKERS
 from ._mc_tables import CORNER_OFFSETS, EDGE_TABLE, EDGE_VERTICES, TRI_TABLE
+from ._validation import bounds_min_max as _bounds_min_max
 from ._validation import out_of_bounds_mask as _out_of_bounds_mask
 from ._validation import preprocess_cameras as _preprocess_cameras
 from ._validation import validate_bounds as _validate_bounds
@@ -229,8 +230,7 @@ class TorchOcMesher:
         # Pre-compute bounds as numpy for fast out-of-bounds masking --------
         self._bounds_np = np.array(bounds, dtype=np.float64)
         # Pre-compute min/max vectors for vectorised bounds check
-        self._bounds_min_np = np.array([bounds[0], bounds[2], bounds[4]], dtype=np.float64)
-        self._bounds_max_np = np.array([bounds[1], bounds[3], bounds[5]], dtype=np.float64)
+        self._bounds_min_np, self._bounds_max_np = _bounds_min_max(bounds)
 
         # Pre-allocate reusable octree child offsets -------------------------
         self._child_offsets = torch.tensor(

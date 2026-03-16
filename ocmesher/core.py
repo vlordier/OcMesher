@@ -55,6 +55,7 @@ _np_asarray = np.asarray
 
 # Re-export validation under private names for backwards compatibility.
 from ._validation import _AXIS_NAMES  # noqa: E402, F401
+from ._validation import bounds_min_max as _bounds_min_max  # noqa: E402
 from ._validation import out_of_bounds_mask as _out_of_bounds_mask_shared  # noqa: E402
 from ._validation import preprocess_cameras as _preprocess_cameras  # noqa: E402
 from ._validation import validate_bounds as _validate_bounds  # noqa: E402
@@ -190,8 +191,7 @@ class OcMesher:
 
         # Pre-compute bound vectors for vectorised out-of-bounds masking.
         # Avoids per-axis Python loop in kernel_caller (6 temps → 2 broadcasts).
-        self._bounds_min_np = np.array([bounds[0], bounds[2], bounds[4]], dtype=np.float64)
-        self._bounds_max_np = np.array([bounds[1], bounds[3], bounds[5]], dtype=np.float64)
+        self._bounds_min_np, self._bounds_max_np = _bounds_min_max(bounds)
 
         # Persistent thread pool for multi-kernel SDF evaluation.
         # Avoids the overhead of constructing + tearing down a ThreadPool per

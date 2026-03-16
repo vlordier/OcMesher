@@ -11,6 +11,7 @@ from ocmesher.core import (
     _validate_cameras,
     _validate_kernels,
 )
+from ocmesher._validation import bounds_min_max
 
 # ---------------------------------------------------------------------------
 # _validate_cameras
@@ -116,6 +117,18 @@ class TestValidateBounds:
     def test_rejects_inf_values(self):
         with pytest.raises(ValueError, match="finite"):
             _validate_bounds([-np.inf, np.inf, -1.0, 1.0, -1.0, 1.0])
+
+
+class TestBoundsMinMax:
+    def test_splits_bounds_into_min_and_max_vectors(self):
+        b_min, b_max = bounds_min_max(_validate_bounds([-1, 1, -2, 2, -3, 3]))
+        np.testing.assert_array_equal(b_min, np.array([-1.0, -2.0, -3.0]))
+        np.testing.assert_array_equal(b_max, np.array([1.0, 2.0, 3.0]))
+
+    def test_returns_float64_arrays(self):
+        b_min, b_max = bounds_min_max(_validate_bounds([-1, 1, -2, 2, -3, 3]))
+        assert b_min.dtype == np.float64
+        assert b_max.dtype == np.float64
 
 
 # ---------------------------------------------------------------------------

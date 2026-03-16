@@ -11,6 +11,7 @@ from __future__ import annotations
 import numpy as np
 
 __all__ = [
+    "bounds_min_max",
     "out_of_bounds_mask",
     "preprocess_cameras",
     "validate_bounds",
@@ -81,6 +82,20 @@ def validate_bounds(bounds):
             msg = f"bounds {name}_min ({bounds[axis * 2]}) must be less than {name}_max ({bounds[axis * 2 + 1]})"
             raise ValueError(msg)
     return bounds
+
+
+def bounds_min_max(bounds):
+    """Split validated flat bounds into ``(3,)`` min/max vectors.
+
+    Args:
+        bounds: Validated bounds array of shape ``(6,)``.
+
+    Returns:
+        Tuple ``(b_min, b_max)`` of float64 numpy arrays.
+    """
+    b_min = np.array([bounds[0], bounds[2], bounds[4]], dtype=np.float64)
+    b_max = np.array([bounds[1], bounds[3], bounds[5]], dtype=np.float64)
+    return b_min, b_max
 
 
 def validate_kernels(kernels):
