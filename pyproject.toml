@@ -18,6 +18,14 @@ dependencies = [
 torch = [
     "torch>=2.0.0",
 ]
+rust = [
+    # The ocmesher_rust extension is built with maturin, not pip.
+    # Install it with:
+    #   cd ocmesher-rust && maturin develop --release
+    # or via the project wheel once published.
+    # trimesh is a runtime dependency of the Rust backend's extract_meshes().
+    "trimesh>=4.0.0",
+]
 dev = [
     "pytest>=7.0",
     "pytest-cov>=4.0",
@@ -94,6 +102,13 @@ ignore = [
     "PLR0915",  # too-many-statements (__call__ orchestrates meshing)
     "C901",     # complex methods (meshing is inherently complex)
     "FBT002",   # boolean default positional args (API backwards-compat)
+]
+# rust_backend.py – protocol scaffold + factory helper
+"ocmesher/rust_backend.py" = [
+    "FBT001",   # boolean-typed positional args (API mirrors OcMesher)
+    "FBT002",   # boolean default positional args (API backwards-compat)
+    "PLR0913",  # too-many-arguments (constructor mirrors original API)
+    "PLC0415",  # conditional imports in make_rust_ocmesher
 ]
 # benchmark script – standalone runner
 "benchmarks/run_benchmark.py" = [

@@ -61,3 +61,19 @@ uv run python demo.py
 ```
 
 This example uses one camera and the Perlin Noise from the Python library `vnoise` and outputs the resulting mesh in `results/demo.obj`.
+
+## Rust Backend Performance Checks
+
+To run Rust micro-benchmarks for the data-prep hot paths (`pack_cameras`, bounds validation):
+
+```bash
+cd ocmesher-rust
+PYO3_PYTHON=../.venv/bin/python cargo bench -p ocmesher-core --bench core_benches -- --sample-size 20
+```
+
+To run the same benchmark binary with debug symbols for profiler tooling:
+
+```bash
+cd ocmesher-rust
+PYO3_PYTHON=../.venv/bin/python cargo bench --profile profiling -p ocmesher-core --bench core_benches -- --sample-size 10
+```
