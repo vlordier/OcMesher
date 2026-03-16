@@ -119,6 +119,7 @@ uv run python benchmark.py --configs small --runs 1 --snapshot-json benchmark_ar
 uv run python benchmarks/bench_python_overhead.py --sizes 100 1000 --snapshot-json benchmark_artifacts/bench_python_overhead_snapshot.json
 uv run python benchmarks/bench_e2e.py --sizes 1000 10000 --snapshot-json benchmark_artifacts/bench_e2e_snapshot.json
 uv run python benchmarks/bench_mlx_sdf.py --sizes 1000 10000 --snapshot-json benchmark_artifacts/bench_mlx_sdf_snapshot.json
+uv run python benchmarks/bench_rust_scene.py --runs 3 --snapshot-json benchmark_artifacts/bench_rust_scene_snapshot.json
 ```
 
 The benchmark helpers also support comparing snapshot files from two runs or
@@ -133,6 +134,7 @@ Notes:
 - Snapshot files include execution metadata such as branch, commit, Python version, platform, and command line.
 - Optional runtime tiers such as `numba` and `mlx` are skipped automatically when their dependencies are not installed.
 - The MLX benchmark is a narrow SDF-only pilot on macOS, not a full mesher backend.
+- The Rust scene benchmark compares the compiled `extract_native_scene(...)` and `extract_tch_scene(...)` pilot paths on the same primitive list.
 
 To perform deterministic numerical parity checks against `main`, ensure both branches are built with the default build script (`bash install.sh`) and compare mesh counts/sums for the same fixed camera/SDF case.
 

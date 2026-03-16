@@ -1,0 +1,51 @@
+{
+  "metadata": {
+    "command": "/Users/vincent/Work/OcMesher/benchmarks/bench_rust_scene.py --runs 1 --warmup 0 --device cpu --snapshot-json benchmark_artifacts/bench_rust_scene_snapshot.json",
+    "git_branch": "develop",
+    "git_commit": "dfdb8edc5ad9344751c4bd1cc97b9f0f0fa564cd",
+    "label": "rust-scene",
+    "platform": "macOS-26.3.1-arm64-arm-64bit",
+    "python": "3.11.13",
+    "timestamp_utc": "2026-03-16T22:07:55.680550+00:00"
+  },
+  "results": {
+    "native_scene": {
+      "max_ms": 126.18212499364745,
+      "mean_ms": 126.18212499364745,
+      "median_ms": 126.18212499364745,
+      "min_ms": 126.18212499364745,
+      "runs": 1,
+      "stdev_ms": 0.0
+    },
+    "scene": [
+      {
+        "center": [
+          0.0,
+          0.0,
+          0.0
+        ],
+        "radius": 1.0,
+        "type": "sphere"
+      },
+      {
+        "normal": [
+          0.0,
+          0.0,
+          1.0
+        ],
+        "offset": 0.0,
+        "type": "plane"
+      }
+    ],
+    "speedup_native_over_tch": 5.5639640485582,
+    "tch_scene": {
+      "device": "cpu",
+      "max_ms": 22.67845800088253,
+      "mean_ms": 22.67845800088253,
+      "median_ms": 22.67845800088253,
+      "min_ms": 22.67845800088253,
+      "runs": 1,
+      "stdev_ms": 0.0
+    }
+  }
+}
