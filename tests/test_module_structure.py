@@ -50,17 +50,36 @@ class TestMcTablesIntegrity:
         for entry in TRI_TABLE:
             assert isinstance(entry, list)
 
+    def test_tri_table_known_values(self):
+        from ocmesher._mc_tables import TRI_TABLE
+
+        assert TRI_TABLE[0] == [-1]
+        assert TRI_TABLE[1] == [0, 8, 3, -1]
+        assert TRI_TABLE[255] == [-1]
+
     def test_edge_vertices_tuples_of_two(self):
         from ocmesher._mc_tables import EDGE_VERTICES
 
         for ev in EDGE_VERTICES:
             assert len(ev) == 2
 
+    def test_edge_vertices_known_values(self):
+        from ocmesher._mc_tables import EDGE_VERTICES
+
+        assert EDGE_VERTICES[:3] == [(0, 1), (1, 2), (2, 3)]
+        assert EDGE_VERTICES[-1] == (3, 7)
+
     def test_corner_offsets_tuples_of_three(self):
         from ocmesher._mc_tables import CORNER_OFFSETS
 
         for co in CORNER_OFFSETS:
             assert len(co) == 3
+
+    def test_corner_offsets_known_values(self):
+        from ocmesher._mc_tables import CORNER_OFFSETS
+
+        assert CORNER_OFFSETS[:4] == [(0, 0, 0), (1, 0, 0), (1, 1, 0), (0, 1, 0)]
+        assert CORNER_OFFSETS[-1] == (0, 1, 1)
 
 
 # ---------------------------------------------------------------------------
