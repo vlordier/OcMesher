@@ -600,7 +600,24 @@ class OcMesher:
         return meshes, in_view_tags
 
     def _construct_element_mesh(self, e, k_e, num_verts):
-        """Construct mesh for a single SDF element via bisection refinement."""
+        """Construct mesh for a single SDF element via bisection refinement.
+
+        Performs iterative bisection to refine vertex positions along cube
+        edges until the SDF zero-crossing is located to within
+        ``bisection_tol`` or ``bisection_iters`` iterations are exhausted.
+        After refinement, fused left/right SDF evaluation finalises vertex
+        positions and extra (edge/face) vertices are added by
+        :meth:`_refine_extra_vertices`.
+
+        Args:
+            e: Element index (0-based) into the multi-kernel list.
+            k_e: Single-element kernel tuple ``(kernels[e],)``.
+            num_verts: Number of coarse vertices for this element (from C++).
+
+        Returns:
+            ``(trimesh.Trimesh, in_view_tag)`` where *in_view_tag* is a
+            1-D boolean ndarray indicating which vertices are visible.
+        """
         # Bind frequently-used attributes to locals to avoid repeated
         # LOAD_ATTR lookups in the tight bisection loop (~15 iterations).
         _af = self.AF
