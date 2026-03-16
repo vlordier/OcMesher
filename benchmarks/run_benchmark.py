@@ -61,7 +61,7 @@ _SDF_KERNELS = {
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
-def _make_cameras(n_cameras: int = 1):
+def _make_cameras(n_cameras: int = 1) -> tuple[list[np.ndarray], list[np.ndarray], list[int], list[int]]:
     """Create *n_cameras* cameras arranged around the scene."""
     cam_poses = []
     ks = []
@@ -88,7 +88,7 @@ def _make_cameras(n_cameras: int = 1):
     return (cam_poses, ks, hs, ws)
 
 
-def _make_bounds():
+def _make_bounds() -> tuple[int, int, int, int, int, int]:
     return (-10, 10, -10, 10, -2, 2)
 
 
