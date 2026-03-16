@@ -696,7 +696,7 @@ def _micro_init_vectorised(n_runs: int = 20) -> dict[str, object]:
     return results
 
 
-def _micro_pipeline_breakdown(cameras, bounds, n_runs: int = 3):
+def _micro_pipeline_breakdown(cameras, bounds, n_runs: int = 3) -> dict[str, object]:
     """Break down end-to-end timing per pipeline step.
 
     Measures each step individually so users can identify the dominant
