@@ -1267,11 +1267,10 @@ fn construct_element_mesh(
     });
 
     let n_cubes = nv * 8;
-    let mut sdf_buf = vec![0.0f32; n_cubes];
     let check_tol = bisection_tol > 0.0;
 
     for _ in 0..bisection_iters {
-        let sdf_cubes = eval_kernel_py(
+        let sdf_buf = eval_kernel_py(
             py,
             kernel,
             &cubes,
@@ -1281,7 +1280,6 @@ fn construct_element_mesh(
             torch_eval_dtype,
             torch_non_blocking,
         )?;
-        sdf_buf.copy_from_slice(&sdf_cubes);
 
         py.allow_threads(|| unsafe {
             (lib.update_verts)(
@@ -1304,26 +1302,28 @@ fn construct_element_mesh(
     let mut cubes_r = vec![0.0f64; n_cubes * 3];
     py.allow_threads(|| unsafe { (lib.get_lr_verts)(element, cubes.as_mut_ptr(), cubes_r.as_mut_ptr()) });
 
-    let sdf_l = eval_kernel_py(
+    // Batch left/right queries into a single Python callback to cut call overhead.
+    let mut lr_xyz = vec![0.0f64; n_cubes * 2 * 3];
+    lr_xyz[..n_cubes * 3].copy_from_slice(&cubes);
+    lr_xyz[n_cubes * 3..].copy_from_slice(&cubes_r);
+    let lr_sdf = eval_kernel_py(
         py,
         kernel,
-        &cubes,
-        n_cubes,
+        &lr_xyz,
+        n_cubes * 2,
         sdf_batch_size,
         torch_eval_device,
         torch_eval_dtype,
         torch_non_blocking,
     )?;
-    let sdf_r = eval_kernel_py(
-        py,
-        kernel,
-        &cubes_r,
-        n_cubes,
-        sdf_batch_size,
-        torch_eval_device,
-        torch_eval_dtype,
-        torch_non_blocking,
-    )?;
+    if lr_sdf.len() != n_cubes * 2 {
+        return Err(pyo3::exceptions::PyValueError::new_err(format!(
+            "LR SDF length mismatch: got {}, expected {}",
+            lr_sdf.len(),
+            n_cubes * 2
+        )));
+    }
+    let (sdf_l, sdf_r) = lr_sdf.split_at(n_cubes);
 
     let mut vertices = vec![0.0f64; nv * 3];
     py.allow_threads(|| unsafe {
@@ -1406,8 +1406,7 @@ fn refine_extra_vertices(
         torch_eval_dtype,
         torch_non_blocking,
     )?;
-    let ecenter_sdf = ef_sdf[..nve].to_vec();
-    let fcenter_sdf = ef_sdf[nve..].to_vec();
+    let (ecenter_sdf, fcenter_sdf) = ef_sdf.split_at(nve);
 
     // Initial LR positions
     let mut edge_lr = vec![0.0f64; nve * 2 * 3];
@@ -1428,13 +1427,13 @@ fn refine_extra_vertices(
     let n_bisect = n_elr + n_flr;
     let check_tol = bisection_tol > 0.0;
     let mut bisect_buf = vec![0.0f64; n_bisect * 3];
-    let mut sdf_buf = vec![0.0f32; n_bisect];
+    let mut sdf_buf: Vec<f32>;
 
     for _ in 0..bisection_iters {
         bisect_buf[..n_elr * 3].copy_from_slice(&edge_lr);
         bisect_buf[n_elr * 3..].copy_from_slice(&face_lr);
 
-        let sdf_all = eval_kernel_py(
+        sdf_buf = eval_kernel_py(
             py,
             kernel,
             &bisect_buf,
@@ -1444,7 +1443,6 @@ fn refine_extra_vertices(
             torch_eval_dtype,
             torch_non_blocking,
         )?;
-        sdf_buf.copy_from_slice(&sdf_all);
 
         let (e_sdf, f_sdf) = sdf_buf.split_at(n_elr);
         py.allow_threads(|| unsafe {
