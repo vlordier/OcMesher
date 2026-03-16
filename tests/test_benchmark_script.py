@@ -321,4 +321,21 @@ class TestMainUpstreamParityMode:
         err = capsys.readouterr().err
         assert "Upstream parity mismatch" in err
 
+    def test_main_parity_mode_writes_json_when_requested(self, monkeypatch, tmp_path):
+        out_path = tmp_path / "parity.json"
+        monkeypatch.setattr(
+            "sys.argv",
+            ["benchmark.py", "--upstream-parity", "--json", str(out_path)],
+        )
+        monkeypatch.setattr(
+            benchmark,
+            "run_upstream_parity",
+            lambda *_args, **_kwargs: {"delta": {"matches": True}, "current": {}, "upstream": {}},
+        )
+
+        benchmark.main()
+
+        written = json.loads(out_path.read_text())
+        assert bool(written["delta"]["matches"])
+
 

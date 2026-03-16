@@ -414,8 +414,13 @@ def _validate_selected_configs(config_choice: str, configs: list[DemoConfig]) ->
 def _write_results_json(output_path: str, results: list[tuple[str, list[TierConfigResult]]]) -> None:
     """Serialize benchmark results to a JSON file."""
     data = _tier_results_to_dict(results)
+    _write_json_object(output_path, data)
+
+
+def _write_json_object(output_path: str, payload: object) -> None:
+    """Serialize a JSON payload to disk with stable formatting."""
     with Path(output_path).open("w") as f:
-        json.dump(data, f, indent=2)
+        json.dump(payload, f, indent=2, sort_keys=True)
 
 
 def _tier_results_to_dict(results: list[tuple[str, list[TierConfigResult]]]) -> dict[str, list[TierConfigResult]]:
@@ -446,6 +451,9 @@ def main() -> None:
             },
             atol=args.parity_atol,
         )
+        if args.json:
+            _write_json_object(args.json, parity)
+            _write_stdout(f"Results written to {args.json}")
         _write_stdout(json.dumps(parity, indent=2, sort_keys=True))
         if args.upstream_parity_strict and not bool(parity["delta"]["matches"]):
             _write_stderr("Upstream parity mismatch under --upstream-parity-strict")
