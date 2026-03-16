@@ -140,7 +140,6 @@ ignore = [
     "D",        # no docstring enforcement in benchmark script
     "EXE001",   # shebang is informational; script may be launched via python
     "PLW3301",  # nested max is clear in table width calculation
-    "C416",     # dict comprehension retained for readability with tuple input
 ]
 # Python overhead micro-benchmark
 "benchmarks/bench_python_overhead.py" = [

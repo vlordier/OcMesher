@@ -339,7 +339,7 @@ def main() -> None:
     print_comparison(all_results)
 
     if args.json:
-        data = {label: res for label, res in all_results}
+        data = dict(all_results)
         with Path(args.json).open("w") as f:
             json.dump(data, f, indent=2)
         print(f"Results written to {args.json}")
