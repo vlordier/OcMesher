@@ -479,3 +479,113 @@ def test_compiled_extension_extract_tch_scene(sample_cameras, sample_bounds):
     assert all(mesh.faces.shape[0] > 0 for mesh in meshes)
     assert all(tag.dtype == np.bool_ for tag in tags)
     assert all(tag.shape == (mesh.vertices.shape[0],) for mesh, tag in zip(meshes, tags, strict=True))
+
+
+@pytest.mark.integration
+def test_compiled_extension_extract_native_scene_rejects_empty(sample_cameras, sample_bounds):
+    ocmesher_rust = pytest.importorskip("ocmesher_rust", reason="compiled Rust extension not installed")
+
+    core_so = Path(__file__).resolve().parents[1] / "ocmesher" / "lib" / "core.so"
+    if not core_so.exists():
+        pytest.skip("compiled core.so not available")
+
+    cam_poses, ks, hs, ws = sample_cameras
+    backend = ocmesher_rust.Backend(
+        lib_path=str(core_so),
+        cameras=(
+            [np.asarray(p, dtype=np.float64).ravel().tolist() for p in cam_poses],
+            [np.asarray(k, dtype=np.float64).ravel().tolist() for k in ks],
+            [float(h) for h in hs],
+            [float(w) for w in ws],
+        ),
+        bounds=np.asarray(sample_bounds, dtype=np.float64).tolist(),
+        pixels_per_cube=32,
+        coarse_count=20_000,
+    )
+
+    with pytest.raises(ValueError, match="primitives must be a non-empty list"):
+        backend.extract_native_scene([])
+
+
+@pytest.mark.integration
+def test_compiled_extension_extract_native_scene_rejects_unknown_type(sample_cameras, sample_bounds):
+    ocmesher_rust = pytest.importorskip("ocmesher_rust", reason="compiled Rust extension not installed")
+
+    core_so = Path(__file__).resolve().parents[1] / "ocmesher" / "lib" / "core.so"
+    if not core_so.exists():
+        pytest.skip("compiled core.so not available")
+
+    cam_poses, ks, hs, ws = sample_cameras
+    backend = ocmesher_rust.Backend(
+        lib_path=str(core_so),
+        cameras=(
+            [np.asarray(p, dtype=np.float64).ravel().tolist() for p in cam_poses],
+            [np.asarray(k, dtype=np.float64).ravel().tolist() for k in ks],
+            [float(h) for h in hs],
+            [float(w) for w in ws],
+        ),
+        bounds=np.asarray(sample_bounds, dtype=np.float64).tolist(),
+        pixels_per_cube=32,
+        coarse_count=20_000,
+    )
+
+    with pytest.raises(ValueError, match="unsupported primitive type: capsule"):
+        backend.extract_native_scene([{"type": "capsule"}])
+
+
+@pytest.mark.integration
+def test_compiled_extension_extract_tch_scene_rejects_non_dict(sample_cameras, sample_bounds):
+    ocmesher_rust = pytest.importorskip("ocmesher_rust", reason="compiled Rust extension not installed")
+
+    if not hasattr(ocmesher_rust.Backend, "extract_tch_scene"):
+        pytest.skip("compiled Rust extension was not built with tch-kernels")
+
+    core_so = Path(__file__).resolve().parents[1] / "ocmesher" / "lib" / "core.so"
+    if not core_so.exists():
+        pytest.skip("compiled core.so not available")
+
+    cam_poses, ks, hs, ws = sample_cameras
+    backend = ocmesher_rust.Backend(
+        lib_path=str(core_so),
+        cameras=(
+            [np.asarray(p, dtype=np.float64).ravel().tolist() for p in cam_poses],
+            [np.asarray(k, dtype=np.float64).ravel().tolist() for k in ks],
+            [float(h) for h in hs],
+            [float(w) for w in ws],
+        ),
+        bounds=np.asarray(sample_bounds, dtype=np.float64).tolist(),
+        pixels_per_cube=32,
+        coarse_count=20_000,
+    )
+
+    with pytest.raises(ValueError, match=r"primitives\[0\] must be a dict"):
+        backend.extract_tch_scene(["bad"])
+
+
+@pytest.mark.integration
+def test_compiled_extension_extract_tch_scene_rejects_negative_radius(sample_cameras, sample_bounds):
+    ocmesher_rust = pytest.importorskip("ocmesher_rust", reason="compiled Rust extension not installed")
+
+    if not hasattr(ocmesher_rust.Backend, "extract_tch_scene"):
+        pytest.skip("compiled Rust extension was not built with tch-kernels")
+
+    core_so = Path(__file__).resolve().parents[1] / "ocmesher" / "lib" / "core.so"
+    if not core_so.exists():
+        pytest.skip("compiled core.so not available")
+
+    cam_poses, ks, hs, ws = sample_cameras
+    backend = ocmesher_rust.Backend(
+        lib_path=str(core_so),
+        cameras=(
+            [np.asarray(p, dtype=np.float64).ravel().tolist() for p in cam_poses],
+            [np.asarray(k, dtype=np.float64).ravel().tolist() for k in ks],
+            [float(h) for h in hs],
+            [float(w) for w in ws],
+        ),
+        bounds=np.asarray(sample_bounds, dtype=np.float64).tolist(),
+        pixels_per_cube=32,
+        coarse_count=20_000,
+    )
+
+    with pytest.raises(ValueError, match="radius must be positive"):
+        backend.extract_tch_scene([{"type": "sphere", "radius": -1.0}])

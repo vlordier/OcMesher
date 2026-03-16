@@ -64,10 +64,10 @@ fn parse_center_f64(center: Option<Vec<f64>>) -> PyResult<[f64; 3]> {
     }
 }
 
-fn parse_sphere_radius(radius: f64) -> PyResult<f64> {
+fn parse_positive_radius(field_name: &str, radius: f64) -> PyResult<f64> {
     if radius <= 0.0 {
         return Err(pyo3::exceptions::PyValueError::new_err(
-            "sphere_radius must be positive",
+            format!("{field_name} must be positive"),
         ));
     }
     Ok(radius)
@@ -118,7 +118,7 @@ fn build_native_primitive(spec: &Bound<'_, PyDict>) -> PyResult<BoxedSdfEvaluato
     let primitive_type = dict_required_string(spec, "type")?;
     match primitive_type.as_str() {
         "sphere" => {
-            let radius = parse_sphere_radius(dict_optional_f64(spec, "radius")?.unwrap_or(1.0))?;
+            let radius = parse_positive_radius("radius", dict_optional_f64(spec, "radius")?.unwrap_or(1.0))?;
             let center = parse_center_f64(dict_optional_vec_f64(spec, "center")?)?;
             Ok(Box::new(SphereKernel::new(center, radius)))
         }
@@ -181,7 +181,7 @@ fn build_tch_primitive(spec: &Bound<'_, PyDict>, device: Device) -> PyResult<Box
     let primitive_type = dict_required_string(spec, "type")?;
     match primitive_type.as_str() {
         "sphere" => {
-            let radius = parse_sphere_radius(dict_optional_f64(spec, "radius")?.unwrap_or(1.0))?;
+            let radius = parse_positive_radius("radius", dict_optional_f64(spec, "radius")?.unwrap_or(1.0))?;
             let center = parse_vector_f32(dict_optional_vec_f64(spec, "center")?, "center", [0.0, 0.0, 0.0])?;
             Ok(Box::new(TchSphereKernel::new(center, radius as f32, device)))
         }
@@ -427,7 +427,7 @@ impl Backend {
         radius: f64,
         center: Option<Vec<f64>>,
     ) -> PyResult<Bound<'py, PyTuple>> {
-        let radius = parse_sphere_radius(radius)?;
+        let radius = parse_positive_radius("radius", radius)?;
         let center_arr = parse_center_f64(center)?;
         let kernels = vec![Box::new(SphereKernel::new(center_arr, radius)) as _];
         let mesh_data_list = run_meshing_pipeline_native(&self.lib, &self.params, &kernels)
@@ -462,7 +462,7 @@ impl Backend {
         plane_offset: f64,
         plane_normal: Option<Vec<f64>>,
     ) -> PyResult<Bound<'py, PyTuple>> {
-        let sphere_radius = parse_sphere_radius(sphere_radius)?;
+        let sphere_radius = parse_positive_radius("sphere_radius", sphere_radius)?;
         let sphere_center = parse_center_f64(sphere_center)?;
         let plane_normal = parse_normal_f64(plane_normal)?;
         let kernels = vec![
@@ -498,7 +498,7 @@ impl Backend {
         center: Option<Vec<f64>>,
         device: Option<String>,
     ) -> PyResult<Bound<'py, PyTuple>> {
-        let radius = parse_sphere_radius(radius)?;
+        let radius = parse_positive_radius("radius", radius)?;
         let center_arr = parse_vector_f32(center, "center", [0.0, 0.0, 0.0])?;
         let tch_device = parse_tch_device(device)?;
         let kernels = vec![Box::new(TchSphereKernel::new(center_arr, radius as f32, tch_device)) as _];
@@ -539,7 +539,7 @@ impl Backend {
         plane_normal: Option<Vec<f64>>,
         device: Option<String>,
     ) -> PyResult<Bound<'py, PyTuple>> {
-        let sphere_radius = parse_sphere_radius(sphere_radius)?;
+        let sphere_radius = parse_positive_radius("sphere_radius", sphere_radius)?;
         let sphere_center = parse_vector_f32(sphere_center, "sphere_center", [0.0, 0.0, 0.0])?;
         let plane_normal = parse_vector_f32(plane_normal, "plane_normal", [0.0, 0.0, 1.0])?;
         let tch_device = parse_tch_device(device)?;
