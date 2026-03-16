@@ -23,28 +23,21 @@ from pathlib import Path
 
 import numpy as np
 import psutil
+import vnoise
 
 logger = logging.getLogger(__name__)
 
 # ---------------------------------------------------------------------------
 # SDF kernels at varying complexity levels
 # ---------------------------------------------------------------------------
-try:
-    import vnoise
+_noise = vnoise.Noise()
 
-    _noise = vnoise.Noise()
 
-    def sdf_terrain(xyz: np.ndarray) -> np.ndarray:
-        """Perlin-noise height field (medium complexity)."""
-        scale = 2
-        h = _noise.noise2(xyz[:, 0] / scale, xyz[:, 1] / scale, grid_mode=False, octaves=4)
-        return xyz[:, 2] - h
-
-except ImportError:
-
-    def sdf_terrain(xyz: np.ndarray) -> np.ndarray:  # type: ignore[misc]
-        """Fallback SDF - flat plane at z=0."""
-        return xyz[:, 2].copy()
+def sdf_terrain(xyz: np.ndarray) -> np.ndarray:
+    """Perlin-noise height field (medium complexity)."""
+    scale = 2
+    h = _noise.noise2(xyz[:, 0] / scale, xyz[:, 1] / scale, grid_mode=False, octaves=4)
+    return xyz[:, 2] - h
 
 
 def sdf_sphere(xyz: np.ndarray) -> np.ndarray:
