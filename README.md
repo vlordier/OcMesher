@@ -126,3 +126,8 @@ uv run python benchmark.py --upstream-parity main --parity-pixels-per-cube 24 --
 # write parity payload to JSON for tooling/CI artifacts
 uv run python benchmark.py --upstream-parity --json benchmark_parity.json
 ```
+
+Notes:
+- `--upstream-parity-strict` requires `--upstream-parity`.
+- `--parity-pixels-per-cube` and `--parity-coarse-count` must be >= 1.
+- `--parity-atol` must be >= 0.
