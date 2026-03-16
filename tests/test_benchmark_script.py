@@ -81,3 +81,13 @@ class TestShortTierLabel:
         assert benchmark._short_tier_label("Baseline") == "Baseline"
 
 
+class TestTierSpec:
+    def test_tiers_include_expected_sdf_types(self):
+        sdf_types = [tier[2] for tier in benchmark.TIERS_SPEC]
+        assert sdf_types == ["vnoise", "vnoise", "numba", "mlx"]
+
+    def test_tiers_use_known_build_scripts(self):
+        scripts = {tier[1] for tier in benchmark.TIERS_SPEC}
+        assert scripts == {benchmark.BASELINE_BUILD, benchmark.OPTIMISED_BUILD}
+
+
