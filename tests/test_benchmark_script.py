@@ -160,7 +160,7 @@ class TestCreateParser:
     def test_config_choices_include_expected_values(self):
         parser = benchmark._create_parser()
         config_arg = next(action for action in parser._actions if action.dest == "configs")
-        assert set(config_arg.choices) == {"small", "medium", "large", "all"}
+        assert tuple(config_arg.choices) == benchmark.CONFIG_CHOICES
 
 
 class TestComparisonHelpers:
