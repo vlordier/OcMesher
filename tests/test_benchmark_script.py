@@ -105,3 +105,8 @@ class TestBenchmarkExceptions:
         assert "traceback" in text
 
 
+class TestSdfBlocks:
+    def test_registry_contains_expected_keys(self):
+        assert set(benchmark.SDF_BLOCKS) == {"vnoise", "numba", "mlx"}
+
+
