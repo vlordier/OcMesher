@@ -5,7 +5,7 @@ from __future__ import annotations
 import numpy as np
 import pytest
 
-from ocmesher._validation import bounds_min_max, coerce_kernel_sdf, preprocess_cameras
+from ocmesher._validation import bounds_min_max, coerce_kernel_sdf, preprocess_cameras, validate_mesher_params
 from ocmesher.core import (
     _AXIS_NAMES,
     _validate_bounds,
@@ -242,6 +242,72 @@ class TestCoerceKernelSdf:
         # (3, 1) has len 3 but shape != (3,)
         with pytest.raises(ValueError, match="expected"):
             coerce_kernel_sdf(np.zeros((3, 1)), 3, "test")
+
+
+# ---------------------------------------------------------------------------
+# validate_mesher_params edge-case tests
+# ---------------------------------------------------------------------------
+
+_VALID_PARAMS: dict[str, float | int] = {
+    "pixels_per_cube": 1.0,
+    "inv_scale": 1.0,
+    "min_dist": 0.5,
+    "memory_limit_mb": 256.0,
+    "bisection_iters": 10,
+    "visible_relax_iter": 0,
+    "coarse_count": 100,
+}
+
+
+class TestValidateMesherParams:
+    """Edge-case coverage for validate_mesher_params."""
+
+    @pytest.mark.parametrize(
+        "param",
+        [
+            "pixels_per_cube",
+            "inv_scale",
+            "min_dist",
+            "memory_limit_mb",
+            "bisection_iters",
+            "coarse_count",
+        ],
+    )
+    def test_zero_rejected_for_positive_params(self, param: str):
+        with pytest.raises(ValueError, match=f"{param} must be > 0"):
+            validate_mesher_params(**{**_VALID_PARAMS, param: 0})
+
+    @pytest.mark.parametrize(
+        "param",
+        [
+            "pixels_per_cube",
+            "inv_scale",
+            "min_dist",
+            "memory_limit_mb",
+            "bisection_iters",
+            "coarse_count",
+        ],
+    )
+    def test_negative_rejected_for_positive_params(self, param: str):
+        with pytest.raises(ValueError, match=f"{param} must be > 0"):
+            validate_mesher_params(**{**_VALID_PARAMS, param: -1})
+
+    def test_negative_visible_relax_iter_rejected(self):
+        with pytest.raises(ValueError, match="visible_relax_iter must be >= 0"):
+            validate_mesher_params(**{**_VALID_PARAMS, "visible_relax_iter": -1})
+
+    def test_negative_bisection_tol_rejected(self):
+        with pytest.raises(ValueError, match="bisection_tol must be >= 0"):
+            validate_mesher_params(**{**_VALID_PARAMS, "bisection_tol": -0.01})
+
+    def test_none_bisection_tol_accepted(self):
+        validate_mesher_params(**_VALID_PARAMS, bisection_tol=None)
+
+    def test_zero_bisection_tol_accepted(self):
+        validate_mesher_params(**_VALID_PARAMS, bisection_tol=0.0)
+
+    def test_valid_params_pass(self):
+        validate_mesher_params(**_VALID_PARAMS)
 
 
 # ---------------------------------------------------------------------------
