@@ -5,7 +5,7 @@ from __future__ import annotations
 import numpy as np
 import pytest
 
-from ocmesher._validation import bounds_min_max, coerce_kernel_sdf
+from ocmesher._validation import bounds_min_max, coerce_kernel_sdf, preprocess_cameras
 from ocmesher.core import (
     _AXIS_NAMES,
     _validate_bounds,
@@ -83,6 +83,42 @@ class TestValidateCameras:
         cameras = ([sample_camera_pose], [sample_intrinsics], [720.5], [1280])
         with pytest.raises(ValueError, match=r"Hs\[0\] must be a positive integer"):
             _validate_cameras(cameras)
+
+
+class TestPreprocessCameras:
+    """Tests for ``preprocess_cameras`` including error paths."""
+
+    def test_returns_correct_shapes(self, sample_camera_pose, sample_intrinsics):
+        inv, intr, hs, ws = preprocess_cameras(
+            [sample_camera_pose], [sample_intrinsics], [720], [1280]
+        )
+        assert inv.shape == (1, 3, 4)
+        assert intr.shape == (1, 3, 3)
+        assert hs == (720,)
+        assert ws == (1280,)
+
+    def test_multi_camera_shapes(self, sample_camera_pose, sample_intrinsics):
+        n = 3
+        inv, intr, hs, ws = preprocess_cameras(
+            [sample_camera_pose] * n,
+            [sample_intrinsics] * n,
+            [720] * n,
+            [1280] * n,
+        )
+        assert inv.shape == (n, 3, 4)
+        assert intr.shape == (n, 3, 3)
+
+    def test_inv_poses_are_contiguous(self, sample_camera_pose, sample_intrinsics):
+        inv, intr, _, _ = preprocess_cameras(
+            [sample_camera_pose], [sample_intrinsics], [720], [1280]
+        )
+        assert inv.flags["C_CONTIGUOUS"]
+        assert intr.flags["C_CONTIGUOUS"]
+
+    def test_singular_pose_raises_linalgerror(self, sample_intrinsics):
+        singular = np.zeros((4, 4), dtype=np.float64)
+        with pytest.raises(np.linalg.LinAlgError):
+            preprocess_cameras([singular], [sample_intrinsics], [720], [1280])
 
 
 # ---------------------------------------------------------------------------
