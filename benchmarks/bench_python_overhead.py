@@ -38,6 +38,7 @@ import json
 import statistics
 import time
 from pathlib import Path
+from typing import TYPE_CHECKING
 
 import numpy as np
 
@@ -46,6 +47,9 @@ from ocmesher.core import (
     OcMesher,
     _np_empty,
 )
+
+if TYPE_CHECKING:
+    from collections.abc import Callable
 
 
 # ---------------------------------------------------------------------------
@@ -80,7 +84,7 @@ def _make_stub(*, enclosed: bool = True) -> OcMesher:
     return obj
 
 
-def _time_fn(fn, *, warmup: int = 2, repeats: int = 10) -> dict:
+def _time_fn(fn: Callable[[], object], *, warmup: int = 2, repeats: int = 10) -> dict[str, float]:
     """Time *fn()* and return statistics in microseconds."""
     for _ in range(warmup):
         fn()
