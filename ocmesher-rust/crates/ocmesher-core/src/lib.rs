@@ -563,12 +563,14 @@ fn normalize_torch_output<'py>(
 ) -> PyResult<Bound<'py, PyAny>> {
     let torch = py.import_bound("torch")?;
     let as_tensor = torch.getattr("as_tensor")?;
-    let tensor = as_tensor.call1((value.bind(py),))?;
     let dtype_obj = build_torch_dtype(&torch.into_any(), torch_eval_dtype)?;
+    let kwargs = PyDict::new_bound(py);
+    kwargs.set_item("dtype", dtype_obj)?;
     if let Some(device) = torch_eval_device {
-        tensor.call_method1("to", (device, dtype_obj))
+        kwargs.set_item("device", device)?;
+        as_tensor.call((value.bind(py),), Some(&kwargs))
     } else {
-        tensor.call_method1("to", (dtype_obj,))
+        as_tensor.call((value.bind(py),), Some(&kwargs))
     }
 }
 
