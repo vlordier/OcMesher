@@ -477,7 +477,7 @@ def _micro_vertex_dedup(cameras, bounds, n_runs: int = 5) -> dict[str, object]:
     return results
 
 
-def _micro_coord_computation(_cameras, _bounds, n_runs: int = 5):
+def _micro_coord_computation(_cameras, _bounds, n_runs: int = 5) -> dict[str, object]:
     """Benchmark ldexp vs pow for coordinate computation."""
     results: dict[str, object] = {}
     try:
@@ -513,7 +513,7 @@ def _micro_coord_computation(_cameras, _bounds, n_runs: int = 5):
     return results
 
 
-def _micro_octree(cameras, bounds, n_runs: int = 3):
+def _micro_octree(cameras, bounds, n_runs: int = 3) -> dict[str, object]:
     """Benchmark octree construction in isolation."""
     results: dict[str, object] = {}
     try:
