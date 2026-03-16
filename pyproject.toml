@@ -134,7 +134,6 @@ ignore = [
 "benchmarks/bench_python_overhead.py" = [
     "SLF001",   # private member access (benchmarking internal methods)
     "T201",     # print statements (benchmark output)
-    "B023",     # loop-variable binding in closures (intentional for timing)
 ]
 # End-to-end benchmark (branch comparison)
 "benchmarks/bench_e2e.py" = [

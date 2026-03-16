@@ -112,7 +112,7 @@ def bench_kernel_caller_single(sizes: list[int]) -> dict:
     results = {}
     for n in sizes:
         pts = np.random.default_rng(42).standard_normal((n, 3))
-        results[str(n)] = _time_fn(lambda: stub.kernel_caller([_sdf_sphere], pts))
+        results[str(n)] = _time_fn(lambda pts=pts: stub.kernel_caller([_sdf_sphere], pts))
     return results
 
 
@@ -123,7 +123,7 @@ def bench_kernel_caller_multi(sizes: list[int]) -> dict:
     results = {}
     for n in sizes:
         pts = np.random.default_rng(42).standard_normal((n, 3))
-        results[str(n)] = _time_fn(lambda: stub.kernel_caller(kernels, pts))
+        results[str(n)] = _time_fn(lambda pts=pts: stub.kernel_caller(kernels, pts))
     return results
 
 
@@ -134,7 +134,7 @@ def bench_kernel_caller_out_reuse(sizes: list[int]) -> dict:
     for n in sizes:
         pts = np.random.default_rng(42).standard_normal((n, 3))
         out = _np_empty((n, 1), dtype=np.float32)
-        results[str(n)] = _time_fn(lambda: stub.kernel_caller([_sdf_sphere], pts, out=out))
+        results[str(n)] = _time_fn(lambda pts=pts, out=out: stub.kernel_caller([_sdf_sphere], pts, out=out))
     return results
 
 
@@ -145,7 +145,7 @@ def bench_bounds_mask_static(sizes: list[int]) -> dict:
     results = {}
     for n in sizes:
         pts = np.random.default_rng(42).standard_normal((n, 3)) * 15
-        results[str(n)] = _time_fn(lambda: OcMesher._out_of_bounds_mask(pts, b_min, b_max))
+        results[str(n)] = _time_fn(lambda pts=pts: OcMesher._out_of_bounds_mask(pts, b_min, b_max))
     return results
 
 
@@ -155,7 +155,9 @@ def bench_bounds_mask_into(sizes: list[int]) -> dict:
     results = {}
     for n in sizes:
         pts = np.random.default_rng(42).standard_normal((min(n, _SDF_BATCH_SIZE), 3)) * 15
-        results[str(n)] = _time_fn(lambda: stub._out_of_bounds_mask_into(pts, stub._bounds_min_np, stub._bounds_max_np))
+        results[str(n)] = _time_fn(
+            lambda pts=pts: stub._out_of_bounds_mask_into(pts, stub._bounds_min_np, stub._bounds_max_np),
+        )
     return results
 
 
@@ -166,10 +168,10 @@ def bench_slice_fill_vs_concatenate(sizes: list[int]) -> dict:
         a = np.random.default_rng(42).standard_normal((n, 3)).astype(np.float64)
         b = np.random.default_rng(43).standard_normal((n, 3)).astype(np.float64)
 
-        def _concat():
+        def _concat(a: np.ndarray = a, b: np.ndarray = b) -> np.ndarray:
             return np.concatenate((a, b))
 
-        def _slice_fill():
+        def _slice_fill(a: np.ndarray = a, b: np.ndarray = b, n: int = n) -> np.ndarray:
             buf = _np_empty((2 * n, 3), dtype=np.float64)
             buf[:n] = a
             buf[n:] = b
@@ -192,12 +194,12 @@ def bench_growable_buffer_pattern(sizes: list[int]) -> dict:
         iters = 15  # typical bisection iteration count
         pts_seq = [np.random.default_rng(42 + i).standard_normal((n, 3)).astype(np.float64) for i in range(iters)]
 
-        def _alloc_each():
+        def _alloc_each(pts_seq: list[np.ndarray] = pts_seq, n: int = n) -> None:
             for p in pts_seq:
                 buf = _np_empty((n, 3), dtype=np.float64)
                 buf[:] = p
 
-        def _growable():
+        def _growable(pts_seq: list[np.ndarray] = pts_seq) -> None:
             cap = 0
             buf = None
             for p in pts_seq:
