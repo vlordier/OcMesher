@@ -126,7 +126,7 @@ class TorchOcMesher:
         }
 
     @staticmethod
-    def _select_device_and_dtype(device=None) -> tuple[torch.device, torch.dtype]:
+    def _select_device_and_dtype(device: str | None = None) -> tuple[torch.device, torch.dtype]:
         """Auto-detect the best device and matching floating-point dtype.
 
         Priority: explicit *device* → CUDA → MPS → CPU.
