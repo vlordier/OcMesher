@@ -30,3 +30,10 @@ def test_cpp_tests_uses_cxx17() -> None:
     workflow = _read(".github/workflows/cpp-tests.yml")
 
     assert "-std=c++17" in workflow
+
+
+def test_cpp_tests_treats_warnings_as_errors() -> None:
+    workflow = _read(".github/workflows/cpp-tests.yml")
+
+    for flag in ("-Wall", "-Wextra", "-Wpedantic", "-Werror"):
+        assert flag in workflow
