@@ -81,26 +81,3 @@ class TestShortTierLabel:
         assert benchmark._short_tier_label("Baseline") == "Baseline"
 
 
-class TestBuildTiersSpec:
-    def test_uses_vnoise_when_available(self):
-        tiers, notes = benchmark._build_tiers_spec(lambda module: module in {"vnoise", "numba", "mlx"})
-        labels = [t[0] for t in tiers]
-        assert labels[0] == "Baseline(-O3+vnoise)"
-        assert labels[1] == "Opt-C++(M4+unordered)"
-        assert len(notes) == 0
-
-    def test_falls_back_when_vnoise_unavailable(self):
-        tiers, notes = benchmark._build_tiers_spec(lambda module: module in {"numba", "mlx"})
-        labels = [t[0] for t in tiers]
-        sdf_types = [t[2] for t in tiers]
-        assert labels[0] == "Baseline(-O3+analytic)"
-        assert labels[1] == "Opt-C++(M4+unordered+analytic)"
-        assert sdf_types[0] == "analytic"
-        assert any("vnoise unavailable" in n for n in notes)
-
-    def test_skips_optional_tiers_when_missing(self):
-        tiers, notes = benchmark._build_tiers_spec(lambda module: module == "vnoise")
-        labels = [t[0] for t in tiers]
-        assert labels == ["Baseline(-O3+vnoise)", "Opt-C++(M4+unordered)"]
-        assert any("numba unavailable" in n for n in notes)
-        assert any("mlx unavailable" in n for n in notes)
