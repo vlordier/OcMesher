@@ -38,3 +38,18 @@ class TestParseLastJsonLine:
     def test_raises_when_no_json_line(self):
         with pytest.raises(RuntimeError, match="No JSON output"):
             benchmark._parse_last_json_line("hello\nworld\n")
+
+
+class TestSelectConfigs:
+    def test_all_returns_all_configs(self):
+        selected = benchmark._select_configs("all", benchmark.DEMO_CONFIGS)
+        assert selected == benchmark.DEMO_CONFIGS
+
+    def test_small_selects_small_label(self):
+        selected = benchmark._select_configs("small", benchmark.DEMO_CONFIGS)
+        assert len(selected) == 1
+        assert selected[0]["label"].startswith("small")
+
+    def test_unknown_config_returns_empty_list(self):
+        selected = benchmark._select_configs("unknown", benchmark.DEMO_CONFIGS)
+        assert selected == []
