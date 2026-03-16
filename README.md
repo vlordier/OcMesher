@@ -112,3 +112,17 @@ uv run python benchmark.py --configs small --runs 1
 ```
 
 To perform deterministic numerical parity checks against `main`, ensure both branches are built with the default build script (`bash install.sh`) and compare mesh counts/sums for the same fixed camera/SDF case.
+
+```bash
+# default parity check against main
+uv run python benchmark.py --upstream-parity
+
+# stricter automation-friendly parity check (non-zero exit on mismatch)
+uv run python benchmark.py --upstream-parity --upstream-parity-strict
+
+# custom parity mesh settings and tolerance
+uv run python benchmark.py --upstream-parity main --parity-pixels-per-cube 24 --parity-coarse-count 200000 --parity-atol 1e-10
+
+# write parity payload to JSON for tooling/CI artifacts
+uv run python benchmark.py --upstream-parity --json benchmark_parity.json
+```
