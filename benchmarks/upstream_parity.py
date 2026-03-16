@@ -93,6 +93,13 @@ def run_upstream_parity(
 ) -> dict[str, MeshSignature | dict[str, float | int | bool]]:
     """Compare current checkout numerical signature against an upstream Git ref."""
     repo_root = repo_root.resolve()
+    subprocess.run(  # noqa: S603
+        [_SH_BIN, "install.sh"],
+        check=True,
+        cwd=repo_root,
+        capture_output=True,
+        text=True,
+    )
     current = _compute_signature_in_repo(
         repo_root,
         python_exe=python_exe,
