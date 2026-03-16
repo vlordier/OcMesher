@@ -162,6 +162,17 @@ class TestCreateParser:
         assert args.runs == 3
         assert args.configs == "all"
         assert args.json is None
+        assert args.upstream_parity is None
+
+    def test_upstream_parity_default_ref(self):
+        parser = benchmark._create_parser()
+        args = parser.parse_args(["--upstream-parity"])
+        assert args.upstream_parity == "main"
+
+    def test_upstream_parity_custom_ref(self):
+        parser = benchmark._create_parser()
+        args = parser.parse_args(["--upstream-parity", "develop"])
+        assert args.upstream_parity == "develop"
 
     def test_config_choices_include_expected_values(self):
         parser = benchmark._create_parser()
@@ -255,5 +266,16 @@ class TestComparisonCells:
         ]
         medians = benchmark._tier_medians_at_row(tables, 0, 2)
         assert medians == [1.0, 0.5]
+
+
+class TestMainUpstreamParityMode:
+    def test_main_runs_upstream_parity_and_returns(self, monkeypatch, capsys):
+        monkeypatch.setattr("sys.argv", ["benchmark.py", "--upstream-parity"])
+        monkeypatch.setattr(benchmark, "run_upstream_parity", lambda *_args, **_kwargs: {"delta": {"matches": True}})
+
+        benchmark.main()
+
+        out = capsys.readouterr().out
+        assert '"matches": true' in out
 
 
