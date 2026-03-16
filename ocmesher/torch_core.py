@@ -510,17 +510,18 @@ class TorchOcMesher:
                     sdf[_out_of_bounds_mask(chunk_np, b_min, b_max)] = 1
                 return sdf.astype(np.float32).reshape(-1, 1)
         else:
+            kernel_labels = tuple(f"kernels[{k_idx}]" for k_idx in range(n_kernels))
 
             def _eval_chunk(chunk_np):
                 _n = len(chunk_np)
                 if enclosed:
                     out_bound = _out_of_bounds_mask(chunk_np, b_min, b_max)
-                cols = []
-                for k_idx, kernel in enumerate(kernels):
-                    sdf = _coerce_kernel_sdf(kernel(chunk_np), _n, f"kernels[{k_idx}]")
+                cols = [None] * n_kernels
+                for k_idx, (kernel, kernel_label) in enumerate(zip(kernels, kernel_labels, strict=False)):
+                    sdf = _coerce_kernel_sdf(kernel(chunk_np), _n, kernel_label)
                     if enclosed:
                         sdf[out_bound] = 1
-                    cols.append(sdf)
+                    cols[k_idx] = sdf
                 return np.stack(cols, axis=-1).astype(np.float32)
 
         # Single-chunk fast path: skip list/pool/concat overhead.
