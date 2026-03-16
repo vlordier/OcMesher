@@ -118,6 +118,17 @@ class TestSdfBlocks:
         assert set(benchmark.SDF_BLOCKS) == {"vnoise", "numba", "mlx"}
 
 
+class TestBuildMesherScript:
+    def test_includes_ppc_and_coarse_values(self):
+        script = benchmark._build_mesher_script(32, 123456, "vnoise")
+        assert "pixels_per_cube=32" in script
+        assert "coarse_count=123456" in script
+
+    def test_uses_requested_sdf_block(self):
+        script = benchmark._build_mesher_script(16, 100000, "mlx")
+        assert "import mlx.core as _mx" in script
+
+
 class TestWriteResultsJson:
     def test_writes_named_tier_results(self, tmp_path):
         out_path = tmp_path / "results.json"
