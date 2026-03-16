@@ -287,6 +287,20 @@ def _select_configs(config_choice: str, all_configs: list[DemoConfig]) -> list[D
     return [c for c in all_configs if c["label"].startswith(config_choice)]
 
 
+def _validate_runs(runs: int) -> None:
+    """Validate that benchmark run count is a positive integer."""
+    if runs < 1:
+        msg = f"--runs must be >= 1, got {runs}"
+        raise ValueError(msg)
+
+
+def _validate_selected_configs(config_choice: str, configs: list[DemoConfig]) -> None:
+    """Validate that config selection produced at least one benchmark profile."""
+    if not configs:
+        msg = f"No benchmark configs selected for choice '{config_choice}'"
+        raise ValueError(msg)
+
+
 def main() -> None:
     parser = argparse.ArgumentParser(description="Benchmark OcMesher: baseline vs opt-C++ vs opt+numba-SDF")
     parser.add_argument("--runs", type=int, default=3, help="Runs per configuration (default: 3)")
@@ -295,8 +309,10 @@ def main() -> None:
     args = parser.parse_args()
 
     os.chdir(Path(__file__).parent)
+    _validate_runs(args.runs)
 
     configs = _select_configs(args.configs, DEMO_CONFIGS)
+    _validate_selected_configs(args.configs, configs)
 
     tiers_spec = [
         ("Baseline(-O3+vnoise)", BASELINE_BUILD, "vnoise"),
