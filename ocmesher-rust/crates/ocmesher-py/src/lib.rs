@@ -27,12 +27,82 @@ use pyo3::types::{PyDict, PyList, PyTuple};
 
 use ocmesher_core::{
     pack_cameras, run_meshing_pipeline, run_meshing_pipeline_native, validate_bounds, CoreLib,
-    MesherParams, SphereKernel,
+    MesherParams, PlaneKernel, SphereKernel,
 };
 #[cfg(feature = "tch-kernels")]
-use ocmesher_core::tch_kernels::TchSphereKernel;
+use ocmesher_core::tch_kernels::{TchPlaneKernel, TchSphereKernel};
 #[cfg(feature = "tch-kernels")]
 use tch::Device;
+
+fn mesh_data_list_to_python<'py>(
+    py: Python<'py>,
+    mesh_data_list: Vec<ocmesher_core::MeshData>,
+) -> PyResult<Bound<'py, PyTuple>> {
+    let meshes_list = PyList::empty_bound(py);
+    let tags_list = PyList::empty_bound(py);
+
+    for mesh_data in mesh_data_list {
+        let (mesh_obj, tag_np) = ocmesher_core::mesh_data_to_python(py, mesh_data)?;
+        meshes_list.append(mesh_obj)?;
+        tags_list.append(tag_np)?;
+    }
+
+    Ok(PyTuple::new_bound(py, [meshes_list.into_any(), tags_list.into_any()]))
+}
+
+fn parse_center_f64(center: Option<Vec<f64>>) -> PyResult<[f64; 3]> {
+    match center {
+        Some(values) => {
+            if values.len() != 3 {
+                return Err(pyo3::exceptions::PyValueError::new_err(
+                    "center must contain exactly 3 values",
+                ));
+            }
+            Ok([values[0], values[1], values[2]])
+        }
+        None => Ok([0.0, 0.0, 0.0]),
+    }
+}
+
+fn parse_normal_f64(normal: Option<Vec<f64>>) -> PyResult<[f64; 3]> {
+    match normal {
+        Some(values) => {
+            if values.len() != 3 {
+                return Err(pyo3::exceptions::PyValueError::new_err(
+                    "normal must contain exactly 3 values",
+                ));
+            }
+            Ok([values[0], values[1], values[2]])
+        }
+        None => Ok([0.0, 0.0, 1.0]),
+    }
+}
+
+#[cfg(feature = "tch-kernels")]
+fn parse_vector_f32(vector: Option<Vec<f64>>, field_name: &str, default: [f32; 3]) -> PyResult<[f32; 3]> {
+    match vector {
+        Some(values) => {
+            if values.len() != 3 {
+                return Err(pyo3::exceptions::PyValueError::new_err(format!(
+                    "{field_name} must contain exactly 3 values"
+                )));
+            }
+            Ok([values[0] as f32, values[1] as f32, values[2] as f32])
+        }
+        None => Ok(default),
+    }
+}
+
+#[cfg(feature = "tch-kernels")]
+fn parse_tch_device(device: Option<String>) -> PyResult<Device> {
+    match device.as_deref() {
+        None | Some("cpu") => Ok(Device::Cpu),
+        Some("mps") => Ok(Device::Mps),
+        Some(value) => Err(pyo3::exceptions::PyValueError::new_err(format!(
+            "unsupported tch device: {value}"
+        ))),
+    }
+}
 
 // ---------------------------------------------------------------------------
 // Backend PyO3 class
@@ -236,17 +306,7 @@ impl Backend {
 
         let mesh_data_list = run_meshing_pipeline(py, &self.lib, &self.params, &kernels)?;
 
-        let meshes_list = PyList::empty_bound(py);
-        let tags_list = PyList::empty_bound(py);
-
-        for mesh_data in mesh_data_list {
-            let (mesh_obj, tag_np) = ocmesher_core::mesh_data_to_python(py, mesh_data)?;
-            meshes_list.append(mesh_obj)?;
-            tags_list.append(tag_np)?;
-        }
-
-        let result = PyTuple::new_bound(py, [meshes_list.into_any(), tags_list.into_any()]);
-        Ok(result)
+        mesh_data_list_to_python(py, mesh_data_list)
     }
 
     /// Run the meshing pipeline with a built-in Rust-native sphere SDF.
@@ -257,31 +317,28 @@ impl Backend {
         radius: f64,
         center: Option<Vec<f64>>,
     ) -> PyResult<Bound<'py, PyTuple>> {
-        let center_arr = match center {
-            Some(values) => {
-                if values.len() != 3 {
-                    return Err(pyo3::exceptions::PyValueError::new_err(
-                        "center must contain exactly 3 values",
-                    ));
-                }
-                [values[0], values[1], values[2]]
-            }
-            None => [0.0, 0.0, 0.0],
-        };
+        let center_arr = parse_center_f64(center)?;
         let kernels = vec![Box::new(SphereKernel::new(center_arr, radius)) as _];
         let mesh_data_list = run_meshing_pipeline_native(&self.lib, &self.params, &kernels)
             .map_err(PyErr::from)?;
 
-        let meshes_list = PyList::empty_bound(py);
-        let tags_list = PyList::empty_bound(py);
+        mesh_data_list_to_python(py, mesh_data_list)
+    }
 
-        for mesh_data in mesh_data_list {
-            let (mesh_obj, tag_np) = ocmesher_core::mesh_data_to_python(py, mesh_data)?;
-            meshes_list.append(mesh_obj)?;
-            tags_list.append(tag_np)?;
-        }
+    /// Run the meshing pipeline with a built-in Rust-native plane SDF.
+    #[pyo3(signature = (offset = 0.0, normal = None))]
+    fn extract_native_plane<'py>(
+        &self,
+        py: Python<'py>,
+        offset: f64,
+        normal: Option<Vec<f64>>,
+    ) -> PyResult<Bound<'py, PyTuple>> {
+        let normal_arr = parse_normal_f64(normal)?;
+        let kernels = vec![Box::new(PlaneKernel::new(normal_arr, offset).map_err(PyErr::from)?) as _];
+        let mesh_data_list = run_meshing_pipeline_native(&self.lib, &self.params, &kernels)
+            .map_err(PyErr::from)?;
 
-        Ok(PyTuple::new_bound(py, [meshes_list.into_any(), tags_list.into_any()]))
+        mesh_data_list_to_python(py, mesh_data_list)
     }
 
     /// Run the meshing pipeline with a `tch`-backed sphere SDF.
@@ -294,40 +351,32 @@ impl Backend {
         center: Option<Vec<f64>>,
         device: Option<String>,
     ) -> PyResult<Bound<'py, PyTuple>> {
-        let center_arr = match center {
-            Some(values) => {
-                if values.len() != 3 {
-                    return Err(pyo3::exceptions::PyValueError::new_err(
-                        "center must contain exactly 3 values",
-                    ));
-                }
-                [values[0] as f32, values[1] as f32, values[2] as f32]
-            }
-            None => [0.0, 0.0, 0.0],
-        };
-        let tch_device = match device.as_deref() {
-            None | Some("cpu") => Device::Cpu,
-            Some("mps") => Device::Mps,
-            Some(value) => {
-                return Err(pyo3::exceptions::PyValueError::new_err(format!(
-                    "unsupported tch device: {value}"
-                )))
-            }
-        };
+        let center_arr = parse_vector_f32(center, "center", [0.0, 0.0, 0.0])?;
+        let tch_device = parse_tch_device(device)?;
         let kernels = vec![Box::new(TchSphereKernel::new(center_arr, radius as f32, tch_device)) as _];
         let mesh_data_list = run_meshing_pipeline_native(&self.lib, &self.params, &kernels)
             .map_err(PyErr::from)?;
 
-        let meshes_list = PyList::empty_bound(py);
-        let tags_list = PyList::empty_bound(py);
+        mesh_data_list_to_python(py, mesh_data_list)
+    }
 
-        for mesh_data in mesh_data_list {
-            let (mesh_obj, tag_np) = ocmesher_core::mesh_data_to_python(py, mesh_data)?;
-            meshes_list.append(mesh_obj)?;
-            tags_list.append(tag_np)?;
-        }
+    /// Run the meshing pipeline with a `tch`-backed plane SDF.
+    #[cfg(feature = "tch-kernels")]
+    #[pyo3(signature = (offset = 0.0, normal = None, device = None))]
+    fn extract_tch_plane<'py>(
+        &self,
+        py: Python<'py>,
+        offset: f64,
+        normal: Option<Vec<f64>>,
+        device: Option<String>,
+    ) -> PyResult<Bound<'py, PyTuple>> {
+        let normal_arr = parse_vector_f32(normal, "normal", [0.0, 0.0, 1.0])?;
+        let tch_device = parse_tch_device(device)?;
+        let kernels = vec![Box::new(TchPlaneKernel::new(normal_arr, offset as f32, tch_device).map_err(PyErr::from)?) as _];
+        let mesh_data_list = run_meshing_pipeline_native(&self.lib, &self.params, &kernels)
+            .map_err(PyErr::from)?;
 
-        Ok(PyTuple::new_bound(py, [meshes_list.into_any(), tags_list.into_any()]))
+        mesh_data_list_to_python(py, mesh_data_list)
     }
 
     /// Convenience: same as ``get_capabilities()`` for protocol compatibility.

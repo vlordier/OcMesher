@@ -7,6 +7,51 @@ pub trait SdfEvaluator: Send + Sync {
 pub type BoxedSdfEvaluator = Box<dyn SdfEvaluator>;
 
 #[derive(Clone, Debug)]
+pub struct PlaneKernel {
+    normal: [f64; 3],
+    offset: f64,
+}
+
+impl PlaneKernel {
+    pub fn new(normal: [f64; 3], offset: f64) -> Result<Self, CoreError> {
+        let norm = (normal[0] * normal[0] + normal[1] * normal[1] + normal[2] * normal[2]).sqrt();
+        if norm <= f64::EPSILON {
+            return Err(CoreError::Sdf("PlaneKernel normal must be non-zero".to_string()));
+        }
+        Ok(Self {
+            normal: [normal[0] / norm, normal[1] / norm, normal[2] / norm],
+            offset,
+        })
+    }
+}
+
+impl Default for PlaneKernel {
+    fn default() -> Self {
+        Self::new([0.0, 0.0, 1.0], 0.0).expect("default plane normal must be valid")
+    }
+}
+
+impl SdfEvaluator for PlaneKernel {
+    fn evaluate_batch(&self, xyz: &[f64], n_pts: usize) -> Result<Vec<f32>, CoreError> {
+        if xyz.len() != n_pts * 3 {
+            return Err(CoreError::Sdf(format!(
+                "PlaneKernel expected {} coordinates, got {}",
+                n_pts * 3,
+                xyz.len()
+            )));
+        }
+        let mut out = Vec::with_capacity(n_pts);
+        for point in xyz.chunks_exact(3) {
+            out.push(
+                (point[0] * self.normal[0] + point[1] * self.normal[1] + point[2] * self.normal[2] - self.offset)
+                    as f32,
+            );
+        }
+        Ok(out)
+    }
+}
+
+#[derive(Clone, Debug)]
 pub struct SphereKernel {
     center: [f64; 3],
     radius: f64,
@@ -123,6 +168,27 @@ pub mod tch_kernels {
     use tch::{Device, Kind, Tensor};
 
     #[derive(Clone, Debug)]
+    pub struct TchPlaneKernel {
+        normal: [f32; 3],
+        offset: f32,
+        device: Device,
+    }
+
+    impl TchPlaneKernel {
+        pub fn new(normal: [f32; 3], offset: f32, device: Device) -> Result<Self, CoreError> {
+            let norm = (normal[0] * normal[0] + normal[1] * normal[1] + normal[2] * normal[2]).sqrt();
+            if norm <= f32::EPSILON {
+                return Err(CoreError::Sdf("TchPlaneKernel normal must be non-zero".to_string()));
+            }
+            Ok(Self {
+                normal: [normal[0] / norm, normal[1] / norm, normal[2] / norm],
+                offset,
+                device,
+            })
+        }
+    }
+
+    #[derive(Clone, Debug)]
     pub struct TchSphereKernel {
         center: [f32; 3],
         radius: f32,
@@ -169,11 +235,47 @@ pub mod tch_kernels {
             Ok(out)
         }
     }
+
+    impl SdfEvaluator for TchPlaneKernel {
+        fn evaluate_batch(&self, xyz: &[f64], n_pts: usize) -> Result<Vec<f32>, CoreError> {
+            if xyz.len() != n_pts * 3 {
+                return Err(CoreError::Sdf(format!(
+                    "TchPlaneKernel expected {} coordinates, got {}",
+                    n_pts * 3,
+                    xyz.len()
+                )));
+            }
+
+            let xyz_f32: Vec<f32> = xyz.iter().map(|&value| value as f32).collect();
+            let xyz_tensor = Tensor::from_slice(&xyz_f32)
+                .view([n_pts as i64, 3])
+                .to_device(self.device);
+            let normal = Tensor::from_slice(&self.normal)
+                .view([3, 1])
+                .to_device(self.device);
+            let dist = xyz_tensor.matmul(&normal).squeeze_dim(1) - (self.offset as f64);
+            let dist_cpu = dist.to_device(Device::Cpu);
+            let mut out = vec![0f32; dist_cpu.numel()];
+            let len = out.len();
+            dist_cpu.copy_data(&mut out, len);
+            Ok(out)
+        }
+    }
 }
 
 #[cfg(test)]
 mod tests {
-    use super::{BoxedSdfEvaluator, SphereKernel, eval_sdf_full_native, eval_sdf_min_native};
+    use super::{BoxedSdfEvaluator, PlaneKernel, SphereKernel, eval_sdf_full_native, eval_sdf_min_native};
+
+    #[test]
+    fn plane_kernel_matches_expected_distances() {
+        let kernel = PlaneKernel::new([0.0, 0.0, 1.0], 0.5).unwrap();
+        let xyz = [0.0, 0.0, 0.0, 0.0, 0.0, 2.0];
+        let out = crate::native_kernels::SdfEvaluator::evaluate_batch(&kernel, &xyz, 2).unwrap();
+        assert_eq!(out.len(), 2);
+        assert!((out[0] + 0.5).abs() <= 1e-6);
+        assert!((out[1] - 1.5).abs() <= 1e-6);
+    }
 
     #[test]
     fn sphere_kernel_matches_expected_distances() {
@@ -209,5 +311,19 @@ mod tests {
         assert_eq!(out.len(), 2);
         assert!((out[0] + 1.0).abs() <= 1e-5);
         assert!((out[1] - 1.0).abs() <= 1e-5);
+    }
+
+    #[cfg(feature = "tch-kernels")]
+    #[test]
+    fn tch_plane_kernel_matches_expected_distances() {
+        use super::tch_kernels::TchPlaneKernel;
+        use tch::Device;
+
+        let kernel = TchPlaneKernel::new([0.0, 0.0, 1.0], 0.5, Device::Cpu).unwrap();
+        let xyz = [0.0, 0.0, 0.0, 0.0, 0.0, 2.0];
+        let out = crate::native_kernels::SdfEvaluator::evaluate_batch(&kernel, &xyz, 2).unwrap();
+        assert_eq!(out.len(), 2);
+        assert!((out[0] + 0.5).abs() <= 1e-5);
+        assert!((out[1] - 1.5).abs() <= 1e-5);
     }
 }
