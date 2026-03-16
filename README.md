@@ -90,3 +90,15 @@ uv run ruff check .
 uv run ruff format .
 uv run pytest
 ```
+
+### Benchmark Validation Workflow
+
+For local performance and regression validation, use the same sequence as CI/maintenance work:
+
+```bash
+uv run ruff check .
+uv run pytest
+uv run python benchmark.py --configs small --runs 1
+```
+
+To perform deterministic numerical parity checks against `main`, ensure both branches are built with the default build script (`bash install.sh`) and compare mesh counts/sums for the same fixed camera/SDF case.
