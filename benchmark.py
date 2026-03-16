@@ -100,6 +100,8 @@ TIERS_SPEC: list[TierSpec] = [
 ]
 
 PYTHON = sys.executable
+TIER_SEPARATOR_WIDTH = 62
+CONFIG_COLUMN_WIDTH = 20
 
 # ── SDF definitions injected verbatim into subprocess scripts ────────
 
@@ -291,9 +293,9 @@ def run_tier(
 
 def _print_tier_banner(label: str) -> None:
     """Print heading banner for one benchmark tier."""
-    print(f"\n{'=' * 62}")
+    print(f"\n{'=' * TIER_SEPARATOR_WIDTH}")
     print(f"  {label}")
-    print(f"{'=' * 62}")
+    print(f"{'=' * TIER_SEPARATOR_WIDTH}")
 
 
 def _summarize_tier_config(label: str, times: list[float], n_verts: int, n_faces: int, runs: int) -> TierConfigResult:
@@ -333,7 +335,7 @@ def print_comparison(tiers: list[tuple[str, list[TierConfigResult]]]) -> None:
     for row in range(len(tables[0])):
         cfg_label = tables[0][row]["config"]
         medians = [tables[i][row]["median"] for i in range(n_cols)]
-        line = f"{cfg_label:<20}"
+        line = f"{cfg_label:<{CONFIG_COLUMN_WIDTH}}"
         for m in medians:
             line += f"  {m:>{cw}.3f}s"
         for m in medians[1:]:
@@ -350,7 +352,7 @@ def _comparison_column_width(short_labels: list[str]) -> int:
 
 def _comparison_header(short_labels: list[str], col_width: int) -> str:
     """Build the comparison table header line."""
-    header = f"{'Config':<20}"
+    header = f"{'Config':<{CONFIG_COLUMN_WIDTH}}"
     for label in short_labels:
         header += f"  {label:>{col_width + 1}}"
     for _ in short_labels[1:]:
@@ -360,7 +362,7 @@ def _comparison_header(short_labels: list[str], col_width: int) -> str:
 
 def _print_comparison_banner(num_cols: int, col_width: int) -> None:
     """Print title banner for the comparison section."""
-    line_w = 20 + (col_width + 3) * num_cols + 7 * max(0, num_cols - 1)
+    line_w = CONFIG_COLUMN_WIDTH + (col_width + 3) * num_cols + 7 * max(0, num_cols - 1)
     print(f"\n{'=' * line_w}")
     print("  COMPARISON  (median wall-clock per config)")
     print(f"{'=' * line_w}")
