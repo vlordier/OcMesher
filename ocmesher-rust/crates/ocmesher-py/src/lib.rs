@@ -228,6 +228,8 @@ impl Backend {
             visible_relax_iter,
             coarse_count,
             sdf_batch_size,
+            torch_eval_device: Some(requested_device.clone()),
+            torch_eval_dtype: Some(preferred_dtype.clone()),
         };
 
         Ok(Backend {
@@ -256,6 +258,7 @@ impl Backend {
             None => d.set_item("max_batch", py.None())?,
         }
         d.set_item("native_batching", true)?;
+        d.set_item("native_torch_eval", true)?;
         d.set_item("supports_async", self.device == "cuda" || self.device == "mps")?;
         d.set_item("default_stream_policy", self.stream_policy.as_str())?;
         d.set_item("version", self.version.as_str())?;
