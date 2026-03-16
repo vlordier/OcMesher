@@ -195,6 +195,12 @@ result = {{
 print(json.dumps(result))
 """
 
+SDF_BLOCKS = {
+    "vnoise": _SDF_VNOISE,
+    "numba": _SDF_NUMBA,
+    "mlx": _SDF_MLX,
+}
+
 
 def _parse_last_json_line(stdout: str) -> RunResult:
     """Parse the last JSON object line emitted by benchmark subprocess output."""
@@ -217,12 +223,7 @@ def build(script: str) -> float:
 
 
 def run_mesher_subprocess(pixels_per_cube: int, coarse_count: int, sdf_type: str) -> RunResult:
-    sdf_blocks = {
-        "vnoise": _SDF_VNOISE,
-        "numba": _SDF_NUMBA,
-        "mlx": _SDF_MLX,
-    }
-    sdf_block = textwrap.dedent(sdf_blocks[sdf_type])
+    sdf_block = textwrap.dedent(SDF_BLOCKS[sdf_type])
     script = _MESHER_TEMPLATE.format(
         sdf_block=sdf_block,
         ppc=pixels_per_cube,
