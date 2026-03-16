@@ -379,10 +379,7 @@ def _speedup_ratio(baseline: float, candidate: float) -> float:
 
 def main() -> None:
     """Parse CLI arguments, run benchmarks, and optionally write JSON output."""
-    parser = argparse.ArgumentParser(description="Benchmark OcMesher: baseline vs opt-C++ vs opt+numba-SDF")
-    parser.add_argument("--runs", type=int, default=3, help="Runs per configuration (default: 3)")
-    parser.add_argument("--configs", default="all", choices=["small", "medium", "large", "all"])
-    parser.add_argument("--json", help="Write results to JSON file")
+    parser = _create_parser()
     args = parser.parse_args()
 
     os.chdir(Path(__file__).parent)
@@ -401,6 +398,15 @@ def main() -> None:
     if args.json:
         _write_results_json(args.json, all_results)
         print(f"Results written to {args.json}")
+
+
+def _create_parser() -> argparse.ArgumentParser:
+    """Create and return the CLI argument parser for benchmark.py."""
+    parser = argparse.ArgumentParser(description="Benchmark OcMesher: baseline vs opt-C++ vs opt+numba-SDF")
+    parser.add_argument("--runs", type=int, default=3, help="Runs per configuration (default: 3)")
+    parser.add_argument("--configs", default="all", choices=["small", "medium", "large", "all"])
+    parser.add_argument("--json", help="Write results to JSON file")
+    return parser
 
 
 if __name__ == "__main__":
