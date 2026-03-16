@@ -34,3 +34,14 @@ def test_write_stderr_appends_newline(capsys) -> None:
     benchmark._write_stderr("oops")
     err = capsys.readouterr().err
     assert err == "oops\n"
+
+
+def test_write_stream_accepts_custom_buffer() -> None:
+    chunks: list[str] = []
+
+    class _Stream:
+        def write(self, text: str) -> None:
+            chunks.append(text)
+
+    benchmark._write_stream(_Stream(), "line")
+    assert chunks == ["line\n"]
