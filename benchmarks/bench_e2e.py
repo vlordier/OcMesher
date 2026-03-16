@@ -33,6 +33,7 @@ import statistics
 import sys
 import textwrap
 import time
+from pathlib import Path
 
 import numpy as np
 
@@ -477,9 +478,9 @@ def regression_check() -> list[str]:
 # ---------------------------------------------------------------------------
 def compare_results(file_a: str, file_b: str):
     """Print side-by-side comparison of two JSON result files."""
-    with open(file_a) as f:
+    with Path(file_a).open() as f:
         a = json.load(f)
-    with open(file_b) as f:
+    with Path(file_b).open() as f:
         b = json.load(f)
 
     header = f"{'Benchmark':<40s}  {'Size':>8s}  {'A (µs)':>10s}  {'B (µs)':>10s}  {'Speedup':>8s}"
@@ -532,6 +533,7 @@ _BENCHMARKS: dict = {
 # Main
 # ---------------------------------------------------------------------------
 def main():
+    """Run branch-comparable end-to-end orchestration benchmarks."""
     parser = argparse.ArgumentParser(
         description="End-to-end benchmark for OcMesher Python orchestration layer",
         formatter_class=argparse.RawDescriptionHelpFormatter,
@@ -612,7 +614,7 @@ def main():
 
     # -- Save results ----------------------------------------------------
     if args.json:
-        with open(args.json, "w") as f:
+        with Path(args.json).open("w") as f:
             json.dump(all_results, f, indent=2)
         print(f"Results saved to {args.json}")
 
