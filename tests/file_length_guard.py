@@ -19,7 +19,10 @@ MAX_LINES_BY_FILE: dict[str, int] = {
 
 
 def _line_count(path: Path) -> int:
-    return path.read_text(encoding="utf-8").count("\n") + 1
+    text = path.read_text(encoding="utf-8")
+    if not text:
+        return 0
+    return len(text.splitlines())
 
 
 def _file_length_violations(repo_root: Path) -> list[str]:
