@@ -37,7 +37,7 @@ import numpy as np
 import torch
 import trimesh
 
-from ._constants import CORNER_QUANT_SCALE, DENOM_EPS, MAX_SDF_WORKERS
+from ._constants import CORNER_QUANT_SCALE, DENOM_EPS, HASH_PRIME_X, HASH_PRIME_Y, HASH_PRIME_Z, MAX_SDF_WORKERS
 from ._mc_tables import CORNER_OFFSETS, EDGE_TABLE, EDGE_VERTICES, TRI_TABLE
 from ._validation import bounds_min_max as _bounds_min_max
 from ._validation import coerce_kernel_sdf as _coerce_kernel_sdf
@@ -629,7 +629,7 @@ class TorchOcMesher:
         # faster than ``torch.unique(dim=0)`` which performs an O(N log N)
         # lexicographic sort with 3-column comparisons per step.
         quantized = (flat * _CORNER_QUANT_SCALE).round().long()
-        hash_vals = quantized[:, 0] * 1000000007 + quantized[:, 1] * 1000000009 + quantized[:, 2] * 1000000021
+        hash_vals = quantized[:, 0] * HASH_PRIME_X + quantized[:, 1] * HASH_PRIME_Y + quantized[:, 2] * HASH_PRIME_Z
         sort_idx = torch.argsort(hash_vals)
         sorted_q = quantized[sort_idx]
 
@@ -910,8 +910,8 @@ class TorchOcMesher:
 
         # --- Vertex deduplication via quantised coordinate hashing ---
         # All tensors are already on CPU in float64; quantise directly.
-        quantized = (verts_flat * 1e8).round().long()
-        hash_vals = quantized[:, 0] * 1000000007 + quantized[:, 1] * 1000000009 + quantized[:, 2] * 1000000021
+        quantized = (verts_flat * _CORNER_QUANT_SCALE).round().long()
+        hash_vals = quantized[:, 0] * HASH_PRIME_X + quantized[:, 1] * HASH_PRIME_Y + quantized[:, 2] * HASH_PRIME_Z
         _, inverse = torch.unique(hash_vals, return_inverse=True)
         n_unique = int(inverse.max().item()) + 1
         n_verts = len(inverse)

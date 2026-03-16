@@ -13,6 +13,9 @@ __all__ = [
     "CORNER_QUANT_SCALE",
     "DEFAULT_SDF_WORKERS",
     "DENOM_EPS",
+    "HASH_PRIME_X",
+    "HASH_PRIME_Y",
+    "HASH_PRIME_Z",
     "MAX_SDF_WORKERS",
     "SDF_BATCH_SIZE",
 ]
@@ -45,3 +48,12 @@ DENOM_EPS: float = 1e-12
 # deduplication.  1e8 gives 10-nanometre resolution — fine enough to
 # distinguish corners at the deepest practical octree level.
 CORNER_QUANT_SCALE: float = 1e8
+
+# Large primes used for spatial hashing of quantised 3-D coordinates.
+# ``hash = x * P0 + y * P1 + z * P2`` produces a well-distributed 1-D
+# key for radix-sort-based deduplication in marching cubes and surface
+# detection.  The primes are chosen to be close together (~1e9) so that
+# the hash stays within int64 range for typical coordinate magnitudes.
+HASH_PRIME_X: int = 1_000_000_007
+HASH_PRIME_Y: int = 1_000_000_009
+HASH_PRIME_Z: int = 1_000_000_021
