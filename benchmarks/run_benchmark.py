@@ -389,7 +389,7 @@ def _micro_projection(cameras, bounds, n_cubes: int = 100_000, n_runs: int = 5) 
     return results
 
 
-def _micro_marching_cubes(cameras, bounds, n_runs: int = 3):
+def _micro_marching_cubes(cameras, bounds, n_runs: int = 3) -> dict[str, object]:
     """Benchmark marching cubes in isolation."""
     results: dict[str, object] = {}
     try:
@@ -420,7 +420,7 @@ def _micro_marching_cubes(cameras, bounds, n_runs: int = 3):
     return results
 
 
-def _micro_vertex_dedup(cameras, bounds, n_runs: int = 5):
+def _micro_vertex_dedup(cameras, bounds, n_runs: int = 5) -> dict[str, object]:
     """Benchmark GPU-accelerated vertex deduplication vs numpy baseline."""
     results: dict[str, object] = {}
     try:
