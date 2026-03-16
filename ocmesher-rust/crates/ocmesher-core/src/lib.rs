@@ -414,6 +414,7 @@ fn extract_sdf_output(py: Python<'_>, raw: Py<PyAny>) -> PyResult<Vec<f32>> {
 
     let raw = extract_sdf_value(py, raw)?;
 
+    // ── Fast path 1: already a CPU numpy f32 array (zero-copy slice) ────────
     if let Ok(arr) = raw.extract::<PyReadonlyArray1<f32>>(py) {
         return arr
             .as_slice()
@@ -428,25 +429,101 @@ fn extract_sdf_output(py: Python<'_>, raw: Py<PyAny>) -> PyResult<Vec<f32>> {
             .map_err(|_| pyo3::exceptions::PyValueError::new_err("SDF array not contiguous"));
     }
 
-    if let Ok(detached) = raw.bind(py).call_method0("detach") {
-        if let Ok(cpu_tensor) = detached.call_method1("to", ("cpu",)) {
-            if let Ok(numpy_obj) = cpu_tensor.call_method0("numpy") {
-                if let Ok(arr) = numpy_obj.extract::<PyReadonlyArray1<f32>>() {
-                    return arr
-                        .as_slice()
-                        .map(|s| s.to_vec())
-                        .map_err(|_| pyo3::exceptions::PyValueError::new_err("SDF array not contiguous"));
+    // ── Fast path 2: torch tensor — use DLPack to avoid numpy overhead ───────
+    // When the kernel lives on GPU, bring to CPU first; then export via
+    // to_dlpack() and read the raw pointer directly without creating a
+    // numpy array object at all.
+    if raw.bind(py).hasattr("__dlpack__").unwrap_or(false) {
+        // Ensure the tensor is on CPU (detach first to drop autograd graph).
+        let cpu_tensor = {
+            let t = if let Ok(d) = raw.bind(py).call_method0("detach") {
+                d
+            } else {
+                raw.bind(py).clone()
+            };
+            // is_cuda / device.type check
+            let on_gpu = t
+                .getattr("device")
+                .and_then(|d| d.getattr("type"))
+                .and_then(|ty| ty.str())
+                .map(|s| s.to_str().map(|s| s != "cpu").unwrap_or(false))
+                .unwrap_or(false);
+            if on_gpu {
+                t.call_method1("to", ("cpu",))?
+            } else {
+                t
+            }
+        };
+
+        // Try torch.utils.dlpack.to_dlpack → read raw DLManagedTensor bytes.
+        let extracted: Option<Vec<f32>> = (|| {
+            let torch = py.import_bound("torch").ok()?;
+            let to_dlpack = torch
+                .getattr("utils").ok()?
+                .getattr("dlpack").ok()?
+                .getattr("to_dlpack").ok()?;
+            let capsule = to_dlpack.call1((&cpu_tensor,)).ok()?;
+
+            // Get raw pointer from the capsule.
+            let ptr = unsafe {
+                pyo3::ffi::PyCapsule_GetPointer(
+                    capsule.as_ptr(),
+                    DLPACK_CAPSULE_NAME.as_ptr().cast(),
+                )
+            };
+            if ptr.is_null() {
+                return None;
+            }
+            let managed = ptr.cast::<DLManagedTensor>();
+            let dl = unsafe { &(*managed).dl_tensor };
+
+            // Reject anything that isn't a 1-D CPU float tensor.
+            if dl.device.device_type != 1 || dl.ndim != 1 || dl.data.is_null() {
+                return None;
+            }
+            let n = unsafe { *dl.shape } as usize;
+            let byte_offset = dl.byte_offset as usize;
+            let data_ptr = unsafe { (dl.data as *const u8).add(byte_offset) };
+
+            match (dl.dtype.code, dl.dtype.bits) {
+                (2, 32) => {
+                    // float32 — copy directly
+                    let slice =
+                        unsafe { std::slice::from_raw_parts(data_ptr.cast::<f32>(), n) };
+                    Some(slice.to_vec())
                 }
-                if let Ok(arr) = numpy_obj.extract::<PyReadonlyArray1<f64>>() {
-                    return arr
-                        .as_slice()
-                        .map(|s| s.iter().map(|&v| v as f32).collect())
-                        .map_err(|_| pyo3::exceptions::PyValueError::new_err("SDF array not contiguous"));
+                (2, 64) => {
+                    // float64 — downcast
+                    let slice =
+                        unsafe { std::slice::from_raw_parts(data_ptr.cast::<f64>(), n) };
+                    Some(slice.iter().map(|&v| v as f32).collect())
                 }
+                _ => None,
+            }
+        })();
+
+        if let Some(vals) = extracted {
+            return Ok(vals);
+        }
+
+        // Fallback within the torch branch: use numpy()
+        if let Ok(numpy_obj) = cpu_tensor.call_method0("numpy") {
+            if let Ok(arr) = numpy_obj.extract::<PyReadonlyArray1<f32>>() {
+                return arr
+                    .as_slice()
+                    .map(|s| s.to_vec())
+                    .map_err(|_| pyo3::exceptions::PyValueError::new_err("SDF array not contiguous"));
+            }
+            if let Ok(arr) = numpy_obj.extract::<PyReadonlyArray1<f64>>() {
+                return arr
+                    .as_slice()
+                    .map(|s| s.iter().map(|&v| v as f32).collect())
+                    .map_err(|_| pyo3::exceptions::PyValueError::new_err("SDF array not contiguous"));
             }
         }
     }
 
+    // ── Fast path 3: generic .numpy() (non-torch DLPack-capable objects) ────
     if let Ok(numpy_obj) = raw.bind(py).call_method0("numpy") {
         if let Ok(arr) = numpy_obj.extract::<PyReadonlyArray1<f32>>() {
             return arr
@@ -458,18 +535,6 @@ fn extract_sdf_output(py: Python<'_>, raw: Py<PyAny>) -> PyResult<Vec<f32>> {
             return arr
                 .as_slice()
                 .map(|s| s.iter().map(|&v| v as f32).collect())
-                .map_err(|_| pyo3::exceptions::PyValueError::new_err("SDF array not contiguous"));
-        }
-    }
-
-    if let Ok(cap) = raw.bind(py).call_method0("__dlpack__") {
-        let np = py.import_bound("numpy")?;
-        let from_dlpack = np.getattr("from_dlpack")?;
-        let arr_obj = from_dlpack.call1((cap,))?;
-        if let Ok(arr) = arr_obj.extract::<PyReadonlyArray1<f32>>() {
-            return arr
-                .as_slice()
-                .map(|s| s.to_vec())
                 .map_err(|_| pyo3::exceptions::PyValueError::new_err("SDF array not contiguous"));
         }
     }

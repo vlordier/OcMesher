@@ -293,6 +293,8 @@ impl Backend {
         d.set_item("zero_copy_query_dlpack_cpu", true)?;
         // f32 DLPack halves H2D size and eliminates GPU-side dtype conversion.
         d.set_item("zero_copy_query_dlpack_f32", true)?;
+        // D2H: SDF output read directly from DLManagedTensor raw pointer (no numpy).
+        d.set_item("zero_copy_output_dlpack", true)?;
         d.set_item("supports_async", self.device == "cuda" || self.device == "mps")?;
         d.set_item("default_stream_policy", self.stream_policy.as_str())?;
         // Pinned CPU memory is used for CUDA non-blocking transfers (stream_policy=auto).
