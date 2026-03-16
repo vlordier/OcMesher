@@ -29,17 +29,12 @@ __all__ = [
 _AXIS_NAMES = ("x", "y", "z")
 
 
-def validate_cameras(cameras: CamerasTuple) -> CamerasTuple:  # noqa: C901
-    """Validate and normalise camera tuple, returning ``(cam_poses, Ks, Hs, Ws)``.
-
-    Args:
-        cameras: Tuple of ``(cam_poses, Ks, Hs, Ws)``.
-
-    Returns:
-        Tuple of numpy arrays ``(cam_poses, Ks, Hs, Ws)``.
+def _validate_camera_structure(cameras: CamerasTuple) -> tuple:
+    """Unpack and validate the top-level camera tuple structure.
 
     Raises:
-        ValueError: If cameras structure, lengths, or shapes are invalid.
+        ValueError: If *cameras* is not a 4-element tuple/list or if the
+            component arrays have mismatched lengths.
     """
     if not isinstance(cameras, (tuple, list)) or len(cameras) != 4:  # noqa: PLR2004
         msg = "cameras must be a tuple/list of (cam_poses, Ks, Hs, Ws)"
@@ -52,6 +47,18 @@ def validate_cameras(cameras: CamerasTuple) -> CamerasTuple:  # noqa: C901
     if n == 0:
         msg = "At least one camera is required"
         raise ValueError(msg)
+    return cam_poses, Ks, Hs, Ws
+
+
+def _validate_camera_arrays(cam_poses, Ks):
+    """Convert and shape-check pose and intrinsics arrays.
+
+    Returns:
+        ``(cam_poses, Ks)`` as lists of float64 numpy arrays.
+
+    Raises:
+        ValueError: If any pose is not ``(4, 4)`` or any K is not ``(3, 3)``.
+    """
     cam_poses = [np.asarray(p, dtype=np.float64) for p in cam_poses]
     Ks = [np.asarray(k, dtype=np.float64) for k in Ks]
     for i, pose in enumerate(cam_poses):
@@ -62,6 +69,15 @@ def validate_cameras(cameras: CamerasTuple) -> CamerasTuple:  # noqa: C901
         if k.shape != (3, 3):
             msg = f"Ks[{i}] must be a 3x3 matrix, got shape {k.shape}"
             raise ValueError(msg)
+    return cam_poses, Ks
+
+
+def _validate_camera_dimensions(Hs, Ws):
+    """Validate that image heights and widths are positive integers.
+
+    Raises:
+        ValueError: If any H or W is non-positive or non-integral.
+    """
     for i, h in enumerate(Hs):
         if int(h) != h or h <= 0:
             msg = f"Hs[{i}] must be a positive integer, got {h!r}"
@@ -70,6 +86,23 @@ def validate_cameras(cameras: CamerasTuple) -> CamerasTuple:  # noqa: C901
         if int(w) != w or w <= 0:
             msg = f"Ws[{i}] must be a positive integer, got {w!r}"
             raise ValueError(msg)
+
+
+def validate_cameras(cameras: CamerasTuple) -> CamerasTuple:
+    """Validate and normalise camera tuple, returning ``(cam_poses, Ks, Hs, Ws)``.
+
+    Args:
+        cameras: Tuple of ``(cam_poses, Ks, Hs, Ws)``.
+
+    Returns:
+        Tuple of numpy arrays ``(cam_poses, Ks, Hs, Ws)``.
+
+    Raises:
+        ValueError: If cameras structure, lengths, or shapes are invalid.
+    """
+    cam_poses, Ks, Hs, Ws = _validate_camera_structure(cameras)
+    cam_poses, Ks = _validate_camera_arrays(cam_poses, Ks)
+    _validate_camera_dimensions(Hs, Ws)
     return cam_poses, Ks, Hs, Ws
 
 
