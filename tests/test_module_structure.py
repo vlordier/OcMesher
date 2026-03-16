@@ -172,6 +172,16 @@ class TestTypesModule:
 
         assert BoundsLike is not None
 
+    def test_can_import_kernel_sequence(self):
+        from ocmesher._types import KernelSequence
+
+        assert KernelSequence is not None
+
+    def test_can_import_mesh_result(self):
+        from ocmesher._types import MeshResult
+
+        assert MeshResult is not None
+
     def test_all_defined(self):
         from ocmesher import _types
 

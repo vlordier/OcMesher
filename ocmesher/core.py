@@ -19,6 +19,7 @@ from tqdm import tqdm
 from ._constants import (
     CAMERA_DATA_STRIDE,
 )
+from ._types import MeshResult
 from ._constants import (
     MAX_SDF_WORKERS as _MAX_SDF_WORKERS,
 )
@@ -463,7 +464,7 @@ class OcMesher:
 
         return result
 
-    def __call__(self, kernels) -> tuple[list[trimesh.Trimesh], list[np.ndarray]]:
+    def __call__(self, kernels) -> MeshResult:
         """Run the full coarse-to-fine meshing pipeline and return meshes."""
         _validate_kernels(kernels)
         n_elements = len(kernels)

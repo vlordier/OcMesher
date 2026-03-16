@@ -39,6 +39,7 @@ import trimesh
 
 from ._constants import CORNER_QUANT_SCALE, DENOM_EPS, MAX_SDF_WORKERS
 from ._mc_tables import CORNER_OFFSETS, EDGE_TABLE, EDGE_VERTICES, TRI_TABLE
+from ._types import MeshResult
 from ._validation import bounds_min_max as _bounds_min_max
 from ._validation import coerce_kernel_sdf as _coerce_kernel_sdf
 from ._validation import out_of_bounds_mask as _out_of_bounds_mask
@@ -902,7 +903,7 @@ class TorchOcMesher:
     # ------------------------------------------------------------------
     # Main pipeline
     # ------------------------------------------------------------------
-    def __call__(self, kernels) -> tuple[list[trimesh.Trimesh], list[np.ndarray]]:
+    def __call__(self, kernels) -> MeshResult:
         """Run the full coarse-to-fine meshing pipeline and return meshes."""
         n_elements = len(kernels)
 

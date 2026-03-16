@@ -10,6 +10,8 @@ from __future__ import annotations
 
 import numpy as np
 
+from ._types import BoundsLike, CamerasTuple, KernelSequence
+
 __all__ = [
     "bounds_min_max",
     "coerce_kernel_sdf",
@@ -23,7 +25,7 @@ __all__ = [
 _AXIS_NAMES = ("x", "y", "z")
 
 
-def validate_cameras(cameras):
+def validate_cameras(cameras: CamerasTuple) -> CamerasTuple:
     """Validate and normalise camera tuple, returning ``(cam_poses, Ks, Hs, Ws)``.
 
     Args:
@@ -59,7 +61,7 @@ def validate_cameras(cameras):
     return cam_poses, Ks, Hs, Ws
 
 
-def validate_bounds(bounds):
+def validate_bounds(bounds: BoundsLike) -> np.ndarray:
     """Validate bounds array: 6 elements ``[x_min, x_max, y_min, y_max, z_min, z_max]``.
 
     Args:
@@ -99,7 +101,7 @@ def bounds_min_max(bounds):
     return b_min, b_max
 
 
-def validate_kernels(kernels):
+def validate_kernels(kernels: KernelSequence) -> None:
     """Validate that *kernels* is a non-empty sequence of callables.
 
     Args:
