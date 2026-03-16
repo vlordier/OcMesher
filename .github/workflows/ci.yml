@@ -53,6 +53,9 @@ jobs:
       - name: Install Python dependencies
         run: uv sync --extra dev
 
+      - name: Run file-length policy guard
+        run: uv run python tests/file_length_guard.py
+
       - name: Run Python tests
         run: |
           if [ -d tests ]; then
