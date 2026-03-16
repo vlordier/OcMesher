@@ -58,6 +58,18 @@ class TestVectorisedInit:
         assert single_cam_mesher._pix_ang_ppc.shape == (1, 1)
 
 
+# ---------------------------------------------------------------------------
+# Context-manager protocol
+# ---------------------------------------------------------------------------
+class TestContextManager:
+    def test_with_statement_returns_mesher(self, single_cam_mesher):
+        with single_cam_mesher as m:
+            assert m is single_cam_mesher
+
+    def test_exit_returns_false(self, single_cam_mesher):
+        assert single_cam_mesher.__exit__(None, None, None) is False
+
+
 class TestConstructorValidation:
     def test_invalid_cameras_raises(self, sample_bounds):
         with pytest.raises(ValueError, match="cameras must be"):

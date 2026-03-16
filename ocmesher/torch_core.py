@@ -339,6 +339,16 @@ class TorchOcMesher:
             f"enclosed={self.enclosed})"
         )
 
+    def __enter__(self):
+        """Support ``with TorchOcMesher(...) as m:`` usage."""
+        return self
+
+    def __exit__(self, exc_type, exc_val, exc_tb):
+        """Release CUDA caches on context-manager exit."""
+        if self.device.type == "cuda":
+            torch.cuda.empty_cache()
+        return False
+
     def _ensure_mc_cache(self):
         """Lazily build marching-cubes lookup tables on *self.device*."""
         if self.device in TorchOcMesher._mc_cache:
