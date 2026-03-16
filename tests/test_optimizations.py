@@ -508,7 +508,7 @@ class TestPoolSubmitMultiKernel:
 
     def test_multi_kernel_uses_pool_submit(self):
         """Multi-kernel kernel_caller should use pool.submit (no _make_eval_one)."""
-        source = inspect.getsource(OcMesher.kernel_caller)
+        source = inspect.getsource(OcMesher._kernel_caller_multi)
         # _make_eval_one closure factory should no longer exist
         assert "_make_eval_one" not in source
         # pool.submit should be bound as _submit and called
@@ -552,13 +552,13 @@ class TestSingleKernelDirectAssignment:
     def test_no_result_col_intermediate(self):
         """Single-kernel path should not create result_col intermediate view."""
 
-        source = inspect.getsource(OcMesher.kernel_caller)
+        source = inspect.getsource(OcMesher._kernel_caller_single)
         assert "result_col" not in source
 
     def test_single_kernel_enclosed_split(self):
         """Single-kernel path should have separate enclosed/non-enclosed loops."""
 
-        source = inspect.getsource(OcMesher.kernel_caller)
+        source = inspect.getsource(OcMesher._kernel_caller_single)
         # The if _enclosed check should be outside the loop for single-kernel
         # (separate loop bodies for enclosed vs non-enclosed)
         assert source.count("if _enclosed:") >= 1

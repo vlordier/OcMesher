@@ -822,3 +822,37 @@ class TestDeduplicatedKernelCallerLoops:
         assert result[0, 1] == pytest.approx(-2.0)
         assert result[1, 0] == pytest.approx(-1.0)  # Not masked
         assert result[1, 1] == pytest.approx(-2.0)  # Not masked
+
+
+class TestSpecializedKernelCallerHelpers:
+    @staticmethod
+    def _make_stub(*, enclosed=True):
+        obj = object.__new__(OcMesher)
+        obj.sdf_np_float_type = np.float32
+        obj.enclosed = enclosed
+        obj._bounds_min_np = np.array([0.0, 0.0, 0.0])
+        obj._bounds_max_np = np.array([10.0, 10.0, 10.0])
+        obj._sdf_pool = None
+        obj._oob_mask = np.empty(_SDF_BATCH_SIZE, dtype=bool)
+        obj._oob_tmp = np.empty(_SDF_BATCH_SIZE, dtype=bool)
+        return obj
+
+    def test_single_helper_matches_public_kernel_caller(self):
+        obj = self._make_stub(enclosed=True)
+        pts = np.array([[5.0, 5.0, 5.0], [999.0, 999.0, 999.0]])
+        kernel = _constant_kernel(-0.5)
+
+        public = obj.kernel_caller([kernel], pts)
+        direct = obj._kernel_caller_single(kernel, pts)
+
+        np.testing.assert_array_equal(direct, public)
+
+    def test_multi_helper_matches_public_kernel_caller(self):
+        obj = self._make_stub(enclosed=False)
+        pts = np.array([[1.0, 2.0, 3.0], [4.0, 5.0, 6.0]])
+        kernels = [_constant_kernel(1.0), _constant_kernel(2.0)]
+
+        public = obj.kernel_caller(kernels, pts)
+        direct = obj._kernel_caller_multi(kernels, pts)
+
+        np.testing.assert_array_equal(direct, public)
