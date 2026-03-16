@@ -598,13 +598,13 @@ dependencies = [
     { name = "psutil" },
     { name = "tqdm" },
     { name = "trimesh" },
-    { name = "vnoise" },
 ]
 
 [package.optional-dependencies]
 benchmark = [
     { name = "mlx" },
     { name = "numba" },
+    { name = "vnoise" },
 ]
 dev = [
     { name = "pytest" },
@@ -630,7 +630,7 @@ requires-dist = [
     { name = "torch", marker = "extra == 'torch'", specifier = ">=2.0.0" },
     { name = "tqdm", specifier = ">=4.65.0" },
     { name = "trimesh", specifier = ">=4.0.0" },
-    { name = "vnoise", specifier = ">=0.1.0" },
+    { name = "vnoise", marker = "extra == 'benchmark'", specifier = ">=0.1.0" },
 ]
 provides-extras = ["torch", "dev", "benchmark"]
 

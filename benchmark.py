@@ -21,6 +21,7 @@ import subprocess
 import sys
 import textwrap
 import time
+from collections.abc import Callable
 from pathlib import Path
 from typing import TypedDict
 
@@ -68,6 +69,19 @@ _noise = _vnoise.Noise()
 def sdf(XYZ):
     scale = 2
     h = _noise.noise2(XYZ[:, 0] / scale, XYZ[:, 1] / scale, grid_mode=False, octaves=4)
+    return XYZ[:, 2] - h
+"""
+
+_SDF_ANALYTIC = """
+import numpy as _np
+
+def sdf(XYZ):
+    x = XYZ[:, 0] / 2.0
+    y = XYZ[:, 1] / 2.0
+    h = (0.5000 * _np.sin(1.0 * x) * _np.cos(1.0 * y) +
+         0.2500 * _np.sin(2.0 * x) * _np.cos(2.0 * y) +
+         0.1250 * _np.sin(4.0 * x) * _np.cos(4.0 * y) +
+         0.0625 * _np.sin(8.0 * x) * _np.cos(8.0 * y))
     return XYZ[:, 2] - h
 """
 
@@ -186,8 +200,55 @@ def build(script: str) -> float:
     return time.perf_counter() - t0
 
 
+def _is_module_importable(module: str) -> bool:
+    """Return True if *module* can be imported by the benchmark Python interpreter."""
+    cmd = [PYTHON, "-c", f"import {module}"]
+    result = subprocess.run(cmd, capture_output=True, text=True, check=False)
+    return result.returncode == 0
+
+
+def _build_tiers_spec(
+    module_check: Callable[[str], bool] | None = None,
+) -> tuple[list[tuple[str, str, str]], list[str]]:
+    """Build benchmark tiers based on optional dependency availability."""
+    check = module_check or _is_module_importable
+    notes: list[str] = []
+
+    if check("vnoise"):
+        base_label = "Baseline(-O3+vnoise)"
+        opt_cpp_label = "Opt-C++(M4+unordered)"
+        base_sdf = "vnoise"
+    else:
+        base_label = "Baseline(-O3+analytic)"
+        opt_cpp_label = "Opt-C++(M4+unordered+analytic)"
+        base_sdf = "analytic"
+        notes.append("vnoise unavailable; using built-in analytic terrain fallback for baseline tiers.")
+
+    tiers: list[tuple[str, str, str]] = [
+        (base_label, BASELINE_BUILD, base_sdf),
+        (opt_cpp_label, OPTIMISED_BUILD, base_sdf),
+    ]
+
+    if check("numba"):
+        tiers.append(("Opt-numba(+numba-SDF)", OPTIMISED_BUILD, "numba"))
+    else:
+        notes.append("numba unavailable; skipping Opt-numba tier.")
+
+    if check("mlx"):
+        tiers.append(("Opt-metal(+MLX-SDF)", OPTIMISED_BUILD, "mlx"))
+    else:
+        notes.append("mlx unavailable; skipping Opt-metal tier.")
+
+    return tiers, notes
+
+
 def run_mesher_subprocess(pixels_per_cube: int, coarse_count: int, sdf_type: str) -> RunResult:
-    sdf_blocks = {"vnoise": _SDF_VNOISE, "numba": _SDF_NUMBA, "mlx": _SDF_MLX}
+    sdf_blocks = {
+        "analytic": _SDF_ANALYTIC,
+        "vnoise": _SDF_VNOISE,
+        "numba": _SDF_NUMBA,
+        "mlx": _SDF_MLX,
+    }
     sdf_block = textwrap.dedent(sdf_blocks[sdf_type])
     script = _MESHER_TEMPLATE.format(
         sdf_block=sdf_block,
@@ -320,12 +381,9 @@ def main() -> None:
     configs = _select_configs(args.configs, DEMO_CONFIGS)
     _validate_selected_configs(args.configs, configs)
 
-    tiers_spec = [
-        ("Baseline(-O3+vnoise)", BASELINE_BUILD, "vnoise"),
-        ("Opt-C++(M4+unordered)", OPTIMISED_BUILD, "vnoise"),
-        ("Opt-numba(+numba-SDF)", OPTIMISED_BUILD, "numba"),
-        ("Opt-metal(+MLX-SDF)", OPTIMISED_BUILD, "mlx"),
-    ]
+    tiers_spec, notes = _build_tiers_spec()
+    for note in notes:
+        print(f"Note: {note}")
 
     all_results = []
     for label, build_script, sdf_type in tiers_spec:

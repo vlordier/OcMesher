@@ -70,6 +70,16 @@ uv run python demo.py
 
 This example uses one camera and the Perlin Noise from the Python library `vnoise` and outputs the resulting mesh in `results/demo.obj`.
 
+If `vnoise` is not available, the demo automatically falls back to a built-in
+analytic multi-octave terrain SDF so it still runs without extra packages.
+
+For benchmark runs that include the `vnoise` terrain tier, install optional
+benchmark extras:
+
+```bash
+uv sync --extra benchmark
+```
+
 ### Development Checks
 
 The repo uses Ruff for linting/formatting and Pytest for tests.
