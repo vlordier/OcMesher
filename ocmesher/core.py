@@ -20,6 +20,15 @@ from tqdm import tqdm
 from ._constants import CAMERA_DATA_STRIDE
 from ._constants import MAX_SDF_WORKERS as _MAX_SDF_WORKERS
 from ._constants import SDF_BATCH_SIZE as _SDF_BATCH_SIZE
+from ._validation import _AXIS_NAMES  # noqa: F401
+from ._validation import bounds_min_max as _bounds_min_max
+from ._validation import coerce_kernel_sdf as _coerce_kernel_sdf
+from ._validation import out_of_bounds_mask as _out_of_bounds_mask_shared
+from ._validation import preprocess_cameras as _preprocess_cameras
+from ._validation import validate_bounds as _validate_bounds
+from ._validation import validate_cameras as _validate_cameras
+from ._validation import validate_kernels as _validate_kernels
+from ._validation import validate_mesher_params as _validate_mesher_params
 from .utils.interface import (
     POINTER,
     AsBool,
@@ -50,17 +59,6 @@ _np_less_equal = np.less_equal
 _np_greater_equal = np.greater_equal
 _np_logical_or = np.logical_or
 _np_asarray = np.asarray
-
-# Re-export validation under private names for backwards compatibility.
-from ._validation import _AXIS_NAMES  # noqa: E402, F401
-from ._validation import bounds_min_max as _bounds_min_max  # noqa: E402
-from ._validation import coerce_kernel_sdf as _coerce_kernel_sdf  # noqa: E402
-from ._validation import out_of_bounds_mask as _out_of_bounds_mask_shared  # noqa: E402
-from ._validation import preprocess_cameras as _preprocess_cameras  # noqa: E402
-from ._validation import validate_bounds as _validate_bounds  # noqa: E402
-from ._validation import validate_cameras as _validate_cameras  # noqa: E402
-from ._validation import validate_kernels as _validate_kernels  # noqa: E402
-from ._validation import validate_mesher_params as _validate_mesher_params  # noqa: E402
 
 
 @gin.configurable
