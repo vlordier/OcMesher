@@ -348,6 +348,13 @@ def _validate_selected_configs(config_choice: str, configs: list[DemoConfig]) ->
         raise ValueError(msg)
 
 
+def _write_results_json(output_path: str, results: list[tuple[str, list[TierConfigResult]]]) -> None:
+    """Serialize benchmark results to a JSON file."""
+    data = dict(results)
+    with Path(output_path).open("w") as f:
+        json.dump(data, f, indent=2)
+
+
 def main() -> None:
     parser = argparse.ArgumentParser(description="Benchmark OcMesher: baseline vs opt-C++ vs opt+numba-SDF")
     parser.add_argument("--runs", type=int, default=3, help="Runs per configuration (default: 3)")
@@ -369,9 +376,7 @@ def main() -> None:
     print_comparison(all_results)
 
     if args.json:
-        data = dict(all_results)
-        with Path(args.json).open("w") as f:
-            json.dump(data, f, indent=2)
+        _write_results_json(args.json, all_results)
         print(f"Results written to {args.json}")
 
 
