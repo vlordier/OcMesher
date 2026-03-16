@@ -80,6 +80,13 @@ DEMO_CONFIGS: list[DemoConfig] = [
     {"label": "large (ppc=8)", "pixels_per_cube": 8, "coarse_count": 500_000},
 ]
 
+TIERS_SPEC: list[tuple[str, str, str]] = [
+    ("Baseline(-O3+vnoise)", BASELINE_BUILD, "vnoise"),
+    ("Opt-C++(M4+unordered)", OPTIMISED_BUILD, "vnoise"),
+    ("Opt-numba(+numba-SDF)", OPTIMISED_BUILD, "numba"),
+    ("Opt-metal(+MLX-SDF)", OPTIMISED_BUILD, "mlx"),
+]
+
 PYTHON = sys.executable
 
 # ── SDF definitions injected verbatim into subprocess scripts ────────
@@ -347,15 +354,8 @@ def main() -> None:
     configs = _select_configs(args.configs, DEMO_CONFIGS)
     _validate_selected_configs(args.configs, configs)
 
-    tiers_spec = [
-        ("Baseline(-O3+vnoise)", BASELINE_BUILD, "vnoise"),
-        ("Opt-C++(M4+unordered)", OPTIMISED_BUILD, "vnoise"),
-        ("Opt-numba(+numba-SDF)", OPTIMISED_BUILD, "numba"),
-        ("Opt-metal(+MLX-SDF)", OPTIMISED_BUILD, "mlx"),
-    ]
-
     all_results = []
-    for label, build_script, sdf_type in tiers_spec:
+    for label, build_script, sdf_type in TIERS_SPEC:
         results = run_tier(label, build_script, sdf_type, configs, args.runs)
         all_results.append((label, results))
 
