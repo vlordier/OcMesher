@@ -18,6 +18,7 @@ __all__ = [
     "HASH_PRIME_Z",
     "MAX_SDF_WORKERS",
     "SDF_BATCH_SIZE",
+    "TORCH_SDF_CHUNK_SIZE",
 ]
 
 # Number of float64 values per camera in the packed camera buffer
@@ -57,3 +58,8 @@ CORNER_QUANT_SCALE: float = 1e8
 HASH_PRIME_X: int = 1_000_000_007
 HASH_PRIME_Y: int = 1_000_000_009
 HASH_PRIME_Z: int = 1_000_000_021
+
+# Chunk size for batched SDF evaluation in the PyTorch backend.
+# Smaller than SDF_BATCH_SIZE (which targets the C++ backend) to
+# improve cache locality during GPU→CPU transfers.
+TORCH_SDF_CHUNK_SIZE: int = 2_000_000

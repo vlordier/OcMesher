@@ -37,7 +37,15 @@ import numpy as np
 import torch
 import trimesh
 
-from ._constants import CORNER_QUANT_SCALE, DENOM_EPS, HASH_PRIME_X, HASH_PRIME_Y, HASH_PRIME_Z, MAX_SDF_WORKERS
+from ._constants import (
+    CORNER_QUANT_SCALE,
+    DENOM_EPS,
+    HASH_PRIME_X,
+    HASH_PRIME_Y,
+    HASH_PRIME_Z,
+    MAX_SDF_WORKERS,
+    TORCH_SDF_CHUNK_SIZE,
+)
 from ._mc_tables import CORNER_OFFSETS, EDGE_TABLE, EDGE_VERTICES, TRI_TABLE
 from ._validation import bounds_min_max as _bounds_min_max
 from ._validation import coerce_kernel_sdf as _coerce_kernel_sdf
@@ -484,7 +492,7 @@ class TorchOcMesher:
             return torch.zeros((0, n_kernels), dtype=torch.float32, device=self.device)
 
         xyz_np = positions.cpu().double().numpy()
-        step = 2_000_000  # chunk size tuned for cache locality
+        step = TORCH_SDF_CHUNK_SIZE
         enclosed = self.enclosed
         _use_pinned = self.device.type == "cuda"
         # Vectorised bounds: pre-computed min/max arrays for broadcast compare.
