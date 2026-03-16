@@ -321,7 +321,7 @@ def print_comparison(tiers: list[tuple[str, list[TierConfigResult]]]) -> None:
         for m in medians:
             line += f"  {m:>{cw}.3f}s"
         for m in medians[1:]:
-            sp = medians[0] / m if m > 0 else 0
+            sp = _speedup_ratio(medians[0], m)
             line += f"  {sp:>5.2f}x"
         print(line)
     print()
@@ -353,6 +353,11 @@ def _write_results_json(output_path: str, results: list[tuple[str, list[TierConf
     data = dict(results)
     with Path(output_path).open("w") as f:
         json.dump(data, f, indent=2)
+
+
+def _speedup_ratio(baseline: float, candidate: float) -> float:
+    """Compute baseline / candidate speedup, guarding zero candidate time."""
+    return baseline / candidate if candidate > 0 else 0.0
 
 
 def main() -> None:
