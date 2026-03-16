@@ -237,12 +237,7 @@ def build(script: str) -> float:
 
 def run_mesher_subprocess(pixels_per_cube: int, coarse_count: int, sdf_type: str) -> RunResult:
     """Run OcMesher in a subprocess for one configuration and parse JSON output."""
-    sdf_block = textwrap.dedent(SDF_BLOCKS[sdf_type])
-    script = _MESHER_TEMPLATE.format(
-        sdf_block=sdf_block,
-        ppc=pixels_per_cube,
-        coarse=coarse_count,
-    )
+    script = _build_mesher_script(pixels_per_cube, coarse_count, sdf_type)
     try:
         result = subprocess.run(  # noqa: S603
             [PYTHON, "-c", script],
@@ -256,6 +251,16 @@ def run_mesher_subprocess(pixels_per_cube: int, coarse_count: int, sdf_type: str
         print(f"  ERROR:\n{stderr}", file=sys.stderr)
         raise MesherSubprocessError(stderr) from exc
     return _parse_last_json_line(result.stdout)
+
+
+def _build_mesher_script(pixels_per_cube: int, coarse_count: int, sdf_type: str) -> str:
+    """Render the subprocess script for a benchmark run configuration."""
+    sdf_block = textwrap.dedent(SDF_BLOCKS[sdf_type])
+    return _MESHER_TEMPLATE.format(
+        sdf_block=sdf_block,
+        ppc=pixels_per_cube,
+        coarse=coarse_count,
+    )
 
 
 def run_tier(
