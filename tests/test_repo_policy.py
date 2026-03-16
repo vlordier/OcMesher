@@ -82,3 +82,10 @@ def test_pre_commit_clang_tidy_is_strict() -> None:
     assert '"--extra-arg=-std=c++17"' in config
     assert '"--warnings-as-errors=*"' in config
     assert '"--header-filter=^ocmesher/source/.*"' in config
+
+
+def test_tests_per_file_ignores_do_not_disable_pt019() -> None:
+    pyproject = tomllib.loads(_read("pyproject.toml"))
+    test_ignores = pyproject["tool"]["ruff"]["lint"]["per-file-ignores"]["tests/**/*.py"]
+
+    assert "PT019" not in test_ignores
