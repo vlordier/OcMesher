@@ -37,6 +37,13 @@ class TestMcTablesIntegrity:
 
         assert all(isinstance(v, int) for v in EDGE_TABLE)
 
+    def test_edge_table_known_values(self):
+        from ocmesher._mc_tables import EDGE_TABLE
+
+        assert EDGE_TABLE[0] == 0x000
+        assert EDGE_TABLE[1] == 0x109
+        assert EDGE_TABLE[255] == 0x000
+
     def test_tri_table_entries_are_lists(self):
         from ocmesher._mc_tables import TRI_TABLE
 
