@@ -178,3 +178,37 @@ Current contract surface:
 - `to_backend_dlpack(...)`: exports backend-native tensors for zero-copy exchange.
 
 The shared protocol and capability dataclass live in [ocmesher/backend_contract.py](ocmesher/backend_contract.py).
+
+### Rust Backend
+
+The repo now also carries a Rust integration workspace based on the
+`rust-integration-infinigen-v1` branch. The Python entry points are
+`ocmesher.RustOcMesher` and `ocmesher.make_rust_ocmesher(...)`.
+
+Build the PyO3 extension into the active environment with:
+
+```bash
+uv sync --extra rust
+cd ocmesher-rust
+uv run maturin develop --release
+```
+
+Then use it from Python like this:
+
+```python
+from ocmesher import make_rust_ocmesher
+
+mesher = make_rust_ocmesher(cameras, bounds)
+meshes, in_view_tags = mesher([sdf])
+```
+
+Notes:
+- The Rust workspace currently bridges to the existing `ocmesher/lib/core.so` shared library rather than replacing the meshing algorithm with a pure Rust core.
+- `bash install.sh` still needs to be run first so `core.so` exists for the Rust extension to load.
+- The Rust wrapper batches SDF evaluation through the same public backend contract used by the Torch backend.
+
+Relevant files:
+- [ocmesher/rust_backend.py](ocmesher/rust_backend.py)
+- [ocmesher-rust/Cargo.toml](ocmesher-rust/Cargo.toml)
+- [ocmesher-rust/crates/ocmesher-core/src/lib.rs](ocmesher-rust/crates/ocmesher-core/src/lib.rs)
+- [ocmesher-rust/crates/ocmesher-py/src/lib.rs](ocmesher-rust/crates/ocmesher-py/src/lib.rs)

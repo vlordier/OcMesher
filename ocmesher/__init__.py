@@ -11,7 +11,7 @@ from importlib.metadata import PackageNotFoundError, version
 # "No handlers could be found for logger 'ocmesher'" warnings.
 logging.getLogger(__name__).addHandler(logging.NullHandler())
 
-__all__ = ["OcMesher", "TorchOcMesher"]
+__all__ = ["OcMesher", "RustOcMesher", "TorchOcMesher", "make_rust_ocmesher"]
 
 try:
     __version__ = version("ocmesher")
@@ -29,5 +29,13 @@ def __getattr__(name: str):
         from .torch_core import TorchOcMesher
 
         return TorchOcMesher
+    if name == "RustOcMesher":
+        from .rust_backend import RustOcMesher
+
+        return RustOcMesher
+    if name == "make_rust_ocmesher":
+        from .rust_backend import make_rust_ocmesher
+
+        return make_rust_ocmesher
     msg = f"module {__name__!r} has no attribute {name!r}"
     raise AttributeError(msg)

@@ -38,3 +38,6 @@ htmlcov/
 
 # MkDocs build output
 site/
+
+# Rust workspace build output
+ocmesher-rust/target/

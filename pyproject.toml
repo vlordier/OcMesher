@@ -27,6 +27,9 @@ dependencies = [
 torch = [
     "torch>=2.0.0",
 ]
+rust = [
+    "maturin>=1.7.0",
+]
 dev = [
     "pytest>=7.0",
     "pytest-cov>=4.0",
@@ -116,6 +119,12 @@ ignore = [
 "ocmesher/torch_core.py" = [
     "FBT001",   # boolean-typed positional arg (__init__ bool kwargs are public API)
     "FBT002",   # boolean default positional args (API backwards-compat)
+]
+"ocmesher/rust_backend.py" = [
+    "FBT001",   # boolean-typed positional args (API mirrors OcMesher)
+    "FBT002",   # boolean default positional args (API backwards-compat)
+    "PLR0913",  # too-many-arguments (constructor mirrors original API)
+    "PLC0415",  # local import in factory avoids top-level import cost
 ]
 # benchmark script – standalone runner
 "benchmarks/run_benchmark.py" = [
