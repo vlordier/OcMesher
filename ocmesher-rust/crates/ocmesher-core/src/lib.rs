@@ -311,7 +311,9 @@ pub fn validate_bounds(bounds: &[f64]) -> Result<([f64; 3], [f64; 3], [f64; 3], 
 
 /// Call a single Python SDF kernel with `xyz` (n_pts × 3 f64) and return f32 values.
 ///
-/// Accepts numpy float32, numpy float64, or any Python object that has `.numpy()`.
+/// Prefers `kernel.evaluate_batch(xyz)` when available, otherwise falls back to
+/// `kernel(xyz)`. Accepts numpy float32/float64 arrays, dict outputs containing
+/// `{"sdf": ...}` or `{"SDF": ...}`, or objects that expose `.numpy()`.
 fn eval_kernel_py_once(
     py: Python<'_>,
     kernel: &Py<PyAny>,
@@ -325,7 +327,35 @@ fn eval_kernel_py_once(
         .map_err(|e| pyo3::exceptions::PyValueError::new_err(e.to_string()))?;
     let xyz_np = xyz_arr.into_pyarray_bound(py);
 
-    let raw = kernel.call1(py, (xyz_np,))?;
+    let raw = {
+        let kernel_bound = kernel.bind(py);
+        if let Ok(eval_batch) = kernel_bound.getattr("evaluate_batch") {
+            if eval_batch.is_callable() {
+                eval_batch.call1((xyz_np,))?.unbind()
+            } else {
+                kernel_bound.call1((xyz_np,))?.unbind()
+            }
+        } else {
+            kernel_bound.call1((xyz_np,))?.unbind()
+        }
+    };
+
+    let raw = {
+        let raw_bound = raw.bind(py);
+        if let Ok(dict) = raw_bound.downcast::<PyDict>() {
+            if let Ok(Some(v)) = dict.get_item("sdf") {
+                v.unbind()
+            } else if let Ok(Some(v)) = dict.get_item("SDF") {
+                v.unbind()
+            } else {
+                return Err(pyo3::exceptions::PyKeyError::new_err(
+                    "SDF output dict must contain 'sdf' or 'SDF'",
+                ));
+            }
+        } else {
+            raw.clone_ref(py)
+        }
+    };
 
     // Try numpy f32 directly
     if let Ok(arr) = raw.extract::<PyReadonlyArray1<f32>>(py) {
