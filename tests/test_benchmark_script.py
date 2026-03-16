@@ -204,6 +204,12 @@ class TestPrintTierBanner:
         benchmark._print_tier_banner("Opt-C++")
         out = capsys.readouterr().out
         assert "Opt-C++" in out
-        assert "=" * 62 in out
+        assert "=" * benchmark.TIER_SEPARATOR_WIDTH in out
+
+
+class TestLayoutConstants:
+    def test_comparison_header_uses_config_column_width(self):
+        header = benchmark._comparison_header(["Base"], 7)
+        assert header.startswith(f"{'Config':<{benchmark.CONFIG_COLUMN_WIDTH}}")
 
 
