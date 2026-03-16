@@ -107,9 +107,7 @@ class TestValidationModule:
         assert callable(_validate_kernels)
 
 
-# ---------------------------------------------------------------------------
-# _constants: values and exports
-# ---------------------------------------------------------------------------
+# Section: _constants values and exports
 
 
 class TestConstantsModule:
@@ -151,9 +149,7 @@ class TestConstantsModule:
         assert CORE_STRIDE == CONST_STRIDE
 
 
-# ---------------------------------------------------------------------------
-# _types: importability
-# ---------------------------------------------------------------------------
+# Section: _types importability
 
 
 class TestTypesModule:
