@@ -179,17 +179,17 @@ cam_poses = [np.array([
     [0, -1, 0, 3],
     [0, 0, 0, 1],
 ], dtype=np.float64)]
-Ks = [np.array([
+ks = [np.array([
     [2000, 0, 640],
     [0, 2000, 360],
     [0, 0, 1],
 ], dtype=np.float64)]
-Hs = [720]
-Ws = [1280]
+hs = [720]
+ws = [1280]
 bounds = [-5, 5, -5, 5, -2, 2]
 
 mesher = OcMesher(
-    (cam_poses, Ks, Hs, Ws),
+    (cam_poses, ks, hs, ws),
     bounds=bounds,
     pixels_per_cube={ppc},
     coarse_count={coarse},
