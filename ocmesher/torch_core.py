@@ -56,7 +56,7 @@ from ._validation import validate_bounds as _validate_bounds
 from ._validation import validate_cameras as _validate_cameras
 from ._validation import validate_mesher_params as _validate_mesher_params
 from .backend_contract import BackendCapabilities
-from .utils.timer import Timer
+from .utils.timer import PhaseTracker, Timer
 
 if TYPE_CHECKING:
     from ._types import BoundsLike, CamerasTuple, KernelSequence, MeshResult
@@ -263,6 +263,8 @@ class TorchOcMesher:
         self._sdf_pool: ThreadPoolExecutor | None = None
         self._sdf_positions_pinned: torch.Tensor | None = None
         self._sdf_results_pinned: torch.Tensor | None = None
+        self._phase_tracker: PhaseTracker | None = None
+        self.last_phase_summary: dict[str, float] = {}
 
         # Pre-compute per-camera pixel angular size (vectorised) --------------
         fx_all = self.cam_intrinsics[:, 0, 0]  # (C,) in _fdtype
@@ -492,6 +494,12 @@ class TorchOcMesher:
 
         setattr(self, method_name, _compiled_with_fallback)
 
+    def _track_phase(self, name: str):
+        """Return a no-op context or the active phase accumulator."""
+        if self._phase_tracker is None:
+            return nullcontext()
+        return self._phase_tracker.track(name)
+
     def _get_sdf_pool(self) -> ThreadPoolExecutor:
         """Lazily construct and reuse the SDF worker pool."""
         if self._sdf_pool is None:
@@ -644,77 +652,67 @@ class TorchOcMesher:
         Returns:
             ``(N, len(kernels))`` float32 tensor on *self.device*.
         """
-        n = positions.shape[0]
-        n_kernels = len(kernels)
-        if n == 0:
-            return _torch_zeros((0, n_kernels), dtype=torch.float32, device=self.device)
+        with self._track_phase("sdf_eval"):
+            n = positions.shape[0]
+            n_kernels = len(kernels)
+            if n == 0:
+                return _torch_zeros((0, n_kernels), dtype=torch.float32, device=self.device)
 
-        if self.device.type == "cuda":
-            xyz_host = self._get_pinned_host_buffer("_sdf_positions_pinned", (n, 3), torch.float64)
-            xyz_host.copy_(positions, non_blocking=False)
-            xyz_np = xyz_host.numpy()
-        else:
-            xyz_np = positions.cpu().double().numpy()
-        step = self._max_batch
-        enclosed = self.enclosed
-        _use_pinned = self.device.type == "cuda"
-        # Vectorised bounds: pre-computed min/max arrays for broadcast compare.
-        b_min = self._bounds_min_np
-        b_max = self._bounds_max_np
+            if self.device.type == "cuda":
+                xyz_host = self._get_pinned_host_buffer("_sdf_positions_pinned", (n, 3), torch.float64)
+                xyz_host.copy_(positions, non_blocking=False)
+                xyz_np = xyz_host.numpy()
+            else:
+                xyz_np = positions.cpu().double().numpy()
+            step = self._max_batch
+            enclosed = self.enclosed
+            _use_pinned = self.device.type == "cuda"
+            b_min = self._bounds_min_np
+            b_max = self._bounds_max_np
 
-        if n_kernels == 1:
-            # --- Fast path for the common single-kernel case ---
-            kernel = kernels[0]
+            if n_kernels == 1:
+                kernel = kernels[0]
 
-            def _fill_chunk(chunk_np: np.ndarray, out_chunk: np.ndarray) -> None:
-                _n = len(chunk_np)
-                sdf = _coerce_kernel_sdf(kernel(chunk_np), _n, "kernels[0]")
-                if enclosed:
-                    sdf[_out_of_bounds_mask(chunk_np, b_min, b_max)] = 1
-                out_chunk[:, 0] = sdf
-        else:
-            kernel_labels = tuple(f"kernels[{k_idx}]" for k_idx in range(n_kernels))
-
-            def _fill_chunk(chunk_np: np.ndarray, out_chunk: np.ndarray) -> None:
-                _n = len(chunk_np)
-                if enclosed:
-                    out_bound = _out_of_bounds_mask(chunk_np, b_min, b_max)
-                for k_idx, (kernel, kernel_label) in enumerate(zip(kernels, kernel_labels, strict=False)):
-                    sdf = _coerce_kernel_sdf(kernel(chunk_np), _n, kernel_label)
+                def _fill_chunk(chunk_np: np.ndarray, out_chunk: np.ndarray) -> None:
+                    _n = len(chunk_np)
+                    sdf = _coerce_kernel_sdf(kernel(chunk_np), _n, "kernels[0]")
                     if enclosed:
-                        sdf[out_bound] = 1
-                    out_chunk[:, k_idx] = sdf
+                        sdf[_out_of_bounds_mask(chunk_np, b_min, b_max)] = 1
+                    out_chunk[:, 0] = sdf
+            else:
+                kernel_labels = tuple(f"kernels[{k_idx}]" for k_idx in range(n_kernels))
 
-        # Single-chunk fast path: skip list/pool/concat overhead.
-        if _use_pinned:
-            result_host = self._get_pinned_host_buffer("_sdf_results_pinned", (n, n_kernels), torch.float32)
-            result_np = result_host.numpy()
-        else:
-            result_np = np.empty((n, n_kernels), dtype=np.float32)
-        if n <= step:
-            _fill_chunk(xyz_np, result_np)
-        elif self.n_sdf_workers > 1:
-            chunk_ranges = [(i, min(i + step, n)) for i in range(0, n, step)]
-            pool = self._get_sdf_pool()
-            futures = [
-                pool.submit(
-                    _fill_chunk,
-                    xyz_np[start:end],
-                    result_np[start:end],
-                )
-                for start, end in chunk_ranges
-            ]
-            for future in futures:
-                future.result()
-        else:
-            for start in range(0, n, step):
-                end = min(start + step, n)
-                _fill_chunk(xyz_np[start:end], result_np[start:end])
+                def _fill_chunk(chunk_np: np.ndarray, out_chunk: np.ndarray) -> None:
+                    _n = len(chunk_np)
+                    if enclosed:
+                        out_bound = _out_of_bounds_mask(chunk_np, b_min, b_max)
+                    for k_idx, (kernel, kernel_label) in enumerate(zip(kernels, kernel_labels, strict=False)):
+                        sdf = _coerce_kernel_sdf(kernel(chunk_np), _n, kernel_label)
+                        if enclosed:
+                            sdf[out_bound] = 1
+                        out_chunk[:, k_idx] = sdf
 
-        # Use pinned memory for CUDA transfers to overlap copy with compute
-        if _use_pinned:
-            return result_host.to(self.device, non_blocking=True)
-        return torch.from_numpy(result_np).to(self.device)
+            if _use_pinned:
+                result_host = self._get_pinned_host_buffer("_sdf_results_pinned", (n, n_kernels), torch.float32)
+                result_np = result_host.numpy()
+            else:
+                result_np = np.empty((n, n_kernels), dtype=np.float32)
+            if n <= step:
+                _fill_chunk(xyz_np, result_np)
+            elif self.n_sdf_workers > 1:
+                chunk_ranges = [(i, min(i + step, n)) for i in range(0, n, step)]
+                pool = self._get_sdf_pool()
+                futures = [pool.submit(_fill_chunk, xyz_np[start:end], result_np[start:end]) for start, end in chunk_ranges]
+                for future in futures:
+                    future.result()
+            else:
+                for start in range(0, n, step):
+                    end = min(start + step, n)
+                    _fill_chunk(xyz_np[start:end], result_np[start:end])
+
+            if _use_pinned:
+                return result_host.to(self.device, non_blocking=True)
+            return torch.from_numpy(result_np).to(self.device)
 
     # ------------------------------------------------------------------
     # Octree construction
@@ -1024,74 +1022,64 @@ class TorchOcMesher:
         Returns:
             ``(vertices, faces)`` as numpy arrays.
         """
-        n = sdf.shape[0]
-        if n == 0:
-            return np.zeros((0, 3), dtype=np.float64), np.zeros((0, 3), dtype=np.int32)
+        with self._track_phase("marching_cubes"):
+            n = sdf.shape[0]
+            if n == 0:
+                return np.zeros((0, 3), dtype=np.float64), np.zeros((0, 3), dtype=np.int32)
 
-        # Move SDF to CPU for marching cubes; lookup tables likewise on CPU.
-        sdf = sdf.cpu()
-        corners = corners.cpu()  # should already be CPU, but be safe
+            sdf = sdf.cpu()
+            corners = corners.cpu()
 
-        device_cpu = torch.device("cpu")
-        # Build / retrieve CPU-side MC cache (separate from the GPU cache).
-        if device_cpu not in TorchOcMesher._mc_cache:
-            TorchOcMesher._mc_cache[device_cpu] = self._build_mc_cache(device_cpu)
+            device_cpu = torch.device("cpu")
+            if device_cpu not in TorchOcMesher._mc_cache:
+                TorchOcMesher._mc_cache[device_cpu] = self._build_mc_cache(device_cpu)
 
-        cache = TorchOcMesher._mc_cache[device_cpu]
-        edge_table_t = cache["edge_table"]
-        tri_table_t = cache["tri_table"]
-        bit_shifts = cache["bit_shifts"]
-        max_tri_entries = int(cache["max_tri_entries"].item())
+            cache = TorchOcMesher._mc_cache[device_cpu]
+            edge_table_t = cache["edge_table"]
+            tri_table_t = cache["tri_table"]
+            bit_shifts = cache["bit_shifts"]
+            max_tri_entries = int(cache["max_tri_entries"].item())
 
-        # --- Fused cube configuration (vectorised bit-shifts) ---
-        neg_mask = (sdf < 0).int()  # (N, 8)
-        cube_idx = (neg_mask * bit_shifts.unsqueeze(0)).sum(dim=1).int()  # (N,)
+            neg_mask = (sdf < 0).int()
+            cube_idx = (neg_mask * bit_shifts.unsqueeze(0)).sum(dim=1).int()
 
-        edge_mask = edge_table_t[cube_idx.long()]
-        active = edge_mask != 0
-        if not active.any():
-            return np.zeros((0, 3), dtype=np.float64), np.zeros((0, 3), dtype=np.int32)
+            edge_mask = edge_table_t[cube_idx.long()]
+            active = edge_mask != 0
+            if not active.any():
+                return np.zeros((0, 3), dtype=np.float64), np.zeros((0, 3), dtype=np.int32)
 
-        # Keep only active cubes
-        active_idx = torch.where(active)[0]
-        a_sdf = sdf[active_idx]
-        a_corners = corners[active_idx]
-        a_cfg = cube_idx[active_idx].long()
+            active_idx = torch.where(active)[0]
+            a_sdf = sdf[active_idx]
+            a_corners = corners[active_idx]
+            a_cfg = cube_idx[active_idx].long()
 
-        # --- Vectorised edge interpolation (float64 for geometry) ---
-        ev = self._edge_vertices.cpu()
-        s0 = a_sdf[:, ev[:, 0]].double()  # (A, 12)
-        s1 = a_sdf[:, ev[:, 1]].double()
-        denom = s0 - s1
-        t = torch.where(denom.abs() < _DENOM_EPS, torch.tensor(0.5, dtype=torch.float64), s0 / denom)
-        t.clamp_(0.0, 1.0)
-        t = t.unsqueeze(-1)  # (A, 12, 1)
-        p0 = a_corners[:, ev[:, 0]].double()
-        p1 = a_corners[:, ev[:, 1]].double()
-        edge_positions = torch.lerp(p0, p1, t)  # fused linear interpolation in float64
+            ev = self._edge_vertices.cpu()
+            s0 = a_sdf[:, ev[:, 0]].double()
+            s1 = a_sdf[:, ev[:, 1]].double()
+            denom = s0 - s1
+            t = torch.where(denom.abs() < _DENOM_EPS, torch.tensor(0.5, dtype=torch.float64), s0 / denom)
+            t.clamp_(0.0, 1.0)
+            t = t.unsqueeze(-1)
+            p0 = a_corners[:, ev[:, 0]].double()
+            p1 = a_corners[:, ev[:, 1]].double()
+            edge_positions = torch.lerp(p0, p1, t)
 
-        # Lookup per-cube triangle lists
-        tri_entries = tri_table_t[a_cfg]
+            tri_entries = tri_table_t[a_cfg]
 
-        # --- Extract triangles (fully vectorised gather) ---
-        # Reshape tri_entries into (A, max_tris, 3) for batch gather.
-        max_tris_per_cube = max_tri_entries // 3
-        tri_edge_ids = tri_entries[:, : max_tris_per_cube * 3].reshape(-1, max_tris_per_cube, 3)  # (A, T, 3)
-        # A triangle slot is valid when its first edge index >= 0
-        tri_valid = tri_edge_ids[:, :, 0] >= 0  # (A, T)
-        # Flatten valid triangles
-        valid_cube_idx, valid_tri_idx = torch.where(tri_valid)
-        if valid_cube_idx.numel() == 0:
-            return np.zeros((0, 3), dtype=np.float64), np.zeros((0, 3), dtype=np.int32)
-        edge_ids = tri_edge_ids[valid_cube_idx, valid_tri_idx]  # (F, 3)
-        # Gather edge positions for each triangle vertex
-        v0 = edge_positions[valid_cube_idx, edge_ids[:, 0].long()]  # (F, 3)
-        v1 = edge_positions[valid_cube_idx, edge_ids[:, 1].long()]  # (F, 3)
-        v2 = edge_positions[valid_cube_idx, edge_ids[:, 2].long()]  # (F, 3)
-        tri_verts = torch.stack([v0, v1, v2], dim=1)  # (F, 3, 3)
-        verts_flat = tri_verts.reshape(-1, 3)
+            max_tris_per_cube = max_tri_entries // 3
+            tri_edge_ids = tri_entries[:, : max_tris_per_cube * 3].reshape(-1, max_tris_per_cube, 3)
+            tri_valid = tri_edge_ids[:, :, 0] >= 0
+            valid_cube_idx, valid_tri_idx = torch.where(tri_valid)
+            if valid_cube_idx.numel() == 0:
+                return np.zeros((0, 3), dtype=np.float64), np.zeros((0, 3), dtype=np.int32)
+            edge_ids = tri_edge_ids[valid_cube_idx, valid_tri_idx]
+            v0 = edge_positions[valid_cube_idx, edge_ids[:, 0].long()]
+            v1 = edge_positions[valid_cube_idx, edge_ids[:, 1].long()]
+            v2 = edge_positions[valid_cube_idx, edge_ids[:, 2].long()]
+            tri_verts = torch.stack([v0, v1, v2], dim=1)
+            verts_flat = tri_verts.reshape(-1, 3)
 
-        return self._dedup_vertices(verts_flat)
+            return self._dedup_vertices(verts_flat)
 
     # ------------------------------------------------------------------
     # Main pipeline
@@ -1100,85 +1088,93 @@ class TorchOcMesher:
         """Run the full coarse-to-fine meshing pipeline and return meshes."""
         kernels_list = list(kernels)
         n_elements = len(kernels_list)
+        tracker = PhaseTracker("torch pipeline")
+        self._phase_tracker = tracker
+        self.last_phase_summary = {}
 
-        # 1. Build coarse octree -------------------------------------------
-        with Timer("torch coarse octree") as coarse_timer:
-            coords, levels = self._build_coarse_octree()
-            logger.info("coarse cubes: %d", len(coords))
+        try:
+            with tracker.track("coarse_octree"), Timer("torch coarse octree"):
+                coords, levels = self._build_coarse_octree()
+                logger.info("coarse cubes: %d", len(coords))
 
-        # 2. Detect surface cubes ------------------------------------------
-        with Timer("torch find surface") as find_surface_timer:
-            surface_mask, corner_sdf = self._find_surface_cubes(kernels_list, coords, levels)
-            s_coords = coords[surface_mask]
-            s_levels = levels[surface_mask]
-            s_corner_sdf: torch.Tensor | None = corner_sdf[surface_mask]
-            logger.info("surface cubes: %d", len(s_coords))
+            with tracker.track("surface_detection"), Timer("torch find surface"):
+                surface_mask, corner_sdf = self._find_surface_cubes(kernels_list, coords, levels)
+                s_coords = coords[surface_mask]
+                s_levels = levels[surface_mask]
+                s_corner_sdf: torch.Tensor | None = corner_sdf[surface_mask]
+                logger.info("surface cubes: %d", len(s_coords))
 
-        # 3. Refine surface cubes ------------------------------------------
-        with Timer("torch refine surface") as refine_surface_timer:
-            refined_coords, refined_levels, refined_corner_sdf = self._refine_surface_octree(
-                kernels_list,
-                s_coords,
-                s_levels,
-                corner_sdf=s_corner_sdf,
+            with tracker.track("surface_refinement"), Timer("torch refine surface"):
+                refined_coords, refined_levels, refined_corner_sdf = self._refine_surface_octree(
+                    kernels_list,
+                    s_coords,
+                    s_levels,
+                    corner_sdf=s_corner_sdf,
+                )
+                s_coords = refined_coords
+                s_levels = refined_levels
+                s_corner_sdf = refined_corner_sdf
+                logger.info("refined surface cubes: %d", len(s_coords))
+
+            with tracker.track("visibility_filter"), Timer("torch visibility filter"):
+                positions = self._cube_centers(s_coords, s_levels)
+                vis_mask = self._visibility_filter(positions)
+                vis_coords = s_coords[vis_mask]
+                vis_levels = s_levels[vis_mask]
+                occ_coords = s_coords[~vis_mask]
+                occ_levels = s_levels[~vis_mask]
+                logger.info("visible: %d, occluded: %d", len(vis_coords), len(occ_coords))
+
+            with tracker.track("mesh_construction"), Timer("torch construct mesh"):
+                meshes: list[trimesh.Trimesh] = []
+                in_view_tags: list[np.ndarray] = []
+                all_coords = torch.cat([vis_coords, occ_coords])
+                all_levels = torch.cat([vis_levels, occ_levels])
+                n_visible = len(vis_coords)
+
+                all_corner_sdf: torch.Tensor | None = None
+                if s_corner_sdf is not None:
+                    all_corner_sdf = torch.cat([s_corner_sdf[vis_mask], s_corner_sdf[~vis_mask]])
+
+                for e in range(n_elements):
+                    mesh, ivt = self._construct_element_mesh(
+                        kernels_list[e : e + 1],
+                        all_coords,
+                        all_levels,
+                        n_visible,
+                        corner_sdf=all_corner_sdf,
+                        element_idx=e,
+                    )
+                    meshes.append(mesh)
+                    in_view_tags.append(ivt)
+                    logger.info(
+                        "element %d: %d vertices, %d faces",
+                        e,
+                        mesh.vertices.shape[0],
+                        mesh.faces.shape[0],
+                    )
+
+            summary = tracker.snapshot_millis()
+            summary["fine_surface"] = summary.get("surface_detection", 0.0) + summary.get("surface_refinement", 0.0)
+            summary["total"] = (
+                summary.get("coarse_octree", 0.0)
+                + summary.get("surface_detection", 0.0)
+                + summary.get("surface_refinement", 0.0)
+                + summary.get("visibility_filter", 0.0)
+                + summary.get("mesh_construction", 0.0)
             )
-            s_coords = refined_coords
-            s_levels = refined_levels
-            s_corner_sdf = refined_corner_sdf
-            logger.info("refined surface cubes: %d", len(s_coords))
-
-        # 4. Visibility filter ---------------------------------------------
-        with Timer("torch visibility filter") as visibility_timer:
-            positions = self._cube_centers(s_coords, s_levels)
-            vis_mask = self._visibility_filter(positions)
-            vis_coords = s_coords[vis_mask]
-            vis_levels = s_levels[vis_mask]
-            occ_coords = s_coords[~vis_mask]
-            occ_levels = s_levels[~vis_mask]
-            logger.info("visible: %d, occluded: %d", len(vis_coords), len(occ_coords))
-
-        # 5. Per-element mesh construction ---------------------------------
-        with Timer("torch construct mesh") as mesh_timer:
-            meshes: list[trimesh.Trimesh] = []
-            in_view_tags: list[np.ndarray] = []
-            all_coords = torch.cat([vis_coords, occ_coords])
-            all_levels = torch.cat([vis_levels, occ_levels])
-            n_visible = len(vis_coords)
-
-            # Reorder cached SDF to match the visible-then-occluded layout.
-            all_corner_sdf: torch.Tensor | None = None
-            if s_corner_sdf is not None:
-                all_corner_sdf = torch.cat([s_corner_sdf[vis_mask], s_corner_sdf[~vis_mask]])
-
-            for e in range(n_elements):
-                mesh, ivt = self._construct_element_mesh(
-                    kernels_list[e : e + 1],
-                    all_coords,
-                    all_levels,
-                    n_visible,
-                    corner_sdf=all_corner_sdf,
-                    element_idx=e,
-                )
-                meshes.append(mesh)
-                in_view_tags.append(ivt)
-                logger.info(
-                    "element %d: %d vertices, %d faces",
-                    e,
-                    mesh.vertices.shape[0],
-                    mesh.faces.shape[0],
-                )
-
-        Timer.log_phase_summary(
-            "torch pipeline",
-            {
-                "coarse": coarse_timer.duration,
-                "fine": find_surface_timer.duration + refine_surface_timer.duration,
-                "visibility": visibility_timer.duration,
-                "mesh": mesh_timer.duration,
-            },
-        )
-
-        return meshes, in_view_tags
+            summary["python_orchestration"] = max(
+                summary["total"]
+                - summary.get("sdf_eval", 0.0)
+                - summary.get("visibility_filter", 0.0)
+                - summary.get("marching_cubes", 0.0),
+                0.0,
+            )
+            self.last_phase_summary = summary
+            tracker.log_summary()
+            return meshes, in_view_tags
+        finally:
+            self._phase_tracker = None
 
     @torch.no_grad()
     def _construct_element_mesh(  # noqa: PLR0913

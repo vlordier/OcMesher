@@ -475,11 +475,13 @@ class TestOcMesherSlots:
             "bisection_iters",
             "bisection_tol",
             "_sdf_pool",
+            "_phase_tracker",
             "_oob_mask",
             "_oob_tmp",
             "_sdf_null",
             "_bounds_min_np",
             "_bounds_max_np",
+            "last_phase_summary",
         ):
             assert attr in slots, f"{attr} missing from __slots__"
 

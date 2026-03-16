@@ -9,8 +9,9 @@ from __future__ import annotations
 
 import logging
 from concurrent.futures import ThreadPoolExecutor
+from contextlib import nullcontext
 from pathlib import Path
-from typing import TYPE_CHECKING, Self
+from typing import TYPE_CHECKING, Literal, Self
 
 import gin
 import numpy as np
@@ -41,7 +42,7 @@ from .utils.interface import (
     load_cdll,
     register_func,
 )
-from .utils.timer import Timer
+from .utils.timer import PhaseTracker, Timer
 
 if TYPE_CHECKING:
     from numpy.typing import NDArray
@@ -71,6 +72,7 @@ class OcMesher:
         "_bounds_max_np",
         # Pre-computed bounds vectors
         "_bounds_min_np",
+        "_phase_tracker",
         "_oob_mask",
         "_oob_tmp",
         "_sdf_null",
@@ -106,6 +108,7 @@ class OcMesher:
         "get_verts_center",
         "inv_scale",
         "inview_pixels_per_cube",
+        "last_phase_summary",
         "memory_limit_mb",
         "min_dist",
         "n_cameras",
@@ -207,6 +210,8 @@ class OcMesher:
         # batch (each batch in the bisection inner loop).  Lazy-initialised:
         # only created when more than one kernel is actually used.
         self._sdf_pool: ThreadPoolExecutor | None = None
+        self._phase_tracker: PhaseTracker | None = None
+        self.last_phase_summary: dict[str, float] = {}
 
         # Reusable boolean buffers for out-of-bounds masking.
         # Pre-allocated to _SDF_BATCH_SIZE (the maximum batch slice), so
@@ -313,7 +318,7 @@ class OcMesher:
         """Support ``with OcMesher(...) as m:`` usage."""
         return self
 
-    def __exit__(self, exc_type: object, exc_val: object, exc_tb: object) -> bool:
+    def __exit__(self, exc_type: object, exc_val: object, exc_tb: object) -> Literal[False]:
         """Shut down the persistent thread pool on context-manager exit."""
         self._shutdown_pool()
         return False
@@ -334,6 +339,13 @@ class OcMesher:
         if self._sdf_pool is None:
             self._sdf_pool = ThreadPoolExecutor(max_workers=min(n_kernels, _MAX_SDF_WORKERS))
         return self._sdf_pool
+
+    def _track_phase(self, name: str):
+        """Return a no-op context or the active phase accumulator."""
+        tracker = getattr(self, "_phase_tracker", None)
+        if tracker is None:
+            return nullcontext()
+        return tracker.track(name)
 
     @staticmethod
     def _out_of_bounds_mask(xyz, b_min, b_max):
@@ -430,41 +442,39 @@ class OcMesher:
         out: NDArray[np.float32] | None = None,
     ) -> NDArray[np.float32]:
         """Evaluate one SDF kernel at all query points."""
-        n_XYZ = len(XYZ_all)
-        if n_XYZ == 0:
-            return _np_empty((0, 1), dtype=self.sdf_np_float_type)
+        with self._track_phase("sdf_eval"):
+            n_XYZ = len(XYZ_all)
+            if n_XYZ == 0:
+                return _np_empty((0, 1), dtype=self.sdf_np_float_type)
 
-        _sdf_dtype = self.sdf_np_float_type
-        result = out if out is not None else _np_empty((n_XYZ, 1), dtype=_sdf_dtype)
-        # Cache module-level constant and builtin to avoid LOAD_GLOBAL
-        # on every iteration of the batch loop.
-        _batch = _SDF_BATCH_SIZE
-        _min = min
-        _enclosed = self.enclosed
+            _sdf_dtype = self.sdf_np_float_type
+            result = out if out is not None else _np_empty((n_XYZ, 1), dtype=_sdf_dtype)
+            _batch = _SDF_BATCH_SIZE
+            _min = min
+            _enclosed = self.enclosed
 
-        # Pre-cache bounds-mask helpers once (only used when enclosed).
-        if _enclosed:
-            _mask_into = self._out_of_bounds_mask_into
-            _b_min = self._bounds_min_np
-            _b_max = self._bounds_max_np
-        if _enclosed:
-            for i in range(0, n_XYZ, _batch):
-                end = _min(i + _batch, n_XYZ)
-                XYZ = XYZ_all[i:end]
-                n = end - i
-                sdf = _coerce_kernel_sdf(kernel(XYZ), n, "kernels[0]")
-                col = result[i:end, 0]
-                col[:] = sdf
-                oob = _mask_into(XYZ, _b_min, _b_max)
-                col[oob] = 1
-        else:
-            for i in range(0, n_XYZ, _batch):
-                end = _min(i + _batch, n_XYZ)
-                XYZ = XYZ_all[i:end]
-                n = end - i
-                result[i:end, 0] = _coerce_kernel_sdf(kernel(XYZ), n, "kernels[0]")
+            if _enclosed:
+                _mask_into = self._out_of_bounds_mask_into
+                _b_min = self._bounds_min_np
+                _b_max = self._bounds_max_np
+            if _enclosed:
+                for i in range(0, n_XYZ, _batch):
+                    end = _min(i + _batch, n_XYZ)
+                    XYZ = XYZ_all[i:end]
+                    n = end - i
+                    sdf = _coerce_kernel_sdf(kernel(XYZ), n, "kernels[0]")
+                    col = result[i:end, 0]
+                    col[:] = sdf
+                    oob = _mask_into(XYZ, _b_min, _b_max)
+                    col[oob] = 1
+            else:
+                for i in range(0, n_XYZ, _batch):
+                    end = _min(i + _batch, n_XYZ)
+                    XYZ = XYZ_all[i:end]
+                    n = end - i
+                    result[i:end, 0] = _coerce_kernel_sdf(kernel(XYZ), n, "kernels[0]")
 
-        return result
+            return result
 
     def _kernel_caller_multi(
         self,
@@ -474,194 +484,202 @@ class OcMesher:
         out: NDArray[np.float32] | None = None,
     ) -> NDArray[np.float32]:
         """Evaluate multiple SDF kernels at all query points via the shared pool."""
-        n_XYZ = len(XYZ_all)
-        n_kernels = len(kernels)
-        if n_XYZ == 0:
-            return _np_empty((0, n_kernels), dtype=self.sdf_np_float_type)
+        with self._track_phase("sdf_eval"):
+            n_XYZ = len(XYZ_all)
+            n_kernels = len(kernels)
+            if n_XYZ == 0:
+                return _np_empty((0, n_kernels), dtype=self.sdf_np_float_type)
 
-        _sdf_dtype = self.sdf_np_float_type
-        result = out if out is not None else _np_empty((n_XYZ, n_kernels), dtype=_sdf_dtype)
-        _batch = _SDF_BATCH_SIZE
-        _min = min
-        _enclosed = self.enclosed
+            _sdf_dtype = self.sdf_np_float_type
+            result = out if out is not None else _np_empty((n_XYZ, n_kernels), dtype=_sdf_dtype)
+            _batch = _SDF_BATCH_SIZE
+            _min = min
+            _enclosed = self.enclosed
 
-        if _enclosed:
-            _mask_into = self._out_of_bounds_mask_into
-            _b_min = self._bounds_min_np
-            _b_max = self._bounds_max_np
-
-        # Uses pool.submit directly instead of pool.map with a closure
-        # factory, eliminating per-batch function object + closure dict
-        # construction overhead.
-        pool = self._get_pool(n_kernels)
-        _submit = pool.submit
-        # Pre-allocate futures list and label tuple once — avoids
-        # creating a new list and n_kernels f-strings on every batch
-        # iteration (matters for callers that exceed SDF_BATCH_SIZE).
-        _futures: list = [None] * n_kernels
-        _labels = tuple(f"kernels[{i}]" for i in range(n_kernels))
-
-        for i in range(0, n_XYZ, _batch):
-            end = _min(i + _batch, n_XYZ)
-            XYZ = XYZ_all[i:end]
-            n = end - i
-            for k_idx in range(n_kernels):
-                _futures[k_idx] = _submit(kernels[k_idx], XYZ)
-            batch_slice = result[i:end]
-            for k_idx in range(n_kernels):
-                batch_slice[:, k_idx] = _coerce_kernel_sdf(_futures[k_idx].result(), n, _labels[k_idx])
             if _enclosed:
-                batch_slice[_mask_into(XYZ, _b_min, _b_max)] = 1
+                _mask_into = self._out_of_bounds_mask_into
+                _b_min = self._bounds_min_np
+                _b_max = self._bounds_max_np
 
-        return result
+            pool = self._get_pool(n_kernels)
+            _submit = pool.submit
+            _futures: list = [None] * n_kernels
+            _labels = tuple(f"kernels[{i}]" for i in range(n_kernels))
+
+            for i in range(0, n_XYZ, _batch):
+                end = _min(i + _batch, n_XYZ)
+                XYZ = XYZ_all[i:end]
+                n = end - i
+                for k_idx in range(n_kernels):
+                    _futures[k_idx] = _submit(kernels[k_idx], XYZ)
+                batch_slice = result[i:end]
+                for k_idx in range(n_kernels):
+                    batch_slice[:, k_idx] = _coerce_kernel_sdf(_futures[k_idx].result(), n, _labels[k_idx])
+                if _enclosed:
+                    batch_slice[_mask_into(XYZ, _b_min, _b_max)] = 1
+
+            return result
 
     def __call__(self, kernels) -> MeshResult:
         """Run the full coarse-to-fine meshing pipeline and return meshes."""
         _validate_kernels(kernels)
         n_elements = len(kernels)
         single_kernel = n_elements == 1
+        tracker = PhaseTracker("ocmesher pipeline")
+        self._phase_tracker = tracker
+        self.last_phase_summary = {}
 
-        # Cache attribute lookups for the hot loops below.
-        _af = self.AF
-        _sdf_af = self.sdf_AF
-        _kernel_caller = self.kernel_caller
-        _kernel_caller_single = self._kernel_caller_single
-        _np_float = self.np_float_type
-        _sdf_dtype = self.sdf_np_float_type
-        _sdf_null = self._sdf_null
-        _empty = _np_empty  # module-level cache avoids LOAD_ATTR on np
+        try:
+            _af = self.AF
+            _sdf_af = self.sdf_AF
+            _kernel_caller = self.kernel_caller
+            _kernel_caller_single = self._kernel_caller_single
+            _np_float = self.np_float_type
+            _sdf_dtype = self.sdf_np_float_type
+            _sdf_null = self._sdf_null
+            _empty = _np_empty
 
-        # octree only considering cameras, not sdf
-        with Timer("coarse step part1") as coarse_part1_timer:
-            n_blocks = self.run_coarse(
-                _af(self.center),
-                self.size,
-                self.n_cameras,
-                _af(self.cameras),
-                self.inview_pixels_per_cube,
-                self.inv_scale,
-                self.min_dist,
-                self.coarse_count,
-                self.memory_limit_mb,
-                n_elements,
-            )
-        logger.info("coarse blocks: %d", n_blocks)
-        # start considering sdf
-        _fine_group = self.fine_group
-        _fine_iteration = self.fine_iteration
-        _fine_iteration_output = self.fine_iteration_output
-        with Timer("coarse step part2") as coarse_part2_timer, tqdm(total=n_blocks) as pbar:
-            # Growable buffers: allocated once, grown on demand, reused
-            # across inner-loop iterations.  Eliminates per-iteration
-            # np.empty + ctypes pointer construction overhead.
-            _c_cap = 0
-            _c_pos = None
-            _c_pos_ptr = None
-            _c_sdf = None
-            _c_sdf_ptr = None  # cached pointer for _fine_iteration
-            _c_min = None  # min-reduction buffer (multi-element only)
-            while True:
-                inc = _fine_group()
-                if inc == 0:
-                    break
-                pbar.update(inc)
-                n = _fine_iteration(_sdf_null)
-                while n > 0:
-                    if n > _c_cap:
-                        _c_pos = _empty((n, 3), dtype=_np_float)
-                        _c_pos_ptr = _af(_c_pos)
-                        _c_sdf = _empty((n, n_elements), dtype=_sdf_dtype)
-                        if single_kernel:
-                            # (n, 1) C-ordered: column 0 is contiguous at base.
-                            _c_sdf_ptr = _sdf_af(_c_sdf)
-                        else:
-                            _c_min = _empty(n, dtype=_sdf_dtype)
-                            _c_sdf_ptr = _sdf_af(_c_min)
-                        _c_cap = n
-                    _fine_iteration_output(_c_pos_ptr)
-                    if single_kernel:
-                        _kernel_caller_single(kernels[0], _c_pos[:n], out=_c_sdf[:n])
-                    else:
-                        _kernel_caller(kernels, _c_pos[:n], out=_c_sdf[:n])
-                    if not single_kernel:
-                        _c_sdf[:n].min(axis=-1, out=_c_min[:n])
-                    n = _fine_iteration(_c_sdf_ptr)
-        with Timer("filter visible blocks") as visibility_timer:
-            n_vis_block = self.vis_filter(self.simplify_occluded, self.visible_relax_iter)
-        logger.info("visible blocks: %d", n_vis_block)
-
-        _final_iteration = self.final_iteration
-        _final_iteration2 = self.final_iteration2
-        _final_iteration3 = self.final_iteration3
-        with Timer("fine step") as fine_timer, tqdm(total=n_vis_block) as pbar:
-            # np.empty: C function writes nv before any Python read.
-            nv = _empty(1, dtype=np.int32)
-            nv_ptr = AsInt(nv)
-            # Growable buffers for the fine step loop — same pattern as
-            # the coarse step: allocated once, grown on demand, reused.
-            _f_cap = 0
-            _f_pos = None
-            _f_pos_ptr = None
-            _f_sdf = None
-            _f_sdf_ptr = None
-            while True:
-                n = _final_iteration(nv_ptr)
-                if n == 0:
-                    break
-                if n > _f_cap:
-                    _f_pos = _empty((n, 3), dtype=_np_float)
-                    _f_pos_ptr = _af(_f_pos)
-                    _f_sdf = _empty((n, n_elements), dtype=_sdf_dtype)
-                    _f_sdf_ptr = _sdf_af(_f_sdf)
-                    _f_cap = n
-                _final_iteration2(_f_pos_ptr)
-                if single_kernel:
-                    _kernel_caller_single(kernels[0], _f_pos[:n], out=_f_sdf[:n])
-                else:
-                    _kernel_caller(kernels, _f_pos[:n], out=_f_sdf[:n])
-                inc = _final_iteration3(_f_sdf_ptr)
-                pbar.update(inc)
-            n = self.final_iteration_occluded(nv_ptr)
-            if n != 0:
-                if n > _f_cap:
-                    _f_pos = _empty((n, 3), dtype=_np_float)
-                    _f_pos_ptr = _af(_f_pos)
-                    _f_sdf = _empty((n, n_elements), dtype=_sdf_dtype)
-                    _f_sdf_ptr = _sdf_af(_f_sdf)
-                _final_iteration2(_f_pos_ptr)
-                if single_kernel:
-                    _kernel_caller_single(kernels[0], _f_pos[:n], out=_f_sdf[:n])
-                else:
-                    _kernel_caller(kernels, _f_pos[:n], out=_f_sdf[:n])
-                self.final_iteration3_occluded(_f_sdf_ptr)
-            # np.empty: final_remaining fills every element before use.
-            nv = _empty(n_elements, dtype=np.int32)
-            self.final_remaining(AsInt(nv))
-        with Timer("construct mesh") as mesh_timer:
-            meshes = [None] * n_elements
-            in_view_tags = [None] * n_elements
-            _construct = self._construct_element_mesh
-            for e in range(n_elements):
-                k_e = (kernels[e],)  # tuple avoids list-slice copy
-                mesh, in_view_tag = _construct(e, k_e, nv[e])
-                meshes[e] = mesh
-                in_view_tags[e] = in_view_tag
-                logger.info(
-                    "element %d: %d vertices, %d faces",
-                    e,
-                    mesh.vertices.shape[0],
-                    mesh.faces.shape[0],
+            with tracker.track("coarse_octree_camera"), Timer("coarse step part1"):
+                n_blocks = self.run_coarse(
+                    _af(self.center),
+                    self.size,
+                    self.n_cameras,
+                    _af(self.cameras),
+                    self.inview_pixels_per_cube,
+                    self.inv_scale,
+                    self.min_dist,
+                    self.coarse_count,
+                    self.memory_limit_mb,
+                    n_elements,
                 )
-        Timer.log_phase_summary(
-            "ocmesher pipeline",
-            {
-                "coarse": coarse_part1_timer.duration + coarse_part2_timer.duration,
-                "visibility": visibility_timer.duration,
-                "fine": fine_timer.duration,
-                "mesh": mesh_timer.duration,
-            },
-        )
-        return meshes, in_view_tags
+            logger.info("coarse blocks: %d", n_blocks)
+
+            _fine_group = self.fine_group
+            _fine_iteration = self.fine_iteration
+            _fine_iteration_output = self.fine_iteration_output
+            with tracker.track("coarse_octree_sdf"), Timer("coarse step part2"), tqdm(total=n_blocks) as pbar:
+                _c_cap = 0
+                _c_pos = None
+                _c_pos_ptr = None
+                _c_sdf = None
+                _c_sdf_ptr = None
+                _c_min = None
+                while True:
+                    inc = _fine_group()
+                    if inc == 0:
+                        break
+                    pbar.update(inc)
+                    n = _fine_iteration(_sdf_null)
+                    while n > 0:
+                        if n > _c_cap:
+                            _c_pos = _empty((n, 3), dtype=_np_float)
+                            _c_pos_ptr = _af(_c_pos)
+                            _c_sdf = _empty((n, n_elements), dtype=_sdf_dtype)
+                            if single_kernel:
+                                _c_sdf_ptr = _sdf_af(_c_sdf)
+                            else:
+                                _c_min = _empty(n, dtype=_sdf_dtype)
+                                _c_sdf_ptr = _sdf_af(_c_min)
+                            _c_cap = n
+                        assert _c_pos is not None and _c_pos_ptr is not None and _c_sdf is not None
+                        _fine_iteration_output(_c_pos_ptr)
+                        if single_kernel:
+                            _kernel_caller_single(kernels[0], _c_pos[:n], out=_c_sdf[:n])
+                        else:
+                            assert _c_min is not None
+                            _kernel_caller(kernels, _c_pos[:n], out=_c_sdf[:n])
+                        if not single_kernel:
+                            _c_sdf[:n].min(axis=-1, out=_c_min[:n])
+                        n = _fine_iteration(_c_sdf_ptr)
+
+            with tracker.track("visibility_filter"), Timer("filter visible blocks"):
+                n_vis_block = self.vis_filter(self.simplify_occluded, self.visible_relax_iter)
+            logger.info("visible blocks: %d", n_vis_block)
+
+            _final_iteration = self.final_iteration
+            _final_iteration2 = self.final_iteration2
+            _final_iteration3 = self.final_iteration3
+            with tracker.track("fine_surface"), Timer("fine step"), tqdm(total=n_vis_block) as pbar:
+                nv = _empty(1, dtype=np.int32)
+                nv_ptr = AsInt(nv)
+                _f_cap = 0
+                _f_pos = None
+                _f_pos_ptr = None
+                _f_sdf = None
+                _f_sdf_ptr = None
+                while True:
+                    n = _final_iteration(nv_ptr)
+                    if n == 0:
+                        break
+                    if n > _f_cap:
+                        _f_pos = _empty((n, 3), dtype=_np_float)
+                        _f_pos_ptr = _af(_f_pos)
+                        _f_sdf = _empty((n, n_elements), dtype=_sdf_dtype)
+                        _f_sdf_ptr = _sdf_af(_f_sdf)
+                        _f_cap = n
+                    assert _f_pos is not None and _f_pos_ptr is not None and _f_sdf is not None
+                    _final_iteration2(_f_pos_ptr)
+                    if single_kernel:
+                        _kernel_caller_single(kernels[0], _f_pos[:n], out=_f_sdf[:n])
+                    else:
+                        _kernel_caller(kernels, _f_pos[:n], out=_f_sdf[:n])
+                    inc = _final_iteration3(_f_sdf_ptr)
+                    pbar.update(inc)
+                n = self.final_iteration_occluded(nv_ptr)
+                if n != 0:
+                    if n > _f_cap:
+                        _f_pos = _empty((n, 3), dtype=_np_float)
+                        _f_pos_ptr = _af(_f_pos)
+                        _f_sdf = _empty((n, n_elements), dtype=_sdf_dtype)
+                        _f_sdf_ptr = _sdf_af(_f_sdf)
+                    assert _f_pos is not None and _f_pos_ptr is not None and _f_sdf is not None and _f_sdf_ptr is not None
+                    _final_iteration2(_f_pos_ptr)
+                    if single_kernel:
+                        _kernel_caller_single(kernels[0], _f_pos[:n], out=_f_sdf[:n])
+                    else:
+                        _kernel_caller(kernels, _f_pos[:n], out=_f_sdf[:n])
+                    self.final_iteration3_occluded(_f_sdf_ptr)
+                nv = _empty(n_elements, dtype=np.int32)
+                self.final_remaining(AsInt(nv))
+
+            with tracker.track("mesh_construction"), Timer("construct mesh"):
+                meshes: list[trimesh.Trimesh] = []
+                in_view_tags: list[np.ndarray] = []
+                _construct = self._construct_element_mesh
+                for e in range(n_elements):
+                    k_e = (kernels[e],)
+                    mesh, in_view_tag = _construct(e, k_e, nv[e])
+                    meshes.append(mesh)
+                    in_view_tags.append(in_view_tag)
+                    logger.info(
+                        "element %d: %d vertices, %d faces",
+                        e,
+                        mesh.vertices.shape[0],
+                        mesh.faces.shape[0],
+                    )
+
+            summary = tracker.snapshot_millis()
+            summary["coarse_octree"] = summary.get("coarse_octree_camera", 0.0) + summary.get("coarse_octree_sdf", 0.0)
+            summary["marching_cubes"] = summary.get("mesh_construction", 0.0)
+            summary["total"] = (
+                summary.get("coarse_octree_camera", 0.0)
+                + summary.get("coarse_octree_sdf", 0.0)
+                + summary.get("visibility_filter", 0.0)
+                + summary.get("fine_surface", 0.0)
+                + summary.get("mesh_construction", 0.0)
+            )
+            summary["python_orchestration"] = max(
+                summary["total"]
+                - summary.get("sdf_eval", 0.0)
+                - summary.get("visibility_filter", 0.0)
+                - summary.get("marching_cubes", 0.0),
+                0.0,
+            )
+            self.last_phase_summary = summary
+            tracker.log_summary()
+            return meshes, in_view_tags
+        finally:
+            self._phase_tracker = None
 
     def _construct_element_mesh(self, e, k_e, num_verts):
         """Construct mesh for a single SDF element via bisection refinement.

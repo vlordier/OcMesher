@@ -12,6 +12,7 @@ from ocmesher.core import (
     OcMesher,
     _validate_kernels,
 )
+from ocmesher.utils.timer import PhaseTracker
 
 from .sdf_fixtures import constant_kernel as _constant_kernel
 
@@ -70,6 +71,13 @@ class TestKernelCaller:
         points = np.array([[0, 0, 0.5]], dtype=np.float64)
         result = mesher.kernel_caller([sphere_kernel, plane_kernel], points)
         assert result.shape == (1, 2)
+
+    def test_kernel_caller_records_sdf_phase_when_tracker_active(self, sample_bounds, sphere_kernel):
+        mesher = self._make_mesher_stub(sample_bounds)
+        mesher._phase_tracker = PhaseTracker("test")
+        points = np.array([[0, 0, 0], [1, 0, 0]], dtype=np.float64)
+        _ = mesher.kernel_caller([sphere_kernel], points)
+        assert mesher._phase_tracker.snapshot_millis()["sdf_eval"] > 0.0
 
     def test_rejects_non_callable_kernel(self, sample_bounds):
         mesher = self._make_mesher_stub(sample_bounds)

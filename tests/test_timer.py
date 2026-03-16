@@ -10,7 +10,7 @@ from unittest.mock import patch
 import psutil
 import pytest
 
-from ocmesher.utils.timer import Timer
+from ocmesher.utils.timer import PhaseTracker, Timer
 
 # ---------------------------------------------------------------------------
 # Helpers - deterministic psutil stubs
@@ -129,6 +129,31 @@ class TestPhaseSummary:
         assert caplog.text == ""
 
 
+class TestPhaseTracker:
+    def test_track_accumulates_named_phase(self):
+        tracker = PhaseTracker("pipeline")
+        with tracker.track("sdf_eval"):
+            time.sleep(0.005)
+        with tracker.track("sdf_eval"):
+            time.sleep(0.005)
+        snapshot = tracker.snapshot()
+        assert "sdf_eval" in snapshot
+        assert snapshot["sdf_eval"] >= timedelta(milliseconds=8)
+
+    def test_snapshot_millis_returns_floats(self):
+        tracker = PhaseTracker("pipeline")
+        tracker.add("coarse", timedelta(milliseconds=12))
+        assert tracker.snapshot_millis() == {"coarse": 12.0}
+
+    def test_log_summary_uses_timer_logger(self, caplog):
+        tracker = PhaseTracker("pipeline")
+        tracker.add("coarse", timedelta(seconds=1))
+        with caplog.at_level(logging.INFO, logger="ocmesher.utils.timer"):
+            tracker.log_summary()
+        assert "[pipeline] phase summary:" in caplog.text
+        assert "coarse=0:00:01" in caplog.text
+
+
 class TestTimerMemoryReporting:
     @patch("ocmesher.utils.timer.psutil.Process", _FakeProcess)
     def test_memory_output_format(self, caplog):
@@ -186,3 +211,12 @@ class TestTimerSlots:
         t = Timer("slot guard")
         with pytest.raises(AttributeError):
             t.unexpected_attr = 42  # type: ignore[attr-defined]
+
+
+class TestPhaseTrackerSlots:
+    def test_has_slots(self):
+        assert hasattr(PhaseTracker, "__slots__")
+
+    def test_no_instance_dict(self):
+        tracker = PhaseTracker("pipeline")
+        assert not hasattr(tracker, "__dict__")

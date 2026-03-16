@@ -9,6 +9,7 @@ torch = pytest.importorskip("torch", reason="torch not installed")
 
 from ocmesher import torch_core
 from ocmesher.torch_core import TorchOcMesher
+from ocmesher.utils.timer import PhaseTracker
 
 
 # ---------------------------------------------------------------------------
@@ -139,6 +140,12 @@ class TestBackendContract:
 
     def test_mps_prefers_smaller_batches(self):
         assert TorchOcMesher._recommended_max_batch("mps") < torch_core.TORCH_SDF_CHUNK_SIZE
+
+    def test_evaluate_sdf_records_phase_summary(self, single_cam_mesher, sphere_kernel):
+        single_cam_mesher._phase_tracker = PhaseTracker("torch pipeline")
+        pts = torch.zeros((4, 3), dtype=single_cam_mesher._fdtype, device=single_cam_mesher.device)
+        _ = single_cam_mesher.evaluate_sdf_batch([sphere_kernel], pts)
+        assert single_cam_mesher._phase_tracker.snapshot_millis()["sdf_eval"] > 0.0
 
 
 # ---------------------------------------------------------------------------

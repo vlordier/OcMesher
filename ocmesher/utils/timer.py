@@ -3,19 +3,65 @@
 
 # Authors: Zeyu Ma
 
-"""Simple wall-clock timer with memory reporting and phase summaries."""
+"""Simple wall-clock timers and reusable phase accumulation helpers."""
 
 import logging
 import os
+from contextlib import contextmanager
 from datetime import UTC, datetime, timedelta
+from time import perf_counter_ns
 from types import TracebackType
-from typing import Self
+from typing import Iterator, Self
 
 import psutil
 
 logger = logging.getLogger(__name__)
 
-__all__ = ["Timer"]
+__all__ = ["PhaseTracker", "Timer"]
+
+
+class PhaseTracker:
+    """Accumulate named phase durations across one pipeline run."""
+
+    __slots__ = ("disable_timer", "label", "phases")
+
+    disable_timer: bool
+    label: str
+    phases: dict[str, timedelta]
+
+    def __init__(self, label: str, *, disable_timer: bool = False) -> None:
+        self.disable_timer = disable_timer
+        self.label = label
+        self.phases = {}
+
+    @contextmanager
+    def track(self, name: str) -> Iterator[None]:
+        """Measure one phase block and accumulate its duration by *name*."""
+        if self.disable_timer:
+            yield
+            return
+        start_ns = perf_counter_ns()
+        try:
+            yield
+        finally:
+            elapsed = timedelta(seconds=(perf_counter_ns() - start_ns) / 1_000_000_000)
+            self.add(name, elapsed)
+
+    def add(self, name: str, duration: timedelta) -> None:
+        """Accumulate an already measured *duration* under *name*."""
+        self.phases[name] = self.phases.get(name, timedelta()) + duration
+
+    def snapshot(self) -> dict[str, timedelta]:
+        """Return a copy of the accumulated phase durations."""
+        return dict(self.phases)
+
+    def snapshot_millis(self) -> dict[str, float]:
+        """Return accumulated phase durations in milliseconds."""
+        return {name: duration.total_seconds() * 1000.0 for name, duration in self.phases.items()}
+
+    def log_summary(self) -> None:
+        """Emit the accumulated phase summary through the shared timer logger."""
+        Timer.log_phase_summary(self.label, self.phases, disable_timer=self.disable_timer)
 
 
 class Timer:
