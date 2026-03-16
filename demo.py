@@ -11,34 +11,17 @@ Outputs the resulting mesh to ``results/demo.obj``.
 from pathlib import Path
 
 import numpy as np
+import vnoise
 
 from ocmesher import OcMesher
 
-try:
-    import vnoise
-
-    _noise = vnoise.Noise()
-
-    def _terrain_height(XYZ):
-        scale = 2
-        return _noise.noise2(XYZ[:, 0] / scale, XYZ[:, 1] / scale, grid_mode=False, octaves=4)
-
-except ImportError:
-
-    def _terrain_height(XYZ):
-        x = XYZ[:, 0] / 2.0
-        y = XYZ[:, 1] / 2.0
-        return (
-            0.5000 * np.sin(1.0 * x) * np.cos(1.0 * y)
-            + 0.2500 * np.sin(2.0 * x) * np.cos(2.0 * y)
-            + 0.1250 * np.sin(4.0 * x) * np.cos(4.0 * y)
-            + 0.0625 * np.sin(8.0 * x) * np.cos(8.0 * y)
-        )
+noise = vnoise.Noise()
 
 
 def f(XYZ):
-    """Signed-distance function for the demo terrain height field."""
-    h = _terrain_height(XYZ)
+    """Signed-distance function for a Perlin-noise height field."""
+    scale = 2
+    h = noise.noise2(XYZ[:, 0] / scale, XYZ[:, 1] / scale, grid_mode=False, octaves=4)
     return XYZ[:, 2] - h
 
 
