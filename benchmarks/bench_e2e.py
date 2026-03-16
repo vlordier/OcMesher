@@ -475,7 +475,7 @@ def regression_check() -> list[str]:
 # ---------------------------------------------------------------------------
 # Comparison utility
 # ---------------------------------------------------------------------------
-def compare_results(file_a: str, file_b: str):
+def compare_results(file_a: str, file_b: str) -> None:
     """Print side-by-side comparison of two JSON result files."""
     with Path(file_a).open() as f:
         a = json.load(f)
@@ -531,7 +531,7 @@ _BENCHMARKS: dict = {
 # ---------------------------------------------------------------------------
 # Main
 # ---------------------------------------------------------------------------
-def main():
+def main() -> None:
     """Run branch-comparable end-to-end orchestration benchmarks."""
     parser = argparse.ArgumentParser(
         description="End-to-end benchmark for OcMesher Python orchestration layer",
