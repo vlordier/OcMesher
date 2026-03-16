@@ -2,14 +2,14 @@ name: Static Analysis
 
 on:
   push:
-    branches: ["main", "master"]
+    branches: ["main", "develop"]
     paths:
       - "ocmesher/source/**"
       - ".clang-tidy"
       - ".clang-format"
       - ".github/workflows/static-analysis.yml"
   pull_request:
-    branches: ["main", "master"]
+    branches: ["main", "develop"]
     paths:
       - "ocmesher/source/**"
       - ".clang-tidy"
