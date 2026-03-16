@@ -73,7 +73,7 @@ def _sdf_gyroid(xyz: np.ndarray) -> np.ndarray:
 # ---------------------------------------------------------------------------
 # Stub factory: create an OcMesher without the C++ DLL
 # ---------------------------------------------------------------------------
-def _make_stub(*, enclosed: bool = True, n_cameras: int = 4) -> OcMesher:
+def _make_stub(*, enclosed: bool = True) -> OcMesher:
     """Create an OcMesher stub without loading the C++ DLL.
 
     Sets up just enough state for ``kernel_caller``, bounds masking, and
@@ -243,7 +243,7 @@ def bench_bounds_mask(sizes: list[int], repeats: int) -> dict:
     return results
 
 
-def bench_camera_packing(sizes: list[int], repeats: int) -> dict:
+def bench_camera_packing(_sizes: list[int], repeats: int) -> dict:
     """Camera data packing (vectorized vs per-camera loop).
 
     Tests the __init__ camera packing with varying number of cameras.
