@@ -213,3 +213,12 @@ class TestLayoutConstants:
         assert header.startswith(f"{'Config':<{benchmark.CONFIG_COLUMN_WIDTH}}")
 
 
+class TestComparisonRow:
+    def test_formats_medians_and_speedup_columns(self):
+        row = benchmark._comparison_row("small", [1.0, 0.5], 7)
+        assert row.startswith("small")
+        assert "1.000s" in row
+        assert "0.500s" in row
+        assert "2.00x" in row
+
+
