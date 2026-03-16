@@ -102,6 +102,7 @@ TIERS_SPEC: list[TierSpec] = [
 PYTHON = sys.executable
 TIER_SEPARATOR_WIDTH = 62
 CONFIG_COLUMN_WIDTH = 20
+CONFIG_CHOICES = ("small", "medium", "large", "all")
 
 # ── SDF definitions injected verbatim into subprocess scripts ────────
 
@@ -447,7 +448,7 @@ def _create_parser() -> argparse.ArgumentParser:
     """Create and return the CLI argument parser for benchmark.py."""
     parser = argparse.ArgumentParser(description="Benchmark OcMesher: baseline vs opt-C++ vs opt+numba-SDF")
     parser.add_argument("--runs", type=int, default=3, help="Runs per configuration (default: 3)")
-    parser.add_argument("--configs", default="all", choices=["small", "medium", "large", "all"])
+    parser.add_argument("--configs", default="all", choices=CONFIG_CHOICES)
     parser.add_argument("--json", help="Write results to JSON file")
     return parser
 
