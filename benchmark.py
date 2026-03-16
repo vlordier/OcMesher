@@ -255,7 +255,7 @@ def run_mesher_subprocess(pixels_per_cube: int, coarse_count: int, sdf_type: str
         )
     except subprocess.CalledProcessError as exc:
         stderr = exc.stderr or str(exc)
-        print(f"  ERROR:\n{stderr}", file=sys.stderr)
+        _write_stderr(f"  ERROR:\n{stderr}")
         raise MesherSubprocessError(stderr) from exc
     return _parse_last_json_line(result.stdout)
 
@@ -280,27 +280,27 @@ def run_tier(
     """Benchmark one tier across all selected configs and aggregate run stats."""
     _print_tier_banner(label)
     build_time = build(build_script)
-    print(f"  Build time: {build_time:.2f}s")
+    _write_stdout(f"  Build time: {build_time:.2f}s")
     results = []
     for cfg in configs:
         times = []
         verts = faces = 0
-        print(f"\n  Config: {cfg['label']}")
+        _write_stdout(f"\n  Config: {cfg['label']}")
         for i in range(runs):
             r = run_mesher_subprocess(cfg["pixels_per_cube"], cfg["coarse_count"], sdf_type)
             times.append(r["elapsed_s"])
             verts = r["n_verts"]
             faces = r["n_faces"]
-            print(f"    Run {i + 1}/{runs}: {r['elapsed_s']:.3f}s  ({verts} verts, {faces} faces)")
+            _write_stdout(f"    Run {i + 1}/{runs}: {r['elapsed_s']:.3f}s  ({verts} verts, {faces} faces)")
         results.append(_summarize_tier_config(cfg["label"], times, verts, faces, runs))
     return results
 
 
 def _print_tier_banner(label: str) -> None:
     """Print heading banner for one benchmark tier."""
-    print(f"\n{'=' * TIER_SEPARATOR_WIDTH}")
-    print(f"  {label}")
-    print(f"{'=' * TIER_SEPARATOR_WIDTH}")
+    _write_stdout(f"\n{'=' * TIER_SEPARATOR_WIDTH}")
+    _write_stdout(f"  {label}")
+    _write_stdout(f"{'=' * TIER_SEPARATOR_WIDTH}")
 
 
 def _summarize_tier_config(label: str, times: list[float], n_verts: int, n_faces: int, runs: int) -> TierConfigResult:
@@ -334,14 +334,14 @@ def print_comparison(tiers: list[tuple[str, list[TierConfigResult]]]) -> None:
     cw = _comparison_column_width(short)
     header = _comparison_header(short, cw)
     _print_comparison_banner(n_cols, cw)
-    print(header)
-    print("-" * len(header))
+    _write_stdout(header)
+    _write_stdout("-" * len(header))
 
     for row in range(len(tables[0])):
         cfg_label = tables[0][row]["config"]
         medians = _tier_medians_at_row(tables, row, n_cols)
-        print(_comparison_row(cfg_label, medians, cw))
-    print()
+        _write_stdout(_comparison_row(cfg_label, medians, cw))
+    _write_stdout()
 
 
 def _comparison_row(cfg_label: str, medians: list[float], col_width: int) -> str:
@@ -381,9 +381,9 @@ def _comparison_header(short_labels: list[str], col_width: int) -> str:
 def _print_comparison_banner(num_cols: int, col_width: int) -> None:
     """Print title banner for the comparison section."""
     line_w = CONFIG_COLUMN_WIDTH + (col_width + 3) * num_cols + 7 * max(0, num_cols - 1)
-    print(f"\n{'=' * line_w}")
-    print("  COMPARISON  (median wall-clock per config)")
-    print(f"{'=' * line_w}")
+    _write_stdout(f"\n{'=' * line_w}")
+    _write_stdout("  COMPARISON  (median wall-clock per config)")
+    _write_stdout(f"{'=' * line_w}")
 
 
 def _select_configs(config_choice: str, all_configs: list[DemoConfig]) -> list[DemoConfig]:
@@ -441,7 +441,7 @@ def main() -> None:
 
     if args.json:
         _write_results_json(args.json, all_results)
-        print(f"Results written to {args.json}")
+        _write_stdout(f"Results written to {args.json}")
 
 
 def _create_parser() -> argparse.ArgumentParser:
@@ -460,6 +460,16 @@ def _collect_tier_results(configs: list[DemoConfig], runs: int) -> list[tuple[st
         results = run_tier(label, build_script, sdf_type, configs, runs)
         all_results.append((label, results))
     return all_results
+
+
+def _write_stdout(message: str = "") -> None:
+    """Write one line to stdout without relying on print()."""
+    sys.stdout.write(f"{message}\n")
+
+
+def _write_stderr(message: str) -> None:
+    """Write one line to stderr without relying on print()."""
+    sys.stderr.write(f"{message}\n")
 
 
 if __name__ == "__main__":
