@@ -1,6 +1,7 @@
 """Tests for new module structure: _mc_tables, _validation, _constants, _types."""
 
 from __future__ import annotations
+
 import pytest
 
 # ---------------------------------------------------------------------------

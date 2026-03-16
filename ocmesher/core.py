@@ -20,7 +20,6 @@ from tqdm import tqdm
 from ._constants import CAMERA_DATA_STRIDE
 from ._constants import MAX_SDF_WORKERS as _MAX_SDF_WORKERS
 from ._constants import SDF_BATCH_SIZE as _SDF_BATCH_SIZE
-from ._validation import _AXIS_NAMES  # noqa: F401
 from ._validation import bounds_min_max as _bounds_min_max
 from ._validation import coerce_kernel_sdf as _coerce_kernel_sdf
 from ._validation import out_of_bounds_mask as _out_of_bounds_mask_shared
