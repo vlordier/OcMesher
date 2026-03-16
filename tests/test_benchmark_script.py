@@ -126,3 +126,11 @@ class TestWriteResultsJson:
         assert data["Baseline"][0]["n_verts"] == 10
 
 
+class TestSpeedupRatio:
+    def test_returns_ratio_for_positive_candidate(self):
+        assert benchmark._speedup_ratio(10.0, 2.0) == 5.0
+
+    def test_returns_zero_when_candidate_is_zero(self):
+        assert benchmark._speedup_ratio(10.0, 0.0) == 0.0
+
+
