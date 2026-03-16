@@ -222,3 +222,16 @@ class TestComparisonRow:
         assert "2.00x" in row
 
 
+class TestComparisonCells:
+    def test_speedup_cells_formats_suffix(self):
+        assert benchmark._speedup_cells([2.0, 1.0, 0.5]) == "   2.00x   4.00x"
+
+    def test_tier_medians_at_row_collects_expected_values(self):
+        tables = [
+            [{"median": 1.0}],
+            [{"median": 0.5}],
+        ]
+        medians = benchmark._tier_medians_at_row(tables, 0, 2)
+        assert medians == [1.0, 0.5]
+
+
