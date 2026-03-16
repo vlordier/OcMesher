@@ -199,3 +199,11 @@ class TestTierResultsToDict:
         assert list(mapped.keys()) == ["Baseline", "Opt"]
 
 
+class TestPrintTierBanner:
+    def test_prints_label_and_separator(self, capsys):
+        benchmark._print_tier_banner("Opt-C++")
+        out = capsys.readouterr().out
+        assert "Opt-C++" in out
+        assert "=" * 62 in out
+
+
