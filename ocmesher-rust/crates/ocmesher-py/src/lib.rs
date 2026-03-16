@@ -64,6 +64,15 @@ fn parse_center_f64(center: Option<Vec<f64>>) -> PyResult<[f64; 3]> {
     }
 }
 
+fn parse_sphere_radius(radius: f64) -> PyResult<f64> {
+    if radius <= 0.0 {
+        return Err(pyo3::exceptions::PyValueError::new_err(
+            "sphere_radius must be positive",
+        ));
+    }
+    Ok(radius)
+}
+
 fn parse_normal_f64(normal: Option<Vec<f64>>) -> PyResult<[f64; 3]> {
     match normal {
         Some(values) => {
@@ -317,6 +326,7 @@ impl Backend {
         radius: f64,
         center: Option<Vec<f64>>,
     ) -> PyResult<Bound<'py, PyTuple>> {
+        let radius = parse_sphere_radius(radius)?;
         let center_arr = parse_center_f64(center)?;
         let kernels = vec![Box::new(SphereKernel::new(center_arr, radius)) as _];
         let mesh_data_list = run_meshing_pipeline_native(&self.lib, &self.params, &kernels)
@@ -341,6 +351,29 @@ impl Backend {
         mesh_data_list_to_python(py, mesh_data_list)
     }
 
+    /// Run the meshing pipeline with a composed Rust-native sphere+plane SDF scene.
+    #[pyo3(signature = (sphere_radius = 1.0, sphere_center = None, plane_offset = 0.0, plane_normal = None))]
+    fn extract_native_sphere_plane<'py>(
+        &self,
+        py: Python<'py>,
+        sphere_radius: f64,
+        sphere_center: Option<Vec<f64>>,
+        plane_offset: f64,
+        plane_normal: Option<Vec<f64>>,
+    ) -> PyResult<Bound<'py, PyTuple>> {
+        let sphere_radius = parse_sphere_radius(sphere_radius)?;
+        let sphere_center = parse_center_f64(sphere_center)?;
+        let plane_normal = parse_normal_f64(plane_normal)?;
+        let kernels = vec![
+            Box::new(SphereKernel::new(sphere_center, sphere_radius)) as _,
+            Box::new(PlaneKernel::new(plane_normal, plane_offset).map_err(PyErr::from)?) as _,
+        ];
+        let mesh_data_list = run_meshing_pipeline_native(&self.lib, &self.params, &kernels)
+            .map_err(PyErr::from)?;
+
+        mesh_data_list_to_python(py, mesh_data_list)
+    }
+
     /// Run the meshing pipeline with a `tch`-backed sphere SDF.
     #[cfg(feature = "tch-kernels")]
     #[pyo3(signature = (radius = 1.0, center = None, device = None))]
@@ -351,6 +384,7 @@ impl Backend {
         center: Option<Vec<f64>>,
         device: Option<String>,
     ) -> PyResult<Bound<'py, PyTuple>> {
+        let radius = parse_sphere_radius(radius)?;
         let center_arr = parse_vector_f32(center, "center", [0.0, 0.0, 0.0])?;
         let tch_device = parse_tch_device(device)?;
         let kernels = vec![Box::new(TchSphereKernel::new(center_arr, radius as f32, tch_device)) as _];
@@ -373,6 +407,32 @@ impl Backend {
         let normal_arr = parse_vector_f32(normal, "normal", [0.0, 0.0, 1.0])?;
         let tch_device = parse_tch_device(device)?;
         let kernels = vec![Box::new(TchPlaneKernel::new(normal_arr, offset as f32, tch_device).map_err(PyErr::from)?) as _];
+        let mesh_data_list = run_meshing_pipeline_native(&self.lib, &self.params, &kernels)
+            .map_err(PyErr::from)?;
+
+        mesh_data_list_to_python(py, mesh_data_list)
+    }
+
+    /// Run the meshing pipeline with a composed `tch`-backed sphere+plane SDF scene.
+    #[cfg(feature = "tch-kernels")]
+    #[pyo3(signature = (sphere_radius = 1.0, sphere_center = None, plane_offset = 0.0, plane_normal = None, device = None))]
+    fn extract_tch_sphere_plane<'py>(
+        &self,
+        py: Python<'py>,
+        sphere_radius: f64,
+        sphere_center: Option<Vec<f64>>,
+        plane_offset: f64,
+        plane_normal: Option<Vec<f64>>,
+        device: Option<String>,
+    ) -> PyResult<Bound<'py, PyTuple>> {
+        let sphere_radius = parse_sphere_radius(sphere_radius)?;
+        let sphere_center = parse_vector_f32(sphere_center, "sphere_center", [0.0, 0.0, 0.0])?;
+        let plane_normal = parse_vector_f32(plane_normal, "plane_normal", [0.0, 0.0, 1.0])?;
+        let tch_device = parse_tch_device(device)?;
+        let kernels = vec![
+            Box::new(TchSphereKernel::new(sphere_center, sphere_radius as f32, tch_device)) as _,
+            Box::new(TchPlaneKernel::new(plane_normal, plane_offset as f32, tch_device).map_err(PyErr::from)?) as _,
+        ];
         let mesh_data_list = run_meshing_pipeline_native(&self.lib, &self.params, &kernels)
             .map_err(PyErr::from)?;
 

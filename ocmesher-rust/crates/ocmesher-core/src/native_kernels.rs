@@ -299,6 +299,19 @@ mod tests {
         assert_eq!(min[1], 1.0);
     }
 
+    #[test]
+    fn native_eval_min_combines_plane_and_sphere() {
+        let kernels: Vec<BoxedSdfEvaluator> = vec![
+            Box::new(SphereKernel::new([0.0, 0.0, 0.0], 1.0)),
+            Box::new(PlaneKernel::new([0.0, 0.0, 1.0], 0.0).unwrap()),
+        ];
+        let xyz = [0.0, 0.0, 2.0, 0.0, 0.0, -2.0];
+        let min = eval_sdf_min_native(&kernels, &xyz, 2, &[-5.0, -5.0, -5.0], &[5.0, 5.0, 5.0], false).unwrap();
+        assert_eq!(min.len(), 2);
+        assert!((min[0] - 1.0).abs() <= 1e-6);
+        assert!((min[1] + 2.0).abs() <= 1e-6);
+    }
+
     #[cfg(feature = "tch-kernels")]
     #[test]
     fn tch_sphere_kernel_matches_expected_distances() {
@@ -325,5 +338,22 @@ mod tests {
         assert_eq!(out.len(), 2);
         assert!((out[0] + 0.5).abs() <= 1e-5);
         assert!((out[1] - 1.5).abs() <= 1e-5);
+    }
+
+    #[cfg(feature = "tch-kernels")]
+    #[test]
+    fn tch_eval_min_combines_plane_and_sphere() {
+        use super::tch_kernels::{TchPlaneKernel, TchSphereKernel};
+        use tch::Device;
+
+        let kernels: Vec<BoxedSdfEvaluator> = vec![
+            Box::new(TchSphereKernel::new([0.0, 0.0, 0.0], 1.0, Device::Cpu)),
+            Box::new(TchPlaneKernel::new([0.0, 0.0, 1.0], 0.0, Device::Cpu).unwrap()),
+        ];
+        let xyz = [0.0, 0.0, 2.0, 0.0, 0.0, -2.0];
+        let min = eval_sdf_min_native(&kernels, &xyz, 2, &[-5.0, -5.0, -5.0], &[5.0, 5.0, 5.0], false).unwrap();
+        assert_eq!(min.len(), 2);
+        assert!((min[0] - 1.0).abs() <= 1e-5);
+        assert!((min[1] + 2.0).abs() <= 1e-5);
     }
 }

@@ -321,3 +321,77 @@ def test_compiled_extension_extract_tch_plane(sample_cameras, sample_bounds):
     assert meshes[0].faces.shape[0] > 0
     assert tags[0].shape == (meshes[0].vertices.shape[0],)
     assert tags[0].dtype == np.bool_
+
+
+@pytest.mark.integration
+def test_compiled_extension_extract_native_sphere_plane(sample_cameras, sample_bounds):
+    ocmesher_rust = pytest.importorskip("ocmesher_rust", reason="compiled Rust extension not installed")
+
+    if not hasattr(ocmesher_rust.Backend, "extract_native_sphere_plane"):
+        pytest.skip("compiled Rust extension was not built with composed scene support")
+
+    core_so = Path(__file__).resolve().parents[1] / "ocmesher" / "lib" / "core.so"
+    if not core_so.exists():
+        pytest.skip("compiled core.so not available")
+
+    cam_poses, ks, hs, ws = sample_cameras
+    backend = ocmesher_rust.Backend(
+        lib_path=str(core_so),
+        cameras=(
+            [np.asarray(p, dtype=np.float64).ravel().tolist() for p in cam_poses],
+            [np.asarray(k, dtype=np.float64).ravel().tolist() for k in ks],
+            [float(h) for h in hs],
+            [float(w) for w in ws],
+        ),
+        bounds=np.asarray(sample_bounds, dtype=np.float64).tolist(),
+        pixels_per_cube=32,
+        coarse_count=20_000,
+    )
+
+    meshes, tags = backend.extract_native_sphere_plane(sphere_radius=1.0, plane_offset=0.0)
+
+    assert len(meshes) == 2
+    assert len(tags) == 2
+    assert all(mesh.vertices.shape[1] == 3 for mesh in meshes)
+    assert all(mesh.faces.shape[1] == 3 for mesh in meshes)
+    assert all(mesh.vertices.shape[0] > 0 for mesh in meshes)
+    assert all(mesh.faces.shape[0] > 0 for mesh in meshes)
+    assert all(tag.dtype == np.bool_ for tag in tags)
+    assert all(tag.shape == (mesh.vertices.shape[0],) for mesh, tag in zip(meshes, tags, strict=True))
+
+
+@pytest.mark.integration
+def test_compiled_extension_extract_tch_sphere_plane(sample_cameras, sample_bounds):
+    ocmesher_rust = pytest.importorskip("ocmesher_rust", reason="compiled Rust extension not installed")
+
+    if not hasattr(ocmesher_rust.Backend, "extract_tch_sphere_plane"):
+        pytest.skip("compiled Rust extension was not built with tch-kernels")
+
+    core_so = Path(__file__).resolve().parents[1] / "ocmesher" / "lib" / "core.so"
+    if not core_so.exists():
+        pytest.skip("compiled core.so not available")
+
+    cam_poses, ks, hs, ws = sample_cameras
+    backend = ocmesher_rust.Backend(
+        lib_path=str(core_so),
+        cameras=(
+            [np.asarray(p, dtype=np.float64).ravel().tolist() for p in cam_poses],
+            [np.asarray(k, dtype=np.float64).ravel().tolist() for k in ks],
+            [float(h) for h in hs],
+            [float(w) for w in ws],
+        ),
+        bounds=np.asarray(sample_bounds, dtype=np.float64).tolist(),
+        pixels_per_cube=32,
+        coarse_count=20_000,
+    )
+
+    meshes, tags = backend.extract_tch_sphere_plane(sphere_radius=1.0, plane_offset=0.0)
+
+    assert len(meshes) == 2
+    assert len(tags) == 2
+    assert all(mesh.vertices.shape[1] == 3 for mesh in meshes)
+    assert all(mesh.faces.shape[1] == 3 for mesh in meshes)
+    assert all(mesh.vertices.shape[0] > 0 for mesh in meshes)
+    assert all(mesh.faces.shape[0] > 0 for mesh in meshes)
+    assert all(tag.dtype == np.bool_ for tag in tags)
+    assert all(tag.shape == (mesh.vertices.shape[0],) for mesh, tag in zip(meshes, tags, strict=True))
