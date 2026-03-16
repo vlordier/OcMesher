@@ -2,8 +2,8 @@
 
 from __future__ import annotations
 
-from pathlib import Path
 import tomllib
+from pathlib import Path
 
 
 def _repo_root() -> Path:
@@ -74,3 +74,11 @@ def test_pyproject_advertises_python_311_only() -> None:
 
     assert "Programming Language :: Python :: 3.11" in classifiers
     assert "Programming Language :: Python :: 3.12" not in classifiers
+
+
+def test_pre_commit_clang_tidy_is_strict() -> None:
+    config = _read(".pre-commit-config.yaml")
+
+    assert '"--extra-arg=-std=c++17"' in config
+    assert '"--warnings-as-errors=*"' in config
+    assert '"--header-filter=^ocmesher/source/.*"' in config
