@@ -516,6 +516,9 @@ dev = [
     { name = "pyupgrade" },
     { name = "ruff" },
 ]
+rust = [
+    { name = "trimesh" },
+]
 torch = [
     { name = "torch" },
 ]
@@ -532,9 +535,10 @@ requires-dist = [
     { name = "torch", marker = "extra == 'torch'", specifier = ">=2.0.0" },
     { name = "tqdm", specifier = ">=4.65.0" },
     { name = "trimesh", specifier = ">=4.0.0" },
+    { name = "trimesh", marker = "extra == 'rust'", specifier = ">=4.0.0" },
     { name = "vnoise", specifier = ">=0.1.0" },
 ]
-provides-extras = ["torch", "dev"]
+provides-extras = ["torch", "rust", "dev"]
 
 [[package]]
 name = "packaging"

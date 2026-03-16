@@ -1,0 +1,19 @@
+[package]
+name = "ocmesher-core"
+version = "0.1.0"
+edition = "2021"
+description = "Rust core: dynamic loader for OcMesher C++ backend + pyo3-based meshing pipeline"
+
+[dependencies]
+libloading = "0.8"
+pyo3 = { version = "0.22", features = [] }
+numpy = "0.22"
+ndarray = "0.16"
+thiserror = "2"
+
+[dev-dependencies]
+criterion = "0.5"
+
+[[bench]]
+name = "core_benches"
+harness = false

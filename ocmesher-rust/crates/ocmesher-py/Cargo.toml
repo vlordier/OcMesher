@@ -1,0 +1,15 @@
+[package]
+name = "ocmesher_rust"
+version = "0.1.0"
+edition = "2021"
+description = "PyO3 extension module exposing the OcMesher Rust backend"
+
+[lib]
+name = "ocmesher_rust"
+crate-type = ["cdylib"]
+
+[dependencies]
+ocmesher-core = { path = "../ocmesher-core" }
+pyo3 = { version = "0.22", features = ["extension-module"] }
+numpy = "0.22"
+ndarray = "0.16"
