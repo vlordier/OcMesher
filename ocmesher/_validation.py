@@ -8,11 +8,15 @@ here avoids duplication and ensures consistent error messages.
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
 import numpy as np
 
 if TYPE_CHECKING:
+    from collections.abc import Sequence
+
+    from numpy.typing import NDArray
+
     from ._types import BoundsLike, CamerasTuple, KernelSequence
 
 __all__ = [
@@ -132,7 +136,9 @@ def validate_bounds(bounds: BoundsLike) -> np.ndarray:
     return bounds
 
 
-def bounds_min_max(bounds):
+def bounds_min_max(
+    bounds: NDArray[np.float64],
+) -> tuple[NDArray[np.float64], NDArray[np.float64]]:
     """Split validated flat bounds into ``(3,)`` min/max vectors.
 
     Args:
@@ -165,7 +171,7 @@ def validate_kernels(kernels: KernelSequence) -> None:
             raise TypeError(msg)
 
 
-def coerce_kernel_sdf(raw_sdf, n_points, label):
+def coerce_kernel_sdf(raw_sdf: Any, n_points: int, label: str) -> NDArray[Any]:
     """Convert a kernel result to ``np.ndarray`` and validate its shape.
 
     Args:
@@ -186,7 +192,12 @@ def coerce_kernel_sdf(raw_sdf, n_points, label):
     return sdf
 
 
-def preprocess_cameras(cam_poses, Ks, Hs, Ws):
+def preprocess_cameras(
+    cam_poses: list[NDArray[np.float64]],
+    Ks: list[NDArray[np.float64]],
+    Hs: Sequence[int],
+    Ws: Sequence[int],
+) -> tuple[NDArray[np.float64], NDArray[np.float64], tuple[int, ...], tuple[int, ...]]:
     """Invert camera poses and normalise intrinsics as contiguous numpy arrays.
 
     Shared by both the C++ and PyTorch backends to avoid duplicated
@@ -249,7 +260,11 @@ def validate_mesher_params(  # noqa: PLR0913
         raise ValueError(msg)
 
 
-def out_of_bounds_mask(xyz, b_min, b_max):
+def out_of_bounds_mask(
+    xyz: NDArray[np.float64],
+    b_min: NDArray[np.float64],
+    b_max: NDArray[np.float64],
+) -> NDArray[np.bool_]:
     """Build a 1-D boolean mask indicating out-of-bounds points.
 
     Uses per-axis ufunc calls with ``out=`` to accumulate into two
