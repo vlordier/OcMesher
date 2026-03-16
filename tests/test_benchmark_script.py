@@ -178,3 +178,14 @@ class TestComparisonHelpers:
         assert "x/base" in header
 
 
+class TestSummarizeTierConfig:
+    def test_summarizes_single_run_with_zero_stdev(self):
+        result = benchmark._summarize_tier_config("small", [0.5], 10, 20, 1)
+        assert result["config"] == "small"
+        assert result["mean"] == 0.5
+        assert result["median"] == 0.5
+        assert result["stdev"] == 0.0
+        assert result["n_verts"] == 10
+        assert result["n_faces"] == 20
+
+
