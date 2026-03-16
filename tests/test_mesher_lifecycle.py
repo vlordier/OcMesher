@@ -88,9 +88,10 @@ class TestOcMesherInit:
 
     @patch("ocmesher.core.load_cdll")
     @patch("ocmesher.core.register_func")
-    def test_init_success_with_mock_dll(self, _mock_register, mock_load, sample_cameras, sample_bounds):
+    def test_init_success_with_mock_dll(self, mock_register, mock_load, sample_cameras, sample_bounds):
         mock_load.return_value = MagicMock()
         mesher = OcMesher(sample_cameras, sample_bounds)
+        assert mock_register.called
         assert mesher.n_cameras == 1
         assert mesher.bisection_iters == 15
         assert mesher.enclosed is True
@@ -98,14 +99,15 @@ class TestOcMesherInit:
 
     @patch("ocmesher.core.load_cdll")
     @patch("ocmesher.core.register_func")
-    def test_init_camera_packing_shape(self, _mock_register, mock_load, sample_cameras, sample_bounds):
+    def test_init_camera_packing_shape(self, mock_register, mock_load, sample_cameras, sample_bounds):
         mock_load.return_value = MagicMock()
         mesher = OcMesher(sample_cameras, sample_bounds)
+        assert mock_register.called
         assert mesher.cameras.shape == (CAMERA_DATA_STRIDE,)
 
     @patch("ocmesher.core.load_cdll")
     @patch("ocmesher.core.register_func")
-    def test_init_custom_params(self, _mock_register, mock_load, sample_cameras, sample_bounds):
+    def test_init_custom_params(self, mock_register, mock_load, sample_cameras, sample_bounds):
         mock_load.return_value = MagicMock()
         mesher = OcMesher(
             sample_cameras,
@@ -120,6 +122,7 @@ class TestOcMesherInit:
             visible_relax_iter=3,
             coarse_count=100000,
         )
+        assert mock_register.called
         assert mesher.bisection_iters == 10
         assert mesher.enclosed is False
         assert mesher.simplify_occluded is False
@@ -129,20 +132,22 @@ class TestOcMesherInit:
 
     @patch("ocmesher.core.load_cdll")
     @patch("ocmesher.core.register_func")
-    def test_init_accepts_list_cameras(self, _mock_register, mock_load, sample_cameras_as_lists, sample_bounds):
+    def test_init_accepts_list_cameras(self, mock_register, mock_load, sample_cameras_as_lists, sample_bounds):
         """Cameras given as plain Python lists should be accepted."""
         mock_load.return_value = MagicMock()
         mesher = OcMesher(sample_cameras_as_lists, sample_bounds)
+        assert mock_register.called
         assert mesher.n_cameras == 1
 
     @patch("ocmesher.core.load_cdll")
     @patch("ocmesher.core.register_func")
     def test_init_camera_packing_values(
-        self, _mock_register, mock_load, sample_cameras, sample_bounds, sample_camera_pose, sample_intrinsics
+        self, mock_register, mock_load, sample_cameras, sample_bounds, sample_camera_pose, sample_intrinsics
     ):
         """Camera array must contain correct inv_pose, K, H, W values."""
         mock_load.return_value = MagicMock()
         mesher = OcMesher(sample_cameras, sample_bounds)
+        assert mock_register.called
         expected_inv_pose = np.linalg.inv(sample_camera_pose)[:3, :4].reshape(-1)
         expected_k = sample_intrinsics.reshape(-1)
         cam = mesher.cameras
@@ -153,27 +158,29 @@ class TestOcMesherInit:
 
     @patch("ocmesher.core.load_cdll")
     @patch("ocmesher.core.register_func")
-    def test_init_center_for_asymmetric_bounds(self, _mock_register, mock_load, sample_cameras):
+    def test_init_center_for_asymmetric_bounds(self, mock_register, mock_load, sample_cameras):
         """Center must be the midpoint of each axis even for non-symmetric bounds."""
         mock_load.return_value = MagicMock()
         bounds = np.array([0.0, 4.0, -2.0, 6.0, 1.0, 3.0])
         mesher = OcMesher(sample_cameras, bounds)
+        assert mock_register.called
         np.testing.assert_allclose(mesher.center, [2.0, 2.0, 2.0], atol=1e-10)
 
     @patch("ocmesher.core.load_cdll")
     @patch("ocmesher.core.register_func")
-    def test_init_size_is_largest_dimension(self, _mock_register, mock_load, sample_cameras):
+    def test_init_size_is_largest_dimension(self, mock_register, mock_load, sample_cameras):
         """size must be 1.1x the largest axis range."""
         mock_load.return_value = MagicMock()
         # x-range = 10, y-range = 4, z-range = 2
         bounds = np.array([0.0, 10.0, -2.0, 2.0, -1.0, 1.0])
         mesher = OcMesher(sample_cameras, bounds)
+        assert mock_register.called
         assert mesher.size == pytest.approx(11.0)
 
     @patch("ocmesher.core.load_cdll")
     @patch("ocmesher.core.register_func")
     def test_init_multi_camera_packing_shape(
-        self, _mock_register, mock_load, sample_camera_pose, sample_intrinsics, sample_bounds
+        self, mock_register, mock_load, sample_camera_pose, sample_intrinsics, sample_bounds
     ):
         """Camera array must be 2x CAMERA_DATA_STRIDE for two cameras."""
         mock_load.return_value = MagicMock()
@@ -184,6 +191,7 @@ class TestOcMesherInit:
             [1280, 640],
         )
         mesher = OcMesher(cameras, sample_bounds)
+        assert mock_register.called
         assert mesher.n_cameras == 2
         assert mesher.cameras.shape == (2 * CAMERA_DATA_STRIDE,)
 
@@ -196,9 +204,10 @@ class TestOcMesherInit:
 class TestOcMesherReprAndContextManager:
     @patch("ocmesher.core.load_cdll")
     @patch("ocmesher.core.register_func")
-    def test_repr_contains_key_fields(self, _mock_register, mock_load, sample_cameras, sample_bounds):
+    def test_repr_contains_key_fields(self, mock_register, mock_load, sample_cameras, sample_bounds):
         mock_load.return_value = MagicMock()
         mesher = OcMesher(sample_cameras, sample_bounds)
+        assert mock_register.called
         r = repr(mesher)
         assert "OcMesher(" in r
         assert "n_cameras=1" in r
@@ -208,18 +217,21 @@ class TestOcMesherReprAndContextManager:
 
     @patch("ocmesher.core.load_cdll")
     @patch("ocmesher.core.register_func")
-    def test_context_manager_returns_self(self, _mock_register, mock_load, sample_cameras, sample_bounds):
+    def test_context_manager_returns_self(self, mock_register, mock_load, sample_cameras, sample_bounds):
         mock_load.return_value = MagicMock()
         with OcMesher(sample_cameras, sample_bounds) as m:
+            assert mock_register.called
             assert isinstance(m, OcMesher)
 
     @patch("ocmesher.core.load_cdll")
     @patch("ocmesher.core.register_func")
     def test_context_manager_does_not_suppress_exceptions(
-        self, _mock_register, mock_load, sample_cameras, sample_bounds
+        self, mock_register, mock_load, sample_cameras, sample_bounds
     ):
         mock_load.return_value = MagicMock()
+        assert not mock_register.called
         with pytest.raises(RuntimeError), OcMesher(sample_cameras, sample_bounds):
+            assert mock_register.called
             raise RuntimeError("boom")  # noqa: EM101
 
 
@@ -233,26 +245,29 @@ class TestBisectionTolerance:
 
     @patch("ocmesher.core.load_cdll")
     @patch("ocmesher.core.register_func")
-    def test_default_tol_is_zero(self, _mock_register, mock_load, sample_cameras, sample_bounds):
+    def test_default_tol_is_zero(self, mock_register, mock_load, sample_cameras, sample_bounds):
         """Default bisection_tol must be 0 (no early exit)."""
         mock_load.return_value = MagicMock()
         mesher = OcMesher(sample_cameras, sample_bounds)
+        assert mock_register.called
         assert mesher.bisection_tol == 0.0
 
     @patch("ocmesher.core.load_cdll")
     @patch("ocmesher.core.register_func")
-    def test_custom_tol_stored(self, _mock_register, mock_load, sample_cameras, sample_bounds):
+    def test_custom_tol_stored(self, mock_register, mock_load, sample_cameras, sample_bounds):
         """bisection_tol must be stored as a float attribute."""
         mock_load.return_value = MagicMock()
         mesher = OcMesher(sample_cameras, sample_bounds, bisection_tol=1e-4)
+        assert mock_register.called
         assert mesher.bisection_tol == pytest.approx(1e-4)
 
     @patch("ocmesher.core.load_cdll")
     @patch("ocmesher.core.register_func")
-    def test_repr_includes_tol(self, _mock_register, mock_load, sample_cameras, sample_bounds):
+    def test_repr_includes_tol(self, mock_register, mock_load, sample_cameras, sample_bounds):
         """__repr__ must include bisection_tol."""
         mock_load.return_value = MagicMock()
         mesher = OcMesher(sample_cameras, sample_bounds, bisection_tol=0.001)
+        assert mock_register.called
         assert "bisection_tol=0.001" in repr(mesher)
 
 
