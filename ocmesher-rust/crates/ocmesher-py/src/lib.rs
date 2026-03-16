@@ -259,6 +259,7 @@ impl Backend {
         }
         d.set_item("native_batching", true)?;
         d.set_item("native_torch_eval", true)?;
+        d.set_item("zero_copy_query_dlpack_cpu", true)?;
         d.set_item("supports_async", self.device == "cuda" || self.device == "mps")?;
         d.set_item("default_stream_policy", self.stream_policy.as_str())?;
         d.set_item("version", self.version.as_str())?;

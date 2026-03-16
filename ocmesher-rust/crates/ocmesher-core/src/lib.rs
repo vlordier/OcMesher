@@ -15,12 +15,76 @@
 //! acquired for the entire duration of [`run_meshing_pipeline`] so that concurrent
 //! Python calls cannot interleave.
 
-use std::ffi::c_int;
+use std::ffi::{c_int, c_void};
 use std::sync::{Mutex, OnceLock};
 
 use libloading::{Library, Symbol};
 use pyo3::prelude::*;
-use pyo3::types::{PyByteArray, PyDict, PyList};
+use pyo3::types::{PyDict, PyList};
+
+const DLPACK_CAPSULE_NAME: &[u8] = b"dltensor\0";
+
+#[repr(C)]
+struct DLDevice {
+    device_type: i32,
+    device_id: i32,
+}
+
+#[repr(C)]
+struct DLDataType {
+    code: u8,
+    bits: u8,
+    lanes: u16,
+}
+
+#[repr(C)]
+struct DLTensor {
+    data: *mut c_void,
+    device: DLDevice,
+    ndim: i32,
+    dtype: DLDataType,
+    shape: *mut i64,
+    strides: *mut i64,
+    byte_offset: u64,
+}
+
+#[repr(C)]
+struct DLManagedTensor {
+    dl_tensor: DLTensor,
+    manager_ctx: *mut c_void,
+    deleter: Option<unsafe extern "C" fn(*mut DLManagedTensor)>,
+}
+
+struct DLPackTensorContext {
+    storage: Vec<f64>,
+    shape: [i64; 2],
+}
+
+unsafe extern "C" fn dl_managed_tensor_deleter(managed: *mut DLManagedTensor) {
+    if managed.is_null() {
+        return;
+    }
+    let managed = Box::from_raw(managed);
+    if !managed.manager_ctx.is_null() {
+        drop(Box::from_raw(
+            managed.manager_ctx.cast::<DLPackTensorContext>(),
+        ));
+    }
+}
+
+unsafe extern "C" fn dlpack_capsule_destructor(capsule: *mut pyo3::ffi::PyObject) {
+    if pyo3::ffi::PyCapsule_IsValid(capsule, DLPACK_CAPSULE_NAME.as_ptr().cast()) == 0 {
+        return;
+    }
+    let ptr = pyo3::ffi::PyCapsule_GetPointer(capsule, DLPACK_CAPSULE_NAME.as_ptr().cast());
+    if ptr.is_null() {
+        return;
+    }
+    let managed = ptr.cast::<DLManagedTensor>();
+    if let Some(deleter) = (*managed).deleter {
+        deleter(managed);
+    }
+}
 
 // ---------------------------------------------------------------------------
 // Error type
@@ -419,27 +483,54 @@ fn build_torch_xyz_input_from_numpy<'py>(
     }
 }
 
-fn build_torch_xyz_input_direct<'py>(
+fn build_torch_xyz_input_dlpack<'py>(
     py: Python<'py>,
     xyz: &[f64],
     n_pts: usize,
     torch_eval_device: Option<&str>,
     torch_eval_dtype: Option<&str>,
-) -> PyResult<(Bound<'py, PyByteArray>, Bound<'py, PyAny>)> {
-    let byte_len = std::mem::size_of_val(xyz);
-    let xyz_buf = PyByteArray::new_bound_with(py, byte_len, |bytes| {
-        let src = unsafe { std::slice::from_raw_parts(xyz.as_ptr().cast::<u8>(), byte_len) };
-        bytes.copy_from_slice(src);
-        Ok(())
-    })?;
+) -> PyResult<Bound<'py, PyAny>> {
+    let ctx = Box::new(DLPackTensorContext {
+        storage: xyz.to_vec(),
+        shape: [n_pts as i64, 3],
+    });
+    let ctx_ptr = Box::into_raw(ctx);
+    let managed = Box::new(DLManagedTensor {
+        dl_tensor: DLTensor {
+            data: unsafe { (*ctx_ptr).storage.as_mut_ptr().cast::<c_void>() },
+            device: DLDevice {
+                device_type: 1,
+                device_id: 0,
+            },
+            ndim: 2,
+            dtype: DLDataType {
+                code: 2,
+                bits: 64,
+                lanes: 1,
+            },
+            shape: unsafe { (*ctx_ptr).shape.as_mut_ptr() },
+            strides: std::ptr::null_mut(),
+            byte_offset: 0,
+        },
+        manager_ctx: ctx_ptr.cast::<c_void>(),
+        deleter: Some(dl_managed_tensor_deleter),
+    });
+    let managed_ptr = Box::into_raw(managed);
+
+    let capsule = unsafe {
+        Bound::from_owned_ptr_or_err(
+            py,
+            pyo3::ffi::PyCapsule_New(
+                managed_ptr.cast::<c_void>(),
+                DLPACK_CAPSULE_NAME.as_ptr().cast(),
+                Some(dlpack_capsule_destructor),
+            ),
+        )?
+    };
 
     let torch = py.import_bound("torch")?;
-    let frombuffer = torch.getattr("frombuffer")?;
-    let kwargs = PyDict::new_bound(py);
-    kwargs.set_item("dtype", torch.getattr("float64")?)?;
-    kwargs.set_item("count", xyz.len())?;
-    let flat = frombuffer.call((xyz_buf.clone(),), Some(&kwargs))?;
-    let xyz_t = flat.call_method1("reshape", ((n_pts, 3),))?;
+    let from_dlpack = torch.getattr("utils")?.getattr("dlpack")?.getattr("from_dlpack")?;
+    let xyz_t = from_dlpack.call1((capsule,))?;
     let dtype_obj = build_torch_dtype(&torch.into_any(), torch_eval_dtype)?;
     let xyz_t = if let Some(device) = torch_eval_device {
         xyz_t.call_method1("to", (device, dtype_obj))?
@@ -449,7 +540,7 @@ fn build_torch_xyz_input_direct<'py>(
         xyz_t.call_method1("to", (dtype_obj,))?
     };
 
-    Ok((xyz_buf, xyz_t))
+    Ok(xyz_t)
 }
 
 fn build_torch_dtype<'py>(
@@ -625,7 +716,7 @@ fn eval_sdf_full(
             let xyz_arr = Array2::from_shape_vec((chunk_n, 3), chunk_xyz.to_vec())
                 .map_err(|e| pyo3::exceptions::PyValueError::new_err(e.to_string()))?;
             let xyz_np = xyz_arr.into_pyarray_bound(py).into_any();
-            let (_xyz_buf, xyz_torch) = build_torch_xyz_input_direct(
+            let xyz_torch = build_torch_xyz_input_dlpack(
                 py,
                 chunk_xyz,
                 chunk_n,
@@ -727,7 +818,7 @@ fn eval_sdf_min(
             let xyz_arr = Array2::from_shape_vec((chunk_n, 3), chunk_xyz.to_vec())
                 .map_err(|e| pyo3::exceptions::PyValueError::new_err(e.to_string()))?;
             let xyz_np = xyz_arr.into_pyarray_bound(py).into_any();
-            let (_xyz_buf, xyz_torch) = build_torch_xyz_input_direct(
+            let xyz_torch = build_torch_xyz_input_dlpack(
                 py,
                 chunk_xyz,
                 chunk_n,
