@@ -31,7 +31,7 @@ from __future__ import annotations
 
 import logging
 from concurrent.futures import ThreadPoolExecutor
-from typing import TYPE_CHECKING, ClassVar
+from typing import TYPE_CHECKING, ClassVar, Self
 
 import numpy as np
 import torch
@@ -347,17 +347,17 @@ class TorchOcMesher:
             f"enclosed={self.enclosed})"
         )
 
-    def __enter__(self):
+    def __enter__(self) -> Self:
         """Support ``with TorchOcMesher(...) as m:`` usage."""
         return self
 
-    def __exit__(self, exc_type, exc_val, exc_tb):
+    def __exit__(self, exc_type: object, exc_val: object, exc_tb: object) -> bool:
         """Release CUDA caches on context-manager exit."""
         if self.device.type == "cuda":
             torch.cuda.empty_cache()
         return False
 
-    def _ensure_mc_cache(self):
+    def _ensure_mc_cache(self) -> None:
         """Lazily build marching-cubes lookup tables on *self.device*."""
         if self.device in TorchOcMesher._mc_cache:
             return

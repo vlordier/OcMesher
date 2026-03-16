@@ -10,7 +10,7 @@ from __future__ import annotations
 import logging
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Self
 
 import gin
 import numpy as np
@@ -308,16 +308,16 @@ class OcMesher:
             f"enclosed={self.enclosed})"
         )
 
-    def __enter__(self):
+    def __enter__(self) -> Self:
         """Support ``with OcMesher(...) as m:`` usage."""
         return self
 
-    def __exit__(self, exc_type, exc_val, exc_tb):
+    def __exit__(self, exc_type: object, exc_val: object, exc_tb: object) -> bool:
         """Shut down the persistent thread pool on context-manager exit."""
         self._shutdown_pool()
         return False
 
-    def _shutdown_pool(self):
+    def _shutdown_pool(self) -> None:
         """Shut down the persistent SDF thread pool if it exists."""
         if self._sdf_pool is not None:
             self._sdf_pool.shutdown(wait=False)
