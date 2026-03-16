@@ -3,10 +3,12 @@
 from __future__ import annotations
 
 import subprocess
+from pathlib import Path
 
 import numpy as np
 import pytest
 
+from benchmarks.upstream_parity import run_upstream_parity
 from ocmesher import OcMesher
 
 EXPECTED_SIGNATURE = {
@@ -73,3 +75,14 @@ def test_numeric_signature_matches_known_reference() -> None:
     assert actual["faces"] == EXPECTED_SIGNATURE["faces"]
     assert actual["faces_sum"] == EXPECTED_SIGNATURE["faces_sum"]
     assert abs(float(actual["verts_sum"]) - float(EXPECTED_SIGNATURE["verts_sum"])) <= 1e-12
+
+
+@pytest.mark.integration
+def test_numeric_signature_matches_main_branch() -> None:
+    parity = run_upstream_parity(
+        Path(__file__).resolve().parents[1],
+        upstream_ref="main",
+        python_exe="/Users/vincent/Work/OcMesher/.venv/bin/python",
+    )
+
+    assert bool(parity["delta"]["matches"])
