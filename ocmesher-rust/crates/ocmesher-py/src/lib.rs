@@ -230,6 +230,7 @@ impl Backend {
             sdf_batch_size,
             torch_eval_device: Some(requested_device.clone()),
             torch_eval_dtype: Some(preferred_dtype.clone()),
+            torch_stream_policy: Some(stream_policy.clone()),
         };
 
         Ok(Backend {

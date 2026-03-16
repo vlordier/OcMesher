@@ -466,6 +466,7 @@ fn build_torch_xyz_input_from_numpy<'py>(
     xyz_np: &Bound<'py, PyAny>,
     torch_eval_device: Option<&str>,
     torch_eval_dtype: Option<&str>,
+    torch_non_blocking: bool,
 ) -> PyResult<Bound<'py, PyAny>> {
     let torch = py.import_bound("torch")?;
     let from_numpy = torch.getattr("from_numpy")?;
@@ -477,7 +478,9 @@ fn build_torch_xyz_input_from_numpy<'py>(
         torch.getattr("float32")?
     };
     if let Some(device) = torch_eval_device {
-        xyz_t.call_method1("to", (device, dtype_obj))
+        let kwargs = PyDict::new_bound(py);
+        kwargs.set_item("non_blocking", torch_non_blocking)?;
+        xyz_t.call_method("to", (device, dtype_obj), Some(&kwargs))
     } else {
         xyz_t.call_method1("to", (dtype_obj,))
     }
@@ -489,6 +492,7 @@ fn build_torch_xyz_input_dlpack<'py>(
     n_pts: usize,
     torch_eval_device: Option<&str>,
     torch_eval_dtype: Option<&str>,
+    torch_non_blocking: bool,
 ) -> PyResult<Bound<'py, PyAny>> {
     let ctx = Box::new(DLPackTensorContext {
         storage: xyz.to_vec(),
@@ -533,7 +537,9 @@ fn build_torch_xyz_input_dlpack<'py>(
     let xyz_t = from_dlpack.call1((capsule,))?;
     let dtype_obj = build_torch_dtype(&torch.into_any(), torch_eval_dtype)?;
     let xyz_t = if let Some(device) = torch_eval_device {
-        xyz_t.call_method1("to", (device, dtype_obj))?
+        let kwargs = PyDict::new_bound(py);
+        kwargs.set_item("non_blocking", torch_non_blocking)?;
+        xyz_t.call_method("to", (device, dtype_obj), Some(&kwargs))?
     } else if torch_eval_dtype.unwrap_or("float32") == "float64" {
         xyz_t
     } else {
@@ -560,6 +566,7 @@ fn normalize_torch_output<'py>(
     value: Py<PyAny>,
     torch_eval_device: Option<&str>,
     torch_eval_dtype: Option<&str>,
+    torch_non_blocking: bool,
 ) -> PyResult<Bound<'py, PyAny>> {
     let torch = py.import_bound("torch")?;
     let as_tensor = torch.getattr("as_tensor")?;
@@ -568,6 +575,7 @@ fn normalize_torch_output<'py>(
     kwargs.set_item("dtype", dtype_obj)?;
     if let Some(device) = torch_eval_device {
         kwargs.set_item("device", device)?;
+        kwargs.set_item("non_blocking", torch_non_blocking)?;
         as_tensor.call((value.bind(py),), Some(&kwargs))
     } else {
         as_tensor.call((value.bind(py),), Some(&kwargs))
@@ -684,6 +692,7 @@ fn eval_kernel_py_once(
     n_pts: usize,
     torch_eval_device: Option<&str>,
     torch_eval_dtype: Option<&str>,
+    torch_non_blocking: bool,
 ) -> PyResult<Vec<f32>> {
     use ndarray::Array2;
     use numpy::IntoPyArray;
@@ -697,6 +706,7 @@ fn eval_kernel_py_once(
             &xyz_np,
             torch_eval_device,
             torch_eval_dtype,
+            torch_non_blocking,
         )?)
     } else {
         None
@@ -712,13 +722,30 @@ fn eval_kernel_py(
     sdf_batch_size: Option<usize>,
     torch_eval_device: Option<&str>,
     torch_eval_dtype: Option<&str>,
+    torch_non_blocking: bool,
 ) -> PyResult<Vec<f32>> {
     let Some(batch_size) = sdf_batch_size else {
-        return eval_kernel_py_once(py, kernel, xyz, n_pts, torch_eval_device, torch_eval_dtype);
+        return eval_kernel_py_once(
+            py,
+            kernel,
+            xyz,
+            n_pts,
+            torch_eval_device,
+            torch_eval_dtype,
+            torch_non_blocking,
+        );
     };
 
     if batch_size == 0 || n_pts <= batch_size {
-        return eval_kernel_py_once(py, kernel, xyz, n_pts, torch_eval_device, torch_eval_dtype);
+        return eval_kernel_py_once(
+            py,
+            kernel,
+            xyz,
+            n_pts,
+            torch_eval_device,
+            torch_eval_dtype,
+            torch_non_blocking,
+        );
     }
 
     let mut out = Vec::with_capacity(n_pts);
@@ -732,6 +759,7 @@ fn eval_kernel_py(
             end - start,
             torch_eval_device,
             torch_eval_dtype,
+            torch_non_blocking,
         )?;
         out.extend(chunk_vals);
     }
@@ -752,6 +780,7 @@ fn eval_sdf_full(
     sdf_batch_size: Option<usize>,
     torch_eval_device: Option<&str>,
     torch_eval_dtype: Option<&str>,
+    torch_non_blocking: bool,
     b_min: &[f64; 3],
     b_max: &[f64; 3],
     enclosed: bool,
@@ -773,12 +802,19 @@ fn eval_sdf_full(
                 chunk_n,
                 torch_eval_device,
                 torch_eval_dtype,
+                torch_non_blocking,
             )?;
 
             if let Some(bundle) = &torch_bundle {
                 let raw = eval_bundle_raw_from_inputs(py, bundle, None, Some(&xyz_torch))?;
                 let value = extract_sdf_value(py, raw)?;
-                let tensor = normalize_torch_output(py, value, torch_eval_device, torch_eval_dtype)?;
+                let tensor = normalize_torch_output(
+                    py,
+                    value,
+                    torch_eval_device,
+                    torch_eval_dtype,
+                    torch_non_blocking,
+                )?;
                 let chunk_vals = extract_sdf_output(py, tensor.unbind())?;
                 if chunk_vals.len() != chunk_n * n_kernels {
                     return Err(pyo3::exceptions::PyValueError::new_err(format!(
@@ -822,6 +858,7 @@ fn eval_sdf_full(
                 sdf_batch_size,
                 torch_eval_device,
                 torch_eval_dtype,
+                torch_non_blocking,
             )?;
             if sdf.len() != n_pts {
                 return Err(pyo3::exceptions::PyValueError::new_err(format!(
@@ -868,6 +905,7 @@ fn eval_sdf_min(
     sdf_batch_size: Option<usize>,
     torch_eval_device: Option<&str>,
     torch_eval_dtype: Option<&str>,
+    torch_non_blocking: bool,
     b_min: &[f64; 3],
     b_max: &[f64; 3],
     enclosed: bool,
@@ -892,12 +930,19 @@ fn eval_sdf_min(
                 chunk_n,
                 torch_eval_device,
                 torch_eval_dtype,
+                torch_non_blocking,
             )?;
 
             if let Some(bundle) = &torch_bundle {
                 let raw = eval_bundle_raw_from_inputs(py, bundle, None, Some(&xyz_torch))?;
                 let value = extract_sdf_value(py, raw)?;
-                let tensor = normalize_torch_output(py, value, torch_eval_device, torch_eval_dtype)?;
+                let tensor = normalize_torch_output(
+                    py,
+                    value,
+                    torch_eval_device,
+                    torch_eval_dtype,
+                    torch_non_blocking,
+                )?;
                 let reduced = tensor.call_method1("amin", (1,))?;
                 let chunk_vals = extract_sdf_output(py, reduced.unbind())?;
                 if chunk_vals.len() != chunk_n {
@@ -914,7 +959,13 @@ fn eval_sdf_min(
             for kernel in kernels {
                 let raw = eval_kernel_raw_from_inputs(py, kernel, None, Some(&xyz_torch))?;
                 let value = extract_sdf_value(py, raw)?;
-                let tensor = normalize_torch_output(py, value, torch_eval_device, torch_eval_dtype)?;
+                let tensor = normalize_torch_output(
+                    py,
+                    value,
+                    torch_eval_device,
+                    torch_eval_dtype,
+                    torch_non_blocking,
+                )?;
                 outputs.append(tensor)?;
             }
 
@@ -959,6 +1010,7 @@ fn eval_sdf_min(
         sdf_batch_size,
         torch_eval_device,
         torch_eval_dtype,
+        torch_non_blocking,
         b_min,
         b_max,
         enclosed,
@@ -1011,6 +1063,7 @@ fn construct_element_mesh(
     sdf_batch_size: Option<usize>,
     torch_eval_device: Option<&str>,
     torch_eval_dtype: Option<&str>,
+    torch_non_blocking: bool,
     b_min: &[f64; 3],
     b_max: &[f64; 3],
     enclosed: bool,
@@ -1029,6 +1082,7 @@ fn construct_element_mesh(
         sdf_batch_size,
         torch_eval_device,
         torch_eval_dtype,
+        torch_non_blocking,
     )?;
     if center_sdf.len() != nv {
         return Err(pyo3::exceptions::PyValueError::new_err(format!(
@@ -1062,6 +1116,7 @@ fn construct_element_mesh(
             sdf_batch_size,
             torch_eval_device,
             torch_eval_dtype,
+            torch_non_blocking,
         )?;
         sdf_buf.copy_from_slice(&sdf_cubes);
 
@@ -1094,6 +1149,7 @@ fn construct_element_mesh(
         sdf_batch_size,
         torch_eval_device,
         torch_eval_dtype,
+        torch_non_blocking,
     )?;
     let sdf_r = eval_kernel_py(
         py,
@@ -1103,6 +1159,7 @@ fn construct_element_mesh(
         sdf_batch_size,
         torch_eval_device,
         torch_eval_dtype,
+        torch_non_blocking,
     )?;
 
     let mut vertices = vec![0.0f64; nv * 3];
@@ -1127,7 +1184,8 @@ fn construct_element_mesh(
     } else {
         refine_extra_vertices(
             py, lib, kernel, &vertices, nv, nve, nvf, nf, bisection_iters, bisection_tol,
-            sdf_batch_size, torch_eval_device, torch_eval_dtype, b_min, b_max, enclosed,
+            sdf_batch_size, torch_eval_device, torch_eval_dtype, torch_non_blocking,
+            b_min, b_max, enclosed,
         )?
     };
 
@@ -1161,6 +1219,7 @@ fn refine_extra_vertices(
     sdf_batch_size: Option<usize>,
     torch_eval_device: Option<&str>,
     torch_eval_dtype: Option<&str>,
+    torch_non_blocking: bool,
     _b_min: &[f64; 3],
     _b_max: &[f64; 3],
     _enclosed: bool,
@@ -1182,6 +1241,7 @@ fn refine_extra_vertices(
         sdf_batch_size,
         torch_eval_device,
         torch_eval_dtype,
+        torch_non_blocking,
     )?;
     let ecenter_sdf = ef_sdf[..nve].to_vec();
     let fcenter_sdf = ef_sdf[nve..].to_vec();
@@ -1219,6 +1279,7 @@ fn refine_extra_vertices(
             sdf_batch_size,
             torch_eval_device,
             torch_eval_dtype,
+            torch_non_blocking,
         )?;
         sdf_buf.copy_from_slice(&sdf_all);
 
@@ -1269,6 +1330,7 @@ fn refine_extra_vertices(
         sdf_batch_size,
         torch_eval_device,
         torch_eval_dtype,
+        torch_non_blocking,
     )?;
     let esdf_l = &all_lr_sdf[..n_elr];
     let esdf_r = &all_lr_sdf[n_elr..n_elr * 2];
@@ -1327,6 +1389,7 @@ pub struct MesherParams {
     pub sdf_batch_size: Option<usize>,
     pub torch_eval_device: Option<String>,
     pub torch_eval_dtype: Option<String>,
+    pub torch_stream_policy: Option<String>,
 }
 
 /// Run the full OcMesher pipeline.
@@ -1343,6 +1406,12 @@ pub fn run_meshing_pipeline(
     let n_kerns = kernels.len();
     let torch_eval_device = params.torch_eval_device.as_deref();
     let torch_eval_dtype = params.torch_eval_dtype.as_deref();
+    let torch_non_blocking = params
+        .torch_stream_policy
+        .as_deref()
+        .map(|p| p == "auto")
+        .unwrap_or(false)
+        && matches!(torch_eval_device, Some("cuda") | Some("mps"));
 
     let _guard = core_lock()
         .lock()
@@ -1394,6 +1463,7 @@ pub fn run_meshing_pipeline(
                 params.sdf_batch_size,
                 torch_eval_device,
                 torch_eval_dtype,
+                torch_non_blocking,
                 &params.bounds_min,
                 &params.bounds_max,
                 params.enclosed,
@@ -1431,6 +1501,7 @@ pub fn run_meshing_pipeline(
             params.sdf_batch_size,
             torch_eval_device,
             torch_eval_dtype,
+            torch_non_blocking,
             &params.bounds_min,
             &params.bounds_max,
             params.enclosed,
@@ -1455,6 +1526,7 @@ pub fn run_meshing_pipeline(
             params.sdf_batch_size,
             torch_eval_device,
             torch_eval_dtype,
+            torch_non_blocking,
             &params.bounds_min,
             &params.bounds_max,
             params.enclosed,
@@ -1481,6 +1553,7 @@ pub fn run_meshing_pipeline(
             params.sdf_batch_size,
             torch_eval_device,
             torch_eval_dtype,
+            torch_non_blocking,
             &params.bounds_min,
             &params.bounds_max,
             params.enclosed,
