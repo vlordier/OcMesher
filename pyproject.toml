@@ -154,7 +154,6 @@ ignore = [
 ]
 # benchmark __init__
 "benchmarks/__init__.py" = [
-    "INP001",   # implicit namespace package
 ]
 # tests - allow assertions, magic values, no docstrings, etc.
 "tests/**/*.py" = [
