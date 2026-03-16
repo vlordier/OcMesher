@@ -340,7 +340,7 @@ def main() -> None:
 
     if args.json:
         data = {label: res for label, res in all_results}
-        with open(args.json, "w") as f:
+        with Path(args.json).open("w") as f:
             json.dump(data, f, indent=2)
         print(f"Results written to {args.json}")
 

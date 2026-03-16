@@ -141,7 +141,6 @@ ignore = [
     "EXE001",   # shebang is informational; script may be launched via python
     "PLW3301",  # nested max is clear in table width calculation
     "C416",     # dict comprehension retained for readability with tuple input
-    "PTH123",   # simple CLI file writing via open()
 ]
 # Python overhead micro-benchmark
 "benchmarks/bench_python_overhead.py" = [
