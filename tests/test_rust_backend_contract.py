@@ -2,12 +2,14 @@
 
 from __future__ import annotations
 
+import sys
 from typing import Any
+from unittest.mock import MagicMock, patch
 
 import numpy as np
 import pytest
 
-from ocmesher.rust_backend import RustOcMesher, build_batched_sdf_kernels
+from ocmesher.rust_backend import RustOcMesher, build_batched_sdf_kernels, make_rust_ocmesher
 
 
 class DummyRustBackend:
@@ -96,3 +98,50 @@ def test_stream_policy_auto_guarded_on_cpu(sample_cameras, sample_bounds):
         backend=DummyRustBackend(),
     )
     assert mesher.stream_policy == "sync"
+
+
+# ---------------------------------------------------------------------------
+# make_rust_ocmesher factory tests
+# ---------------------------------------------------------------------------
+
+def test_make_rust_ocmesher_raises_import_error_without_extension(sample_cameras, sample_bounds):
+    """Without ocmesher_rust installed, make_rust_ocmesher raises ImportError."""
+    with patch.dict(sys.modules, {"ocmesher_rust": None}):
+        with pytest.raises(ImportError, match="ocmesher_rust is not installed"):
+            make_rust_ocmesher(sample_cameras, sample_bounds)
+
+
+def test_make_rust_ocmesher_returns_rust_ocmesher_instance(sample_cameras, sample_bounds):
+    """With a mock extension, make_rust_ocmesher returns a RustOcMesher."""
+    mock_backend = DummyRustBackend()
+    mock_ext = MagicMock()
+    mock_ext.find_core_so.return_value = "/fake/core.so"
+    mock_ext.Backend.return_value = mock_backend
+
+    with patch.dict(sys.modules, {"ocmesher_rust": mock_ext}):
+        mesher = make_rust_ocmesher(sample_cameras, sample_bounds)
+
+    assert isinstance(mesher, RustOcMesher)
+    assert mesher._backend is mock_backend
+
+
+def test_make_rust_ocmesher_passes_lib_path(sample_cameras, sample_bounds):
+    """Explicit lib_path bypasses find_core_so."""
+    mock_backend = DummyRustBackend()
+    mock_ext = MagicMock()
+    mock_ext.Backend.return_value = mock_backend
+
+    with patch.dict(sys.modules, {"ocmesher_rust": mock_ext}):
+        make_rust_ocmesher(sample_cameras, sample_bounds, lib_path="/custom/core.so")
+
+    mock_ext.find_core_so.assert_not_called()
+    call_kwargs = mock_ext.Backend.call_args
+    assert call_kwargs.kwargs.get("lib_path") == "/custom/core.so"
+
+
+def test_make_rust_ocmesher_exported_from_package():
+    """make_rust_ocmesher is accessible from the top-level ocmesher package."""
+    import ocmesher  # noqa: PLC0415
+
+    fn = ocmesher.make_rust_ocmesher
+    assert callable(fn)

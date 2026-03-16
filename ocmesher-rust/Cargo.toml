@@ -1,0 +1,15 @@
+[workspace]
+members = [
+    "crates/ocmesher-core",
+    "crates/ocmesher-py",
+]
+resolver = "2"
+
+[profile.release]
+opt-level = 3
+lto = "thin"
+codegen-units = 1
+strip = "debuginfo"
+
+[profile.dev]
+opt-level = 1

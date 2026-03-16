@@ -279,3 +279,85 @@ class RustOcMesher:
             msg = "Rust backend must return (meshes, in_view_tags)"
             raise TypeError(msg)
         return result[0], result[1]
+
+
+# ---------------------------------------------------------------------------
+# Convenience factory: build a RustOcMesher backed by ocmesher_rust.Backend
+# ---------------------------------------------------------------------------
+
+def make_rust_ocmesher(
+    cameras: Sequence[Any],
+    bounds: Any,
+    *,
+    lib_path: str | None = None,
+    **kwargs: Any,
+) -> "RustOcMesher":
+    """Create a :class:`RustOcMesher` using the compiled ``ocmesher_rust`` extension.
+
+    Parameters
+    ----------
+    cameras:
+        ``(cam_poses, Ks, Hs, Ws)`` — same format as :class:`ocmesher.OcMesher`.
+    bounds:
+        ``[x_min, x_max, y_min, y_max, z_min, z_max]``.
+    lib_path:
+        Path to ``core.so``.  When *None* the extension's :func:`find_core_so`
+        helper is used to locate the library automatically.
+    **kwargs:
+        Forwarded to both :class:`RustOcMesher` and ``ocmesher_rust.Backend``
+        (``pixels_per_cube``, ``bisection_iters``, ``device``, ``stream_policy``, …).
+
+    Returns
+    -------
+    RustOcMesher
+        A fully configured mesher ready to call with SDF kernels.
+
+    Raises
+    ------
+    ImportError
+        If ``ocmesher_rust`` is not installed.  Build it with ``maturin develop``
+        inside the ``ocmesher-rust/`` workspace.
+    RuntimeError
+        If ``core.so`` cannot be found and *lib_path* was not supplied.
+
+    Examples
+    --------
+    .. code-block:: python
+
+        mesher = make_rust_ocmesher(cameras, bounds)
+        meshes, in_view_tags = mesher(sdf_kernels)
+    """
+    try:
+        import ocmesher_rust  # type: ignore[import-not-found]
+    except ImportError as exc:  # pragma: no cover - optional build artifact
+        msg = (
+            "ocmesher_rust is not installed.  Build the Rust extension with:\n"
+            "  cd ocmesher-rust && maturin develop"
+        )
+        raise ImportError(msg) from exc
+
+    resolved_path: str = lib_path or ocmesher_rust.find_core_so()
+
+    # Separate ocmesher_rust.Backend kwargs from RustOcMesher kwargs.
+    # Keywords consumed only by RustOcMesher (not by the C++ backend).
+    _rust_ocmesher_only = {"device", "dtype", "max_batch", "batch_size", "sdf_batch_size", "stream_policy"}
+    backend_kwargs = {k: v for k, v in kwargs.items() if k not in _rust_ocmesher_only}
+    wrapper_kwargs = {k: v for k, v in kwargs.items() if k in _rust_ocmesher_only}
+
+    # Pack camera poses/Ks as flat lists for Rust (it handles the SE(3) inversion).
+    import numpy as _np  # noqa: PLC0415 — local import avoids top-level cost
+    cam_poses, Ks, Hs, Ws = cameras
+    cam_poses_flat = [_np.asarray(p, dtype=_np.float64).ravel().tolist() for p in cam_poses]
+    ks_flat = [_np.asarray(k, dtype=_np.float64).ravel().tolist() for k in Ks]
+    hs_float = [float(h) for h in Hs]
+    ws_float = [float(w) for w in Ws]
+    bounds_list = _np.asarray(bounds, dtype=_np.float64).tolist()
+
+    backend = ocmesher_rust.Backend(
+        lib_path=resolved_path,
+        cameras=(cam_poses_flat, ks_flat, hs_float, ws_float),
+        bounds=bounds_list,
+        **backend_kwargs,
+    )
+
+    return RustOcMesher(cameras, bounds, backend=backend, **wrapper_kwargs)

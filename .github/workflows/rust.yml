@@ -1,0 +1,119 @@
+name: Rust
+
+on:
+  push:
+    branches:
+      - rust-integration-infinigen-v1
+      - develop
+      - main
+    paths:
+      - "ocmesher-rust/**"
+      - ".github/workflows/rust.yml"
+  pull_request:
+    branches:
+      - develop
+      - main
+    paths:
+      - "ocmesher-rust/**"
+      - ".github/workflows/rust.yml"
+
+permissions:
+  contents: read
+
+jobs:
+  check:
+    name: Cargo check + clippy
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: ocmesher-rust
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Rust stable
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          components: clippy, rustfmt
+
+      - name: Cache Cargo registry + build
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            ocmesher-rust/target
+          key: ${{ runner.os }}-cargo-${{ hashFiles('ocmesher-rust/Cargo.lock') }}
+          restore-keys: ${{ runner.os }}-cargo-
+
+      - name: Install Python (needed for pyo3 link)
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install numpy (pyo3 numpy feature check)
+        run: pip install numpy
+
+      - name: cargo fmt --check
+        run: cargo fmt --all -- --check
+
+      - name: cargo check
+        run: cargo check --workspace
+
+      - name: cargo clippy
+        run: cargo clippy --workspace -- -D warnings
+
+  test:
+    name: Cargo test
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: ocmesher-rust
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Rust stable
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Cache Cargo registry + build
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            ocmesher-rust/target
+          key: ${{ runner.os }}-cargo-test-${{ hashFiles('ocmesher-rust/Cargo.lock') }}
+          restore-keys: ${{ runner.os }}-cargo-
+
+      - name: Install Python (needed for pyo3 link)
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install numpy
+        run: pip install numpy
+
+      - name: cargo test (ocmesher-core unit tests)
+        run: cargo test -p ocmesher-core
+
+  build-wheel:
+    name: Build Python wheel (maturin)
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: ocmesher-rust
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Rust stable
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Install Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install maturin + numpy
+        run: pip install maturin numpy
+
+      - name: Build wheel (debug, no install)
+        run: maturin build -m crates/ocmesher-py/Cargo.toml --out /tmp/wheels

@@ -12,12 +12,12 @@ from .core import OcMesher
 # "No handlers could be found for logger 'ocmesher'" warnings.
 logging.getLogger(__name__).addHandler(logging.NullHandler())
 
-__all__ = ["OcMesher", "TorchOcMesher", "RustOcMesher"]
+__all__ = ["OcMesher", "TorchOcMesher", "RustOcMesher", "make_rust_ocmesher"]
 __version__ = "1.0.0"
 
 
 def __getattr__(name: str):
-    """Lazy-import TorchOcMesher so torch is only required when used."""
+    """Lazy-import optional backends so heavy dependencies are only loaded when used."""
     if name == "TorchOcMesher":
         from .torch_core import TorchOcMesher
 
@@ -26,5 +26,9 @@ def __getattr__(name: str):
         from .rust_backend import RustOcMesher
 
         return RustOcMesher
+    if name == "make_rust_ocmesher":
+        from .rust_backend import make_rust_ocmesher
+
+        return make_rust_ocmesher
     msg = f"module {__name__!r} has no attribute {name!r}"
     raise AttributeError(msg)
