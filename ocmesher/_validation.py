@@ -31,6 +31,7 @@ __all__ = [
 ]
 
 _AXIS_NAMES = ("x", "y", "z")
+_CAMERAS_TUPLE_LENGTH = 4
 
 
 def _validate_camera_structure(cameras: CamerasTuple) -> tuple[Any, Any, Any, Any]:
@@ -43,7 +44,7 @@ def _validate_camera_structure(cameras: CamerasTuple) -> tuple[Any, Any, Any, An
         ValueError: If *cameras* is not a 4-element tuple/list or if the
             component arrays have mismatched lengths.
     """
-    if not isinstance(cameras, (tuple, list)) or len(cameras) != 4:  # noqa: PLR2004
+    if not isinstance(cameras, (tuple, list)) or len(cameras) != _CAMERAS_TUPLE_LENGTH:
         msg = "cameras must be a tuple/list of (cam_poses, Ks, Hs, Ws)"
         raise ValueError(msg)
     cam_poses, Ks, Hs, Ws = cameras
