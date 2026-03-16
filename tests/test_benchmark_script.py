@@ -363,3 +363,47 @@ class TestMainUpstreamParityMode:
         assert "requires --upstream-parity" in err
 
 
+class TestMainUpstreamParityValidation:
+    def test_main_rejects_invalid_parity_pixels_per_cube(self, monkeypatch):
+        monkeypatch.setattr(
+            "sys.argv",
+            ["benchmark.py", "--upstream-parity", "--parity-pixels-per-cube", "0"],
+        )
+        monkeypatch.setattr(
+            benchmark,
+            "run_upstream_parity",
+            lambda *_args, **_kwargs: pytest.fail("run_upstream_parity should not be called"),
+        )
+
+        with pytest.raises(ValueError, match="--parity-pixels-per-cube"):
+            benchmark.main()
+
+    def test_main_rejects_invalid_parity_coarse_count(self, monkeypatch):
+        monkeypatch.setattr(
+            "sys.argv",
+            ["benchmark.py", "--upstream-parity", "--parity-coarse-count", "0"],
+        )
+        monkeypatch.setattr(
+            benchmark,
+            "run_upstream_parity",
+            lambda *_args, **_kwargs: pytest.fail("run_upstream_parity should not be called"),
+        )
+
+        with pytest.raises(ValueError, match="--parity-coarse-count"):
+            benchmark.main()
+
+    def test_main_rejects_negative_parity_atol(self, monkeypatch):
+        monkeypatch.setattr(
+            "sys.argv",
+            ["benchmark.py", "--upstream-parity", "--parity-atol", "-1"],
+        )
+        monkeypatch.setattr(
+            benchmark,
+            "run_upstream_parity",
+            lambda *_args, **_kwargs: pytest.fail("run_upstream_parity should not be called"),
+        )
+
+        with pytest.raises(ValueError, match="--parity-atol"):
+            benchmark.main()
+
+
