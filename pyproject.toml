@@ -151,7 +151,6 @@ ignore = [
     "C901",     # complex functions OK in benchmark main/regression_check
     "PLR0912",  # too-many-branches in regression_check
     "PLR0915",  # too-many-statements in main
-    "SIM102",   # nested if in regression checks (clearer error messages)
 ]
 # benchmark __init__
 "benchmarks/__init__.py" = [

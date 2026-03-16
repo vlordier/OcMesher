@@ -448,10 +448,9 @@ def regression_check() -> list[str]:
         (2, "gyroid", exp_gyroid),
     ]:
         actual = sdf_multi[:, col]
-        if oob.any():
-            # OOB should be 1.0
-            if not np.all(actual[oob] == 1.0):
-                failures.append(f"multi/enclosed/{name}: OOB not masked to 1.0")
+        # OOB should be 1.0
+        if oob.any() and not np.all(actual[oob] == 1.0):
+            failures.append(f"multi/enclosed/{name}: OOB not masked to 1.0")
         if ib.any() and not np.allclose(actual[ib], expected[ib], atol=1e-5):
             failures.append(f"multi/enclosed/{name}: in-bounds values differ")
 
