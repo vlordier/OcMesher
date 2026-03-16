@@ -45,3 +45,13 @@ def test_write_violations_writes_to_stderr(capsys) -> None:
     guard._write_violations(["a", "b"])
     err = capsys.readouterr().err
     assert err == "a\nb\n"
+
+
+def test_file_length_guard_tracks_torch_core() -> None:
+    assert guard.MAX_LINES_BY_FILE["ocmesher/torch_core.py"] == 1100
+
+
+def test_file_length_guard_uses_tightened_limits() -> None:
+    assert guard.MAX_LINES_BY_FILE["benchmark.py"] == 500
+    assert guard.MAX_LINES_BY_FILE["benchmarks/run_benchmark.py"] == 1235
+    assert guard.MAX_LINES_BY_FILE["tests/test_benchmark_script.py"] == 300
