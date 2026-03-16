@@ -316,18 +316,9 @@ def print_comparison(tiers: list[tuple[str, list[TierConfigResult]]]) -> None:
     tables = [t[1] for t in tiers]
     n_cols = len(tiers)
     short = [_short_tier_label(n) for n in names]
-    cw = max([7, *[len(s) for s in short]])
-
-    line_w = 20 + (cw + 3) * n_cols + 7 * max(0, n_cols - 1)
-    print(f"\n{'=' * line_w}")
-    print("  COMPARISON  (median wall-clock per config)")
-    print(f"{'=' * line_w}")
-
-    header = f"{'Config':<20}"
-    for s in short:
-        header += f"  {s:>{cw + 1}}"
-    for _ in short[1:]:
-        header += f"  {'x/base':>6}"
+    cw = _comparison_column_width(short)
+    header = _comparison_header(short, cw)
+    _print_comparison_banner(n_cols, cw)
     print(header)
     print("-" * len(header))
 
@@ -342,6 +333,29 @@ def print_comparison(tiers: list[tuple[str, list[TierConfigResult]]]) -> None:
             line += f"  {sp:>5.2f}x"
         print(line)
     print()
+
+
+def _comparison_column_width(short_labels: list[str]) -> int:
+    """Return width used for tier columns in comparison table."""
+    return max([7, *[len(s) for s in short_labels]])
+
+
+def _comparison_header(short_labels: list[str], col_width: int) -> str:
+    """Build the comparison table header line."""
+    header = f"{'Config':<20}"
+    for label in short_labels:
+        header += f"  {label:>{col_width + 1}}"
+    for _ in short_labels[1:]:
+        header += f"  {'x/base':>6}"
+    return header
+
+
+def _print_comparison_banner(num_cols: int, col_width: int) -> None:
+    """Print title banner for the comparison section."""
+    line_w = 20 + (col_width + 3) * num_cols + 7 * max(0, num_cols - 1)
+    print(f"\n{'=' * line_w}")
+    print("  COMPARISON  (median wall-clock per config)")
+    print(f"{'=' * line_w}")
 
 
 def _select_configs(config_choice: str, all_configs: list[DemoConfig]) -> list[DemoConfig]:
