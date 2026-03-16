@@ -128,7 +128,6 @@ ignore = [
 "benchmark.py" = [
     "INP001",   # implicit namespace package
     "T201",     # print statements (benchmark output)
-    "S603",     # subprocess calls are intentional in benchmark harness
     "D",        # no docstring enforcement in benchmark script
 ]
 # Python overhead micro-benchmark

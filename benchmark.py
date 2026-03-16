@@ -218,7 +218,7 @@ def _parse_last_json_line(stdout: str) -> RunResult:
 
 def build(script: str) -> float:
     t0 = time.perf_counter()
-    subprocess.check_call(["/bin/bash", script], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+    subprocess.check_call(["/bin/bash", script], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)  # noqa: S603
     return time.perf_counter() - t0
 
 
@@ -230,7 +230,7 @@ def run_mesher_subprocess(pixels_per_cube: int, coarse_count: int, sdf_type: str
         coarse=coarse_count,
     )
     try:
-        result = subprocess.run(
+        result = subprocess.run(  # noqa: S603
             [PYTHON, "-c", script],
             capture_output=True,
             text=True,
