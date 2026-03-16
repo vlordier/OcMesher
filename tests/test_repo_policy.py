@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from pathlib import Path
+import tomllib
 
 
 def _repo_root() -> Path:
@@ -65,3 +66,11 @@ def test_lint_workflow_tracks_toolchain_files() -> None:
 
     assert '".python-version"' in workflow
     assert '"uv.lock"' in workflow
+
+
+def test_pyproject_advertises_python_311_only() -> None:
+    pyproject = tomllib.loads(_read("pyproject.toml"))
+    classifiers = pyproject["project"]["classifiers"]
+
+    assert "Programming Language :: Python :: 3.11" in classifiers
+    assert "Programming Language :: Python :: 3.12" not in classifiers
