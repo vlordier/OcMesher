@@ -33,3 +33,9 @@ def test_line_count_handles_single_line_file(tmp_path) -> None:
     p = tmp_path / "one.py"
     p.write_text("x = 1", encoding="utf-8")
     assert guard._line_count(p) == 1
+
+
+def test_line_count_handles_empty_file(tmp_path) -> None:
+    p = tmp_path / "empty.py"
+    p.write_text("", encoding="utf-8")
+    assert guard._line_count(p) == 0
