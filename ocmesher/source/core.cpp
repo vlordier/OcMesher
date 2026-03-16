@@ -398,20 +398,25 @@ int vis_filter( // NOLINT(readability-identifier-naming, modernize-use-trailing-
     visible_set.reserve(cubes.size());
     occluded_set.clear();
     occluded_set.reserve(cubes.size());
-    std::unordered_set<KeyCube, KeyCubeHash> new_visible_set, old_visible_set;
-    new_visible_set.reserve(cubes.size());
-    old_visible_set.reserve(cubes.size());
+    std::vector<KeyCube> visible_frontier;
+    visible_frontier.reserve(cubes.size());
+    std::vector<KeyCube> next_visible_frontier;
+    next_visible_frontier.reserve(cubes.size());
     for (int i = 0; i < static_cast<int>(visible.size()); i++) { // NOLINT(modernize-loop-convert)
         KeyCube key = cubeToKey(cubes[i]);
-        if (visible[i])
+        if (visible[i]) {
             visible_set.insert(key);
-        else
+            visible_frontier.push_back(key);
+        } else {
             occluded_set.insert(key);
+        }
     }
     visible.clear();
     cubes.clear();
     for (int i = 0; i < relax_iters; i++) {
-        for (const auto& key : visible_set) {
+        if (visible_frontier.empty())
+            break;
+        for (const auto& key : visible_frontier) {
             Cube c;
             keyToCube(c, key);
             int coords[3];
@@ -425,18 +430,17 @@ int vis_filter( // NOLINT(readability-identifier-naming, modernize-use-trailing-
                     auto occluded_it = occluded_set.find(new_key);
                     if (occluded_it != occluded_set.end()) {
                         occluded_set.erase(occluded_it);
-                        new_visible_set.insert(new_key);
+                        visible_set.insert(new_key);
+                        next_visible_frontier.push_back(new_key);
                     }
                 }
             }
         }
-        old_visible_set.insert(visible_set.begin(), visible_set.end());
-        visible_set.swap(new_visible_set);
-        new_visible_set.clear();
+        visible_frontier.swap(next_visible_frontier);
+        next_visible_frontier.clear();
     }
-    visible_set.insert(old_visible_set.begin(), old_visible_set.end());
-    old_visible_set.clear();
-    new_visible_set.clear();
+    visible_frontier.clear();
+    next_visible_frontier.clear();
 
     Node root;
     memset(root.m_nxts, -1, 8 * sizeof(int));
