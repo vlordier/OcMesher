@@ -85,7 +85,6 @@ ignore = [
 [tool.ruff.lint.per-file-ignores]
 # demo.py – standalone script, not a package
 "demo.py" = [
-    "INP001",   # implicit namespace package
 ]
 # root __init__.py – intentional top-level package
 "__init__.py" = [
