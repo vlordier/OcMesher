@@ -152,7 +152,6 @@ ignore = [
     "C901",     # complex functions OK in benchmark main/regression_check
     "PLR0912",  # too-many-branches in regression_check
     "PLR0915",  # too-many-statements in main
-    "F841",     # unused variable `sdf` (intentional: benchmarking call overhead)
     "ARG001",   # unused function arguments (future-proofing API)
     "SIM102",   # nested if in regression checks (clearer error messages)
 ]
