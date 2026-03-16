@@ -11,7 +11,7 @@ from ocmesher.core import (
     _validate_cameras,
     _validate_kernels,
 )
-from ocmesher._validation import bounds_min_max
+from ocmesher._validation import bounds_min_max, coerce_kernel_sdf
 
 # ---------------------------------------------------------------------------
 # _validate_cameras
@@ -158,6 +158,20 @@ class TestValidateKernels:
     def test_error_includes_index(self):
         with pytest.raises(TypeError, match=r"kernels\[0\]"):
             _validate_kernels(["not_callable"])
+
+
+class TestCoerceKernelSdf:
+    def test_accepts_numpy_array(self):
+        sdf = coerce_kernel_sdf(np.array([1.0, 2.0], dtype=np.float32), 2, "kernels[0]")
+        np.testing.assert_array_equal(sdf, np.array([1.0, 2.0], dtype=np.float32))
+
+    def test_converts_list_like(self):
+        sdf = coerce_kernel_sdf([1.0, 2.0], 2, "kernels[0]")
+        np.testing.assert_array_equal(sdf, np.array([1.0, 2.0]))
+
+    def test_rejects_wrong_shape(self):
+        with pytest.raises(ValueError, match=r"kernels\[1\].*expected \(2,\)"):
+            coerce_kernel_sdf(np.zeros((2, 1)), 2, "kernels[1]")
 
 
 # ---------------------------------------------------------------------------

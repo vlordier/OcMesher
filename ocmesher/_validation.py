@@ -12,6 +12,7 @@ import numpy as np
 
 __all__ = [
     "bounds_min_max",
+    "coerce_kernel_sdf",
     "out_of_bounds_mask",
     "preprocess_cameras",
     "validate_bounds",
@@ -115,6 +116,27 @@ def validate_kernels(kernels):
         if not callable(k):
             msg = f"kernels[{i}] must be callable, got {type(k).__name__}"
             raise TypeError(msg)
+
+
+def coerce_kernel_sdf(raw_sdf, n_points, label):
+    """Convert a kernel result to ``np.ndarray`` and validate its shape.
+
+    Args:
+        raw_sdf: Kernel result object.
+        n_points: Number of query points used for this kernel call.
+        label: Human-readable kernel label included in error messages.
+
+    Returns:
+        ``(n_points,)`` numpy array.
+
+    Raises:
+        ValueError: If the kernel result shape is not ``(n_points,)``.
+    """
+    sdf = raw_sdf if isinstance(raw_sdf, np.ndarray) else np.asarray(raw_sdf)
+    if sdf.shape != (n_points,):
+        msg = f"{label} returned shape {sdf.shape} for {n_points} query points; expected ({n_points},)"
+        raise ValueError(msg)
+    return sdf
 
 
 def preprocess_cameras(cam_poses, Ks, Hs, Ws):

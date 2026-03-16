@@ -40,6 +40,7 @@ import trimesh
 from ._constants import CORNER_QUANT_SCALE, DENOM_EPS, MAX_SDF_WORKERS
 from ._mc_tables import CORNER_OFFSETS, EDGE_TABLE, EDGE_VERTICES, TRI_TABLE
 from ._validation import bounds_min_max as _bounds_min_max
+from ._validation import coerce_kernel_sdf as _coerce_kernel_sdf
 from ._validation import out_of_bounds_mask as _out_of_bounds_mask
 from ._validation import preprocess_cameras as _preprocess_cameras
 from ._validation import validate_bounds as _validate_bounds
@@ -472,11 +473,8 @@ class TorchOcMesher:
             kernel = kernels[0]
 
             def _eval_chunk(chunk_np):
-                sdf = kernel(chunk_np)
                 _n = len(chunk_np)
-                if sdf.shape != (_n,):
-                    msg = f"kernels[0] returned shape {sdf.shape} for {_n} query points; expected ({_n},)"
-                    raise ValueError(msg)
+                sdf = _coerce_kernel_sdf(kernel(chunk_np), _n, "kernels[0]")
                 if enclosed:
                     sdf[_out_of_bounds_mask(chunk_np, b_min, b_max)] = 1
                 return sdf.astype(np.float32).reshape(-1, 1)
@@ -488,10 +486,7 @@ class TorchOcMesher:
                     out_bound = _out_of_bounds_mask(chunk_np, b_min, b_max)
                 cols = []
                 for k_idx, kernel in enumerate(kernels):
-                    sdf = kernel(chunk_np)
-                    if sdf.shape != (_n,):
-                        msg = f"kernels[{k_idx}] returned shape {sdf.shape} for {_n} query points; expected ({_n},)"
-                        raise ValueError(msg)
+                    sdf = _coerce_kernel_sdf(kernel(chunk_np), _n, f"kernels[{k_idx}]")
                     if enclosed:
                         sdf[out_bound] = 1
                     cols.append(sdf)

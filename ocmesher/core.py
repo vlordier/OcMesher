@@ -56,6 +56,7 @@ _np_asarray = np.asarray
 # Re-export validation under private names for backwards compatibility.
 from ._validation import _AXIS_NAMES  # noqa: E402, F401
 from ._validation import bounds_min_max as _bounds_min_max  # noqa: E402
+from ._validation import coerce_kernel_sdf as _coerce_kernel_sdf  # noqa: E402
 from ._validation import out_of_bounds_mask as _out_of_bounds_mask_shared  # noqa: E402
 from ._validation import preprocess_cameras as _preprocess_cameras  # noqa: E402
 from ._validation import validate_bounds as _validate_bounds  # noqa: E402
@@ -414,10 +415,7 @@ class OcMesher:
         # on every iteration of the batch loop.
         _batch = _SDF_BATCH_SIZE
         _min = min
-        _isinstance = isinstance
-        _ndarray = np.ndarray
         _enclosed = self.enclosed
-        _asarray = _np_asarray
 
         # Pre-cache bounds-mask helpers once (only used when enclosed).
         if _enclosed:
@@ -433,11 +431,7 @@ class OcMesher:
                     end = _min(i + _batch, n_XYZ)
                     XYZ = XYZ_all[i:end]
                     n = end - i
-                    raw = k0(XYZ)
-                    sdf = raw if _isinstance(raw, _ndarray) else _asarray(raw)
-                    if sdf.shape != (n,):
-                        msg = f"kernels[0] returned shape {sdf.shape} for {n} query points; expected ({n},)"
-                        raise ValueError(msg)
+                    sdf = _coerce_kernel_sdf(k0(XYZ), n, "kernels[0]")
                     col = result[i:end, 0]
                     col[:] = sdf
                     oob = _mask_into(XYZ, _b_min, _b_max)
@@ -447,12 +441,7 @@ class OcMesher:
                     end = _min(i + _batch, n_XYZ)
                     XYZ = XYZ_all[i:end]
                     n = end - i
-                    raw = k0(XYZ)
-                    sdf = raw if _isinstance(raw, _ndarray) else _asarray(raw)
-                    if sdf.shape != (n,):
-                        msg = f"kernels[0] returned shape {sdf.shape} for {n} query points; expected ({n},)"
-                        raise ValueError(msg)
-                    result[i:end, 0] = sdf
+                    result[i:end, 0] = _coerce_kernel_sdf(k0(XYZ), n, "kernels[0]")
         else:
             # ---- Multi-kernel path: dispatch via persistent thread pool ----
             # Uses pool.submit directly instead of pool.map with a closure
@@ -468,12 +457,7 @@ class OcMesher:
                 futures = [_submit(k, XYZ) for k in kernels]
                 batch_slice = result[i:end]
                 for k_idx, fut in enumerate(futures):
-                    raw = fut.result()
-                    sdf = raw if _isinstance(raw, _ndarray) else _asarray(raw)
-                    if sdf.shape != (n,):
-                        msg = f"kernels[{k_idx}] returned shape {sdf.shape} for {n} query points; expected ({n},)"
-                        raise ValueError(msg)
-                    batch_slice[:, k_idx] = sdf
+                    batch_slice[:, k_idx] = _coerce_kernel_sdf(fut.result(), n, f"kernels[{k_idx}]")
                 if _enclosed:
                     batch_slice[_mask_into(XYZ, _b_min, _b_max)] = 1
 
