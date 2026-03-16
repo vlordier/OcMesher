@@ -230,16 +230,30 @@ def preprocess_cameras(
 
 def validate_mesher_params(  # noqa: PLR0913
     *,
-    pixels_per_cube,
-    inv_scale,
-    min_dist,
-    memory_limit_mb,
-    bisection_iters,
-    visible_relax_iter,
-    coarse_count,
-    bisection_tol=None,
-):
-    """Validate common scalar configuration shared by both backends."""
+    pixels_per_cube: float,
+    inv_scale: float,
+    min_dist: float,
+    memory_limit_mb: float,
+    bisection_iters: int,
+    visible_relax_iter: int,
+    coarse_count: int,
+    bisection_tol: float | None = None,
+) -> None:
+    """Validate common scalar configuration shared by both backends.
+
+    Args:
+        pixels_per_cube: Target projected cube size in pixels (> 0).
+        inv_scale: Octree refinement threshold (> 0).
+        min_dist: Minimum camera distance for projection (> 0).
+        memory_limit_mb: Chunk memory budget in MB (> 0).
+        bisection_iters: Number of bisection iterations (> 0).
+        visible_relax_iter: Neighbour relaxation radius (>= 0).
+        coarse_count: Target coarse octree leaf count (> 0).
+        bisection_tol: Optional early-exit tolerance (>= 0 when set).
+
+    Raises:
+        ValueError: If any parameter violates its constraint.
+    """
     positive_values = {
         "pixels_per_cube": pixels_per_cube,
         "inv_scale": inv_scale,
