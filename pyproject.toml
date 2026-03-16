@@ -116,7 +116,6 @@ ignore = [
 ]
 # benchmark script – standalone runner
 "benchmarks/run_benchmark.py" = [
-    "INP001",   # implicit namespace package
     "SLF001",   # private member access (benchmarking internal methods)
     "S101",     # assert usage
     "PLR0915",  # too-many-statements (benchmark main)
