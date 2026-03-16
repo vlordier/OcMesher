@@ -5,6 +5,16 @@ description = "View-Dependent Octree-based Mesh Extraction in Unbounded Scenes f
 readme = "README.md"
 license = { file = "LICENSE" }
 requires-python = ">=3.11"
+classifiers = [
+    "Development Status :: 4 - Beta",
+    "Intended Audience :: Science/Research",
+    "License :: OSI Approved :: BSD License",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Topic :: Scientific/Engineering :: Artificial Intelligence",
+    "Topic :: Scientific/Engineering :: Image Processing",
+]
 dependencies = [
     "numpy>=1.24.0",
     "vnoise>=0.1.0",
@@ -28,6 +38,11 @@ benchmark = [
     "numba>=0.60.0",  # JIT-compiled SDF (Opt-numba tier)
     "mlx>=0.22.0",    # Apple Metal GPU SDF (Opt-metal tier, macOS-only)
 ]
+
+[project.urls]
+Homepage = "https://github.com/princeton-vl/OcMesher"
+Repository = "https://github.com/princeton-vl/OcMesher"
+Issues = "https://github.com/princeton-vl/OcMesher/issues"
 
 [build-system]
 requires = ["setuptools>=68"]
