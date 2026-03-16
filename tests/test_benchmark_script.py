@@ -219,6 +219,18 @@ class TestLayoutConstants:
         assert header.startswith(f"{'Config':<{benchmark.CONFIG_COLUMN_WIDTH}}")
 
 
+class TestCollectTierResults:
+    def test_collects_all_tier_labels(self, monkeypatch):
+        monkeypatch.setattr(benchmark, "TIERS_SPEC", [("A", "build-a", "vnoise"), ("B", "build-b", "numba")])
+
+        def _fake_run_tier(label, _build_script, _sdf_type, _configs, _runs):
+            return [{"config": label, "times": [1.0], "mean": 1.0, "median": 1.0, "stdev": 0.0, "min": 1.0, "max": 1.0, "n_verts": 1, "n_faces": 2}]
+
+        monkeypatch.setattr(benchmark, "run_tier", _fake_run_tier)
+        results = benchmark._collect_tier_results([], 1)
+        assert [label for label, _ in results] == ["A", "B"]
+
+
 class TestComparisonRow:
     def test_formats_medians_and_speedup_columns(self):
         row = benchmark._comparison_row("small", [1.0, 0.5], 7)
