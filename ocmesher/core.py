@@ -62,6 +62,10 @@ _np_greater_equal = np.greater_equal
 _np_logical_or = np.logical_or
 _np_asarray = np.asarray
 
+# Below this point-count cutoff, thread-pool submit/result overhead tends to
+# dominate multi-kernel SDF evaluation, so the serial path is faster.
+_MULTI_KERNEL_SERIAL_CUTOFF = 4_096
+
 
 @gin.configurable
 class OcMesher:
@@ -500,6 +504,17 @@ class OcMesher:
                 _mask_into = self._out_of_bounds_mask_into
                 _b_min = self._bounds_min_np
                 _b_max = self._bounds_max_np
+
+            # Single-batch multi-kernel calls are common in the Python hot
+            # path and benchmarks; avoid thread-pool submit/result overhead
+            # when there is no cross-batch parallelism to amortise it.
+            if n_XYZ <= _MULTI_KERNEL_SERIAL_CUTOFF:
+                _labels = tuple(f"kernels[{i}]" for i in range(n_kernels))
+                for k_idx, kernel in enumerate(kernels):
+                    result[:, k_idx] = _coerce_kernel_sdf(kernel(XYZ_all), n_XYZ, _labels[k_idx])
+                if _enclosed:
+                    result[_mask_into(XYZ_all, _b_min, _b_max)] = 1
+                return result
 
             pool = self._get_pool(n_kernels)
             _submit = pool.submit

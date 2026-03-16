@@ -301,8 +301,8 @@ class TestPersistentThreadPool:
             mesher = OcMesher(sample_cameras, sample_bounds)
         assert mesher._sdf_pool is None
 
-    def test_pool_created_on_multi_kernel(self, sample_bounds, sphere_kernel, plane_kernel):
-        """Calling kernel_caller with >1 kernel must create the persistent pool."""
+    def test_pool_not_created_on_single_batch_multi_kernel(self, sample_bounds, sphere_kernel, plane_kernel):
+        """Single-batch multi-kernel calls should use the serial fast path."""
         obj = object.__new__(OcMesher)
         obj.bounds = sample_bounds
         obj.enclosed = False
@@ -313,6 +313,21 @@ class TestPersistentThreadPool:
         obj._oob_mask = np.empty(_SDF_BATCH_SIZE, dtype=bool)
         obj._oob_tmp = np.empty(_SDF_BATCH_SIZE, dtype=bool)
         pts = np.array([[0, 0, 0], [1, 1, 1]], dtype=np.float64)
+        obj.kernel_caller([sphere_kernel, plane_kernel], pts)
+        assert obj._sdf_pool is None
+
+    def test_pool_created_on_multi_batch_multi_kernel(self, sample_bounds, sphere_kernel, plane_kernel):
+        """Multi-batch multi-kernel calls must still create the persistent pool."""
+        obj = object.__new__(OcMesher)
+        obj.bounds = sample_bounds
+        obj.enclosed = False
+        obj.sdf_np_float_type = np.float32
+        obj._bounds_min_np = np.array([sample_bounds[0], sample_bounds[2], sample_bounds[4]], dtype=np.float64)
+        obj._bounds_max_np = np.array([sample_bounds[1], sample_bounds[3], sample_bounds[5]], dtype=np.float64)
+        obj._sdf_pool = None
+        pts = np.zeros((5000, 3), dtype=np.float64)
+        obj._oob_mask = np.empty(len(pts), dtype=bool)
+        obj._oob_tmp = np.empty(len(pts), dtype=bool)
         obj.kernel_caller([sphere_kernel, plane_kernel], pts)
         assert obj._sdf_pool is not None
 
@@ -336,7 +351,7 @@ class TestPersistentThreadPool:
         with patch("ocmesher.core.load_cdll") as mock_load:
             mock_load.return_value = MagicMock()
             with OcMesher(sample_cameras, sample_bounds) as mesher:
-                pts = np.array([[0, 0, 0]], dtype=np.float64)
+                pts = np.zeros((5000, 3), dtype=np.float64)
                 mesher.kernel_caller([sphere_kernel, plane_kernel], pts)
                 assert mesher._sdf_pool is not None
         assert mesher._sdf_pool is None
