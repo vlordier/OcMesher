@@ -80,6 +80,13 @@ uv sync --extra benchmark
 
 The repo uses Ruff for linting/formatting and Pytest for tests.
 
+To mirror local and CI policy checks, install and run pre-commit hooks:
+
+```bash
+uv run pre-commit install
+uv run pre-commit run --all-files
+```
+
 Quality policy notes:
 - Naming consistency and general style are enforced by Ruff.
 - Function complexity and branch depth are linted via Ruff/Pylint rule families (for example `C901`, `PLR0912`, `PLR0915`) in files that are not explicitly waived in `pyproject.toml`.
