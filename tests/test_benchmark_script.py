@@ -163,6 +163,7 @@ class TestCreateParser:
         assert args.configs == "all"
         assert args.json is None
         assert args.upstream_parity is None
+        assert args.upstream_parity_strict is False
         assert args.parity_pixels_per_cube == 32
         assert args.parity_coarse_count == 100_000
         assert args.parity_atol == 1e-12
@@ -306,5 +307,18 @@ class TestMainUpstreamParityMode:
         assert '"matches": true' in out
         assert calls[0]["mesh_config"] == {"pixels_per_cube": 32, "coarse_count": 100_000}
         assert calls[0]["atol"] == 1e-12
+
+    def test_main_strict_mode_exits_nonzero_on_mismatch(self, monkeypatch, capsys):
+        monkeypatch.setattr(
+            "sys.argv",
+            ["benchmark.py", "--upstream-parity", "--upstream-parity-strict"],
+        )
+        monkeypatch.setattr(benchmark, "run_upstream_parity", lambda *_args, **_kwargs: {"delta": {"matches": False}})
+
+        with pytest.raises(SystemExit, match="1"):
+            benchmark.main()
+
+        err = capsys.readouterr().err
+        assert "Upstream parity mismatch" in err
 
 

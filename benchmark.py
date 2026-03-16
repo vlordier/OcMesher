@@ -447,6 +447,9 @@ def main() -> None:
             atol=args.parity_atol,
         )
         _write_stdout(json.dumps(parity, indent=2, sort_keys=True))
+        if args.upstream_parity_strict and not bool(parity["delta"]["matches"]):
+            _write_stderr("Upstream parity mismatch under --upstream-parity-strict")
+            raise SystemExit(1)
         return
 
     _validate_runs(args.runs)
@@ -475,6 +478,11 @@ def _create_parser() -> argparse.ArgumentParser:
         const="main",
         metavar="REF",
         help="Compare numerical mesh signature against Git ref (default: main)",
+    )
+    parser.add_argument(
+        "--upstream-parity-strict",
+        action="store_true",
+        help="Exit with status 1 if --upstream-parity reports a mismatch",
     )
     parser.add_argument(
         "--parity-pixels-per-cube",
