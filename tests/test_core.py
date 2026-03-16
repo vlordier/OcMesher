@@ -140,20 +140,22 @@ class TestKernelCallerAllocation:
         assert result.shape == (0, 1)
         assert result.dtype == np.float32
 
-    @patch("ocmesher.core.load_cdll")
-    @patch("ocmesher.core.register_func")
-    def test_kernel_caller_large_batch_concatenates(
-        self, mock_register, mock_load, sample_cameras, sample_bounds, sphere_kernel, monkeypatch
-    ):
+    def test_kernel_caller_large_batch_concatenates(self, sample_cameras, sample_bounds, sphere_kernel):
         """kernel_caller must correctly concatenate batches > _SDF_BATCH_SIZE.
 
-        Monkeypatches _SDF_BATCH_SIZE to a small value so the test exercises
+        Patches _SDF_BATCH_SIZE to a small value so the test exercises
         multi-batch logic without allocating millions of points.
         """
-        monkeypatch.setattr("ocmesher.core._SDF_BATCH_SIZE", 8)
-        mock_load.return_value = MagicMock()
-        mesher = OcMesher(sample_cameras, sample_bounds)
-        assert mock_register.called
+        with (
+            patch("ocmesher.core._SDF_BATCH_SIZE", 8),
+            patch("ocmesher.core.load_cdll") as mock_load,
+            patch("ocmesher.core.register_func") as mock_register,
+        ):
+            mock_load.return_value = MagicMock()
+            mesher = OcMesher(sample_cameras, sample_bounds)
+            assert mock_register.called
+            mesher._oob_mask = np.empty(13, dtype=bool)
+            mesher._oob_tmp = np.empty(13, dtype=bool)
         # 13 points forces two batches: [0:8] and [8:13]
         n = 13
         pts = np.random.default_rng(0).standard_normal((n, 3)).astype(np.float64)

@@ -144,7 +144,6 @@ ignore = [
     "S101",     # assert usage expected in tests
     "D",        # no docstring enforcement in tests
     "PLR2004",  # magic values used intentionally in test assertions
-    "PT019",    # @patch-injected args look like unused fixtures
     "SLF001",   # internal-method tests validate non-public fast paths
     "E402",     # module-level pytest.importorskip patterns in torch-only tests
     "PLC0415",  # test-local imports for importability checks

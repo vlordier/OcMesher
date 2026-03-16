@@ -139,15 +139,13 @@ class TestOcMesherInit:
         assert mock_register.called
         assert mesher.n_cameras == 1
 
-    @patch("ocmesher.core.load_cdll")
-    @patch("ocmesher.core.register_func")
-    def test_init_camera_packing_values(
-        self, mock_register, mock_load, sample_cameras, sample_bounds, sample_camera_pose, sample_intrinsics
-    ):
+    def test_init_camera_packing_values(self, sample_cameras, sample_bounds):
         """Camera array must contain correct inv_pose, K, H, W values."""
-        mock_load.return_value = MagicMock()
-        mesher = OcMesher(sample_cameras, sample_bounds)
-        assert mock_register.called
+        sample_camera_pose, sample_intrinsics = sample_cameras[0][0], sample_cameras[1][0]
+        with patch("ocmesher.core.load_cdll") as mock_load, patch("ocmesher.core.register_func") as mock_register:
+            mock_load.return_value = MagicMock()
+            mesher = OcMesher(sample_cameras, sample_bounds)
+            assert mock_register.called
         expected_inv_pose = np.linalg.inv(sample_camera_pose)[:3, :4].reshape(-1)
         expected_k = sample_intrinsics.reshape(-1)
         cam = mesher.cameras
@@ -229,9 +227,10 @@ class TestOcMesherReprAndContextManager:
         self, mock_register, mock_load, sample_cameras, sample_bounds
     ):
         mock_load.return_value = MagicMock()
-        assert not mock_register.called
+        with OcMesher(sample_cameras, sample_bounds):
+            pass
+        assert mock_register.called
         with pytest.raises(RuntimeError), OcMesher(sample_cameras, sample_bounds):
-            assert mock_register.called
             raise RuntimeError("boom")  # noqa: EM101
 
 
