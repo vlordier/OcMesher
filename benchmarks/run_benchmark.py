@@ -102,7 +102,7 @@ def _mps_available() -> bool:
         return False
 
 
-def _system_info():
+def _system_info() -> dict[str, object]:
     """Collect system information for the benchmark report."""
     info = {
         "platform": platform.platform(),
@@ -933,14 +933,14 @@ def _bench_compile(cameras, bounds, sdf_name: str = "terrain", n_runs: int = 3, 
 # ---------------------------------------------------------------------------
 # Logging helpers
 # ---------------------------------------------------------------------------
-def _print_section(title: str):
+def _print_section(title: str) -> None:
     logger.info("")
     logger.info("%s", "-" * 70)
     logger.info("%s", title)
     logger.info("%s", "-" * 70)
 
 
-def _print_result(result: dict):
+def _print_result(result: dict[str, object]) -> None:
     if "error" in result:
         logger.info("  SKIPPED: %s", result["error"])
         return
@@ -956,7 +956,7 @@ def _print_result(result: dict):
 # ---------------------------------------------------------------------------
 # Main
 # ---------------------------------------------------------------------------
-def main():
+def main() -> None:
     """Run benchmarks and log results."""
     parser = argparse.ArgumentParser(description="OcMesher benchmark: Python+C++ vs PyTorch")
     parser.add_argument("--full", action="store_true", help="Run full benchmark (slower, higher resolution)")
