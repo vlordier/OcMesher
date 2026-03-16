@@ -208,19 +208,24 @@ void computeCenter(T* coords, const Cube& v) {
                     params::size * (v.m_coords[j] + 0.5) / (1 << v.m_l);
 }
 
+inline void projectCubeCenterToCamera(const Cube& c, int k, T* pc) {
+    using namespace params;
+    T* current_cam = cams + static_cast<ptrdiff_t>(k) * (12 + 9 + 2);
+    T scale = size / (1 << c.m_l);
+    T cx = center[0] - size / 2 + scale * (c.m_coords[0] + 0.5);
+    T cy = center[1] - size / 2 + scale * (c.m_coords[1] + 0.5);
+    T cz = center[2] - size / 2 + scale * (c.m_coords[2] + 0.5);
+    pc[0] = current_cam[3] + cx * current_cam[0] + cy * current_cam[1] + cz * current_cam[2];
+    pc[1] = current_cam[7] + cx * current_cam[4] + cy * current_cam[5] + cz * current_cam[6];
+    pc[2] = current_cam[11] + cx * current_cam[8] + cy * current_cam[9] + cz * current_cam[10];
+}
+
 void projectedCoords(                         // NOLINT(readability-identifier-length)
     const Cube& c, int k, T* icoords, T* r) { // NOLINT(bugprone-easily-swappable-parameters)
     using namespace params;
-    std::array<T, 3> pw{};
     std::array<T, 3> pc{};
     T* current_cam = cams + static_cast<ptrdiff_t>(k) * (12 + 9 + 2);
-    computeCenter(pw.data(), c);
-    for (int i = 0; i < 3; i++) {
-        pc[i] = current_cam[static_cast<ptrdiff_t>(i) * 4 + 3];
-        for (int j = 0; j < 3; j++) { // NOLINT(readability-identifier-length)
-            pc[i] += pw[j] * current_cam[static_cast<ptrdiff_t>(i) * 4 + j];
-        }
-    }
+    projectCubeCenterToCamera(c, k, pc.data());
     if (r != nullptr) {
         *r = std::sqrt(pc[0] * pc[0] + pc[1] * pc[1] + pc[2] * pc[2]);
         *r = std::max(*r, min_dist);
@@ -240,8 +245,10 @@ void projectedCoords(                         // NOLINT(readability-identifier-l
 auto projectedSize(const Cube& c, int k)
     -> T { // NOLINT(readability-identifier-length, modernize-use-trailing-return-type)
     using namespace params;
-    T r; // NOLINT(readability-identifier-length)
-    projectedCoords(c, k, nullptr, &r);
+    std::array<T, 3> pc{};
+    projectCubeCenterToCamera(c, k, pc.data());
+    T r = std::sqrt(pc[0] * pc[0] + pc[1] * pc[1] + pc[2] * pc[2]); // NOLINT(readability-identifier-length)
+    r = std::max(r, min_dist);
     return size / (1 << c.m_l) / r / cam_pix_ang_ppc[static_cast<std::size_t>(k)];
 }
 
