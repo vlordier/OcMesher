@@ -14,6 +14,7 @@ MAX_LINES_BY_FILE: dict[str, int] = {
     "benchmarks/run_benchmark.py": 1250,
     "benchmarks/bench_e2e.py": 750,
     "benchmarks/bench_python_overhead.py": 430,
+    "ocmesher/torch_core.py": 1100,
     "tests/test_benchmark_script.py": 320,
 }
 
