@@ -149,6 +149,30 @@ class TestMarchingCubes:
         assert verts.shape == (0, 3)
         assert faces.shape == (0, 3)
 
+    def test_dedup_vertices_merges_shared_points(self):
+        verts_flat = torch.tensor(
+            [
+                [0.0, 0.0, 0.0],
+                [1.0, 0.0, 0.0],
+                [0.0, 1.0, 0.0],
+                [0.0, 0.0, 0.0],
+                [0.0, 1.0, 0.0],
+                [0.0, 0.0, 1.0],
+            ],
+            dtype=torch.float64,
+        )
+
+        dedup_verts, dedup_faces = TorchOcMesher._dedup_vertices(verts_flat)
+
+        assert dedup_verts.shape == (4, 3)
+        assert dedup_faces.shape == (2, 3)
+        assert {tuple(vertex) for vertex in dedup_verts.tolist()} == {
+            (0.0, 0.0, 0.0),
+            (1.0, 0.0, 0.0),
+            (0.0, 1.0, 0.0),
+            (0.0, 0.0, 1.0),
+        }
+
     def test_all_positive_sdf_no_surface(self, single_cam_mesher):
         corners = torch.randn(5, 8, 3, dtype=torch.float64)
         sdf = torch.ones(5, 8, dtype=torch.float32)
