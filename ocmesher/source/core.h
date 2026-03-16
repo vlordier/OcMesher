@@ -6,6 +6,7 @@
 
 #pragma once
 #include <algorithm>
+#include <array>
 #include <cassert>
 #include <cmath>
 #include <cstdio>
@@ -429,7 +430,7 @@ void findEdges(const Node& n, std::unordered_map<KeyCube, int, KeyCubeHash>& ver
 
 auto computeBoundary(const Cube& c,
                      const Cube& bound) -> int { // NOLINT(modernize-use-trailing-return-type)
-    int b[3][2];                                 // NOLINT(modernize-avoid-c-arrays)
+    std::array<std::array<int, 2>, 3> b{};
     for (int i = 0; i < 3; i++)
         for (int p = 0; p < 2; p++) {
             b[i][p] = static_cast<int>((c.m_coords[i] + p) ==
