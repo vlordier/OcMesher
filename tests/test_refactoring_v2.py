@@ -124,6 +124,12 @@ class TestOutOfBoundsMask:
 # _select_device_and_dtype
 # ---------------------------------------------------------------------------
 class TestSelectDeviceAndDtype:
+    def test_device_param_annotation(self):
+        import inspect
+
+        sig = inspect.signature(TorchOcMesher._select_device_and_dtype)
+        assert sig.parameters["device"].annotation == "str | None"
+
     def test_explicit_cpu(self):
         dev, dtype = TorchOcMesher._select_device_and_dtype("cpu")
         assert dev == torch.device("cpu")
