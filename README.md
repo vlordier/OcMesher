@@ -128,6 +128,7 @@ branches:
 ```bash
 uv run python benchmarks/bench_python_overhead.py --compare old.json new.json
 uv run python benchmarks/bench_e2e.py --compare old.json new.json
+uv run python benchmarks/bench_rust_scene.py --compare benchmark_artifacts/bench_rust_scene_snapshot.json benchmark_artifacts/bench_rust_scene_mps_snapshot.json
 ```
 
 Notes:
@@ -135,6 +136,7 @@ Notes:
 - Optional runtime tiers such as `numba` and `mlx` are skipped automatically when their dependencies are not installed.
 - The MLX benchmark is a narrow SDF-only pilot on macOS, not a full mesher backend.
 - The Rust scene benchmark compares the compiled `extract_native_scene(...)` and `extract_tch_scene(...)` pilot paths on the same primitive list.
+- The Rust scene benchmark can also compare two snapshot JSON files directly, which is useful for CPU-vs-MPS or branch-to-branch pilot comparisons.
 
 To perform deterministic numerical parity checks against `main`, ensure both branches are built with the default build script (`bash install.sh`) and compare mesh counts/sums for the same fixed camera/SDF case.
 

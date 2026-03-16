@@ -8,6 +8,7 @@ Usage::
     python -m benchmarks.bench_rust_scene
     python -m benchmarks.bench_rust_scene --runs 5 --warmup 1
     python -m benchmarks.bench_rust_scene --device mps --snapshot-json rust_scene.json
+    python -m benchmarks.bench_rust_scene --compare cpu.json mps.json
 """
 
 from __future__ import annotations
@@ -22,7 +23,7 @@ from typing import Any
 
 import numpy as np
 
-from benchmarks.result_utils import write_snapshot_json
+from benchmarks.result_utils import load_results_payload, write_snapshot_json
 
 
 def _build_backend() -> Any:
@@ -128,6 +129,7 @@ def run_benchmark(*, runs: int, warmup: int, device: str) -> dict[str, Any]:
 
 def _parse_args(argv: list[str]) -> argparse.Namespace:
     parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument("--compare", nargs=2, metavar=("BASE", "CANDIDATE"), default=None, help="compare two rust scene snapshot files")
     parser.add_argument("--runs", type=int, default=3, help="timed iterations per backend")
     parser.add_argument("--warmup", type=int, default=1, help="warmup iterations before timing")
     parser.add_argument(
@@ -138,6 +140,8 @@ def _parse_args(argv: list[str]) -> argparse.Namespace:
     )
     parser.add_argument("--snapshot-json", type=str, default=None, help="write snapshot JSON to this path")
     args = parser.parse_args(argv)
+    if args.compare is not None:
+        return args
     if args.runs < 1:
         parser.error("--runs must be >= 1")
     if args.warmup < 0:
@@ -145,8 +149,46 @@ def _parse_args(argv: list[str]) -> argparse.Namespace:
     return args
 
 
+def _format_metadata_label(metadata: dict[str, Any] | None, fallback: str) -> str:
+    if metadata is None:
+        return fallback
+    git_commit = metadata.get("git_commit")
+    if isinstance(git_commit, str) and git_commit:
+        return git_commit[:7]
+    return fallback
+
+
+def _compare_snapshots(base_path: str, candidate_path: str) -> list[str]:
+    base_results, base_meta = load_results_payload(base_path)
+    candidate_results, candidate_meta = load_results_payload(candidate_path)
+
+    base_label = _format_metadata_label(base_meta, "base")
+    candidate_label = _format_metadata_label(candidate_meta, "cand")
+    base_native = float(base_results["native_scene"]["mean_ms"])
+    base_tch = float(base_results["tch_scene"]["mean_ms"])
+    candidate_native = float(candidate_results["native_scene"]["mean_ms"])
+    candidate_tch = float(candidate_results["tch_scene"]["mean_ms"])
+
+    native_speedup = base_native / candidate_native if candidate_native else float("inf")
+    tch_speedup = base_tch / candidate_tch if candidate_tch else float("inf")
+
+    return [
+        "Rust scene benchmark comparison",
+        f"base: {base_path} ({base_label})",
+        f"candidate: {candidate_path} ({candidate_label})",
+        f"native_scene mean: {base_native:.3f} ms -> {candidate_native:.3f} ms ({native_speedup:.3f}x)",
+        f"tch_scene mean: {base_tch:.3f} ms -> {candidate_tch:.3f} ms ({tch_speedup:.3f}x)",
+        "speedup > 1.0 means the candidate snapshot is faster",
+    ]
+
+
 def main(argv: list[str] | None = None) -> int:
     args = _parse_args(sys.argv[1:] if argv is None else argv)
+    if args.compare is not None:
+        for line in _compare_snapshots(args.compare[0], args.compare[1]):
+            print(line)
+        return 0
+
     results = run_benchmark(runs=args.runs, warmup=args.warmup, device=args.device)
 
     print("Rust scene benchmark")
