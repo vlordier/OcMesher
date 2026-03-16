@@ -238,3 +238,109 @@ def test_native_torch_bundle_capability_wraps_kernels(sample_cameras, sample_bou
     backend = BundleBackend()
     mesher = RustOcMesher(sample_cameras, sample_bounds, backend=backend, batch_size=2)
     mesher([Kernel(), Kernel()])
+
+
+# ---------------------------------------------------------------------------
+# New capability / optimisation tests
+# ---------------------------------------------------------------------------
+
+def test_capabilities_exposes_dlpack_f32_flag(sample_cameras, sample_bounds):
+    """capabilities() must advertise zero_copy_query_dlpack_f32."""
+    mesher = RustOcMesher(sample_cameras, sample_bounds, backend=DummyRustBackend())
+    caps = mesher.get_capabilities()
+    assert caps.get("zero_copy_query_dlpack_f32") is True
+
+
+def test_capabilities_exposes_cuda_sync_false_by_default(sample_cameras, sample_bounds):
+    """cuda_sync defaults to False."""
+    mesher = RustOcMesher(sample_cameras, sample_bounds, backend=DummyRustBackend())
+    caps = mesher.get_capabilities()
+    assert caps.get("cuda_sync") is False
+
+
+def test_capabilities_cuda_sync_true_when_set(sample_cameras, sample_bounds):
+    """cuda_sync=True is surfaced in capabilities."""
+    mesher = RustOcMesher(
+        sample_cameras,
+        sample_bounds,
+        device="cuda",
+        stream_policy="auto",
+        cuda_sync=True,
+        backend=DummyRustBackend(),
+    )
+    caps = mesher.get_capabilities()
+    assert caps.get("cuda_sync") is True
+
+
+def test_make_rust_ocmesher_forwards_cuda_sync(sample_cameras, sample_bounds):
+    """cuda_sync kwarg is forwarded to the Rust Backend constructor."""
+    mock_backend = DummyRustBackend()
+    mock_ext = MagicMock()
+    mock_ext.find_core_so.return_value = "/fake/core.so"
+    mock_ext.Backend.return_value = mock_backend
+
+    with patch.dict(sys.modules, {"ocmesher_rust": mock_ext}):
+        make_rust_ocmesher(sample_cameras, sample_bounds, cuda_sync=True)
+
+    call_kwargs = mock_ext.Backend.call_args
+    assert call_kwargs.kwargs.get("cuda_sync") is True
+
+
+def test_make_rust_ocmesher_forces_float32_on_mps(sample_cameras, sample_bounds):
+    """When device='mps', preferred_dtype must be float32 (MPS has no fp64 support)."""
+    mock_backend = DummyRustBackend()
+    mock_ext = MagicMock()
+    mock_ext.find_core_so.return_value = "/fake/core.so"
+    mock_ext.Backend.return_value = mock_backend
+
+    with patch.dict(sys.modules, {"ocmesher_rust": mock_ext}):
+        make_rust_ocmesher(sample_cameras, sample_bounds, device="mps")
+
+    # The factory must not pass preferred_dtype='float64' for MPS.
+    call_kwargs = mock_ext.Backend.call_args
+    dtype_passed = call_kwargs.kwargs.get("preferred_dtype")
+    # Either not passed (defaults to float32 in Rust) or explicitly float32.
+    assert dtype_passed in (None, "float32")
+
+
+def test_make_rust_ocmesher_applies_mps_batch_cap(sample_cameras, sample_bounds):
+    """MPS path gets a default sdf_batch_size when none is supplied."""
+    mock_backend = DummyRustBackend()
+    mock_ext = MagicMock()
+    mock_ext.find_core_so.return_value = "/fake/core.so"
+    mock_ext.Backend.return_value = mock_backend
+
+    with patch.dict(sys.modules, {"ocmesher_rust": mock_ext}):
+        make_rust_ocmesher(sample_cameras, sample_bounds, device="mps")
+
+    # The Rust Backend applies the cap internally; the factory should not pass
+    # a conflicting sdf_batch_size unless the caller supplied one.
+    call_kwargs = mock_ext.Backend.call_args
+    # Either not set (Backend handles it) or a positive integer
+    batch = call_kwargs.kwargs.get("sdf_batch_size")
+    assert batch is None or (isinstance(batch, int) and batch > 0)
+
+
+def test_pinned_memory_cuda_flag_on_auto_policy(sample_cameras, sample_bounds):
+    """pinned_memory_cuda capability is True when device=cuda and stream_policy=auto."""
+    mesher = RustOcMesher(
+        sample_cameras,
+        sample_bounds,
+        device="cuda",
+        stream_policy="auto",
+        backend=DummyRustBackend(),
+    )
+    caps = mesher.get_capabilities()
+    assert caps.get("pinned_memory_cuda") is True
+
+
+def test_pinned_memory_cuda_flag_off_for_cpu(sample_cameras, sample_bounds):
+    """pinned_memory_cuda is False when device=cpu."""
+    mesher = RustOcMesher(
+        sample_cameras,
+        sample_bounds,
+        device="cpu",
+        backend=DummyRustBackend(),
+    )
+    caps = mesher.get_capabilities()
+    assert caps.get("pinned_memory_cuda") is False

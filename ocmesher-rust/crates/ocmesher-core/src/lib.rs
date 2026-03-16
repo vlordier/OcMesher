@@ -60,6 +60,13 @@ struct DLPackTensorContext {
     shape: [i64; 2],
 }
 
+/// f32 variant of the DLPack context.  Using f32 at capsule-build time halves
+/// the host-to-device transfer size and removes the GPU-side dtype cast.
+struct DLPackTensorContextF32 {
+    storage: Vec<f32>,
+    shape: [i64; 2],
+}
+
 unsafe extern "C" fn dl_managed_tensor_deleter(managed: *mut DLManagedTensor) {
     if managed.is_null() {
         return;
@@ -68,6 +75,18 @@ unsafe extern "C" fn dl_managed_tensor_deleter(managed: *mut DLManagedTensor) {
     if !managed.manager_ctx.is_null() {
         drop(Box::from_raw(
             managed.manager_ctx.cast::<DLPackTensorContext>(),
+        ));
+    }
+}
+
+unsafe extern "C" fn dl_managed_tensor_deleter_f32(managed: *mut DLManagedTensor) {
+    if managed.is_null() {
+        return;
+    }
+    let managed = Box::from_raw(managed);
+    if !managed.manager_ctx.is_null() {
+        drop(Box::from_raw(
+            managed.manager_ctx.cast::<DLPackTensorContextF32>(),
         ));
     }
 }
@@ -494,59 +513,113 @@ fn build_torch_xyz_input_dlpack<'py>(
     torch_eval_dtype: Option<&str>,
     torch_non_blocking: bool,
 ) -> PyResult<Bound<'py, PyAny>> {
-    let ctx = Box::new(DLPackTensorContext {
-        storage: xyz.to_vec(),
-        shape: [n_pts as i64, 3],
-    });
-    let ctx_ptr = Box::into_raw(ctx);
-    let managed = Box::new(DLManagedTensor {
-        dl_tensor: DLTensor {
-            data: unsafe { (*ctx_ptr).storage.as_mut_ptr().cast::<c_void>() },
-            device: DLDevice {
-                device_type: 1,
-                device_id: 0,
-            },
-            ndim: 2,
-            dtype: DLDataType {
-                code: 2,
-                bits: 64,
-                lanes: 1,
-            },
-            shape: unsafe { (*ctx_ptr).shape.as_mut_ptr() },
-            strides: std::ptr::null_mut(),
-            byte_offset: 0,
-        },
-        manager_ctx: ctx_ptr.cast::<c_void>(),
-        deleter: Some(dl_managed_tensor_deleter),
-    });
-    let managed_ptr = Box::into_raw(managed);
-
-    let capsule = unsafe {
-        Bound::from_owned_ptr_or_err(
-            py,
-            pyo3::ffi::PyCapsule_New(
-                managed_ptr.cast::<c_void>(),
-                DLPACK_CAPSULE_NAME.as_ptr().cast(),
-                Some(dlpack_capsule_destructor),
-            ),
-        )?
-    };
+    // Downcast to f32 at capsule-build time when possible.
+    // This halves the host-to-device transfer size and removes the GPU-side
+    // dtype conversion step from the `.to()` call that follows.
+    let use_f32 = torch_eval_dtype.unwrap_or("float32") != "float64";
 
     let torch = py.import_bound("torch")?;
-    let from_dlpack = torch.getattr("utils")?.getattr("dlpack")?.getattr("from_dlpack")?;
-    let xyz_t = from_dlpack.call1((capsule,))?;
-    let dtype_obj = build_torch_dtype(&torch.into_any(), torch_eval_dtype)?;
-    let xyz_t = if let Some(device) = torch_eval_device {
-        let kwargs = PyDict::new_bound(py);
-        kwargs.set_item("non_blocking", torch_non_blocking)?;
-        xyz_t.call_method("to", (device, dtype_obj), Some(&kwargs))?
-    } else if torch_eval_dtype.unwrap_or("float32") == "float64" {
-        xyz_t
+    let from_dlpack = torch
+        .getattr("utils")?
+        .getattr("dlpack")?
+        .getattr("from_dlpack")?;
+
+    let xyz_t = if use_f32 {
+        let ctx = Box::new(DLPackTensorContextF32 {
+            storage: xyz.iter().map(|&v| v as f32).collect(),
+            shape: [n_pts as i64, 3],
+        });
+        let ctx_ptr = Box::into_raw(ctx);
+        let managed = Box::new(DLManagedTensor {
+            dl_tensor: DLTensor {
+                data: unsafe { (*ctx_ptr).storage.as_mut_ptr().cast::<c_void>() },
+                device: DLDevice { device_type: 1, device_id: 0 },
+                ndim: 2,
+                dtype: DLDataType { code: 2, bits: 32, lanes: 1 },
+                shape: unsafe { (*ctx_ptr).shape.as_mut_ptr() },
+                strides: std::ptr::null_mut(),
+                byte_offset: 0,
+            },
+            manager_ctx: ctx_ptr.cast::<c_void>(),
+            deleter: Some(dl_managed_tensor_deleter_f32),
+        });
+        let managed_ptr = Box::into_raw(managed);
+        let capsule = unsafe {
+            Bound::from_owned_ptr_or_err(
+                py,
+                pyo3::ffi::PyCapsule_New(
+                    managed_ptr.cast::<c_void>(),
+                    DLPACK_CAPSULE_NAME.as_ptr().cast(),
+                    Some(dlpack_capsule_destructor),
+                ),
+            )?
+        };
+        from_dlpack.call1((capsule,))?
     } else {
-        xyz_t.call_method1("to", (dtype_obj,))?
+        // f64 path: keep original precision
+        let ctx = Box::new(DLPackTensorContext {
+            storage: xyz.to_vec(),
+            shape: [n_pts as i64, 3],
+        });
+        let ctx_ptr = Box::into_raw(ctx);
+        let managed = Box::new(DLManagedTensor {
+            dl_tensor: DLTensor {
+                data: unsafe { (*ctx_ptr).storage.as_mut_ptr().cast::<c_void>() },
+                device: DLDevice { device_type: 1, device_id: 0 },
+                ndim: 2,
+                dtype: DLDataType { code: 2, bits: 64, lanes: 1 },
+                shape: unsafe { (*ctx_ptr).shape.as_mut_ptr() },
+                strides: std::ptr::null_mut(),
+                byte_offset: 0,
+            },
+            manager_ctx: ctx_ptr.cast::<c_void>(),
+            deleter: Some(dl_managed_tensor_deleter),
+        });
+        let managed_ptr = Box::into_raw(managed);
+        let capsule = unsafe {
+            Bound::from_owned_ptr_or_err(
+                py,
+                pyo3::ffi::PyCapsule_New(
+                    managed_ptr.cast::<c_void>(),
+                    DLPACK_CAPSULE_NAME.as_ptr().cast(),
+                    Some(dlpack_capsule_destructor),
+                ),
+            )?
+        };
+        from_dlpack.call1((capsule,))?
     };
 
-    Ok(xyz_t)
+    // CUDA non-blocking: pin the CPU tensor before the H2D transfer so the
+    // DMA engine can bypass the staging copy and overlap with CPU work.
+    // MPS (Apple Silicon unified memory) does not benefit from pinning.
+    let xyz_t = if torch_non_blocking
+        && torch_eval_device
+            .map(|d| d.starts_with("cuda"))
+            .unwrap_or(false)
+    {
+        xyz_t.call_method0("pin_memory")?
+    } else {
+        xyz_t
+    };
+
+    // Device transfer.  When the capsule was already built as f32 we only
+    // need the device argument; the dtype cast can be skipped entirely.
+    if let Some(device) = torch_eval_device {
+        let kwargs = PyDict::new_bound(py);
+        kwargs.set_item("non_blocking", torch_non_blocking)?;
+        if use_f32 {
+            xyz_t.call_method("to", (device,), Some(&kwargs))
+        } else {
+            let dtype_obj = build_torch_dtype(&torch.into_any(), torch_eval_dtype)?;
+            xyz_t.call_method("to", (device, dtype_obj), Some(&kwargs))
+        }
+    } else if use_f32 {
+        // CPU path, dtype already correct
+        Ok(xyz_t)
+    } else {
+        // CPU f64 path — no cast needed since DLPack is already f64
+        Ok(xyz_t)
+    }
 }
 
 fn build_torch_dtype<'py>(
@@ -697,6 +770,31 @@ fn eval_kernel_py_once(
     use ndarray::Array2;
     use numpy::IntoPyArray;
 
+    // Fast path: if the kernel exposes `evaluate_batch_torch` and we have a
+    // target device, build a DLPack capsule directly — no numpy intermediary.
+    if torch_eval_device.is_some() {
+        let kernel_bound = kernel.bind(py);
+        if kernel_bound
+            .getattr("evaluate_batch_torch")
+            .map(|a| a.is_callable())
+            .unwrap_or(false)
+        {
+            let xyz_torch = build_torch_xyz_input_dlpack(
+                py,
+                xyz,
+                n_pts,
+                torch_eval_device,
+                torch_eval_dtype,
+                torch_non_blocking,
+            )?;
+            let eval_fn = kernel_bound.getattr("evaluate_batch_torch")?;
+            let raw = eval_fn.call1((xyz_torch,))?;
+            return extract_sdf_output(py, raw.unbind());
+        }
+    }
+
+    // Fallback: build numpy array for kernels that only expose `evaluate_batch`
+    // or plain `__call__`.
     let xyz_arr = Array2::from_shape_vec((n_pts, 3), xyz.to_vec())
         .map_err(|e| pyo3::exceptions::PyValueError::new_err(e.to_string()))?;
     let xyz_np = xyz_arr.into_pyarray_bound(py).into_any();
@@ -1390,6 +1488,11 @@ pub struct MesherParams {
     pub torch_eval_device: Option<String>,
     pub torch_eval_dtype: Option<String>,
     pub torch_stream_policy: Option<String>,
+    /// When `true`, call `torch.cuda.synchronize()` after the pipeline finishes
+    /// so the caller receives fully-materialised GPU tensors on return.
+    pub cuda_sync: bool,
+    /// Effective MPS batch cap applied at construction time (informational).
+    pub mps_batch_cap: Option<usize>,
 }
 
 /// Run the full OcMesher pipeline.
@@ -1559,6 +1662,17 @@ pub fn run_meshing_pipeline(
             params.enclosed,
         )?;
         results.push(mesh);
+    }
+
+    // Flush all outstanding async CUDA work so meshes are fully materialised
+    // before returning to the Python caller.
+    if params.cuda_sync {
+        if let Some(device) = torch_eval_device {
+            if device.starts_with("cuda") {
+                let torch = py.import_bound("torch")?;
+                torch.getattr("cuda")?.call_method0("synchronize")?;
+            }
+        }
     }
 
     Ok(results)

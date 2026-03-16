@@ -225,6 +225,7 @@ class RustOcMesher:
         batch_size: int | None = None,
         sdf_batch_size: int | None = None,
         stream_policy: str = "sync",
+        cuda_sync: bool = False,
         backend: RustBackendProtocol | None = None,
     ):
         """Create a Rust-backed mesher with OcMesher-compatible arguments."""
@@ -273,6 +274,7 @@ class RustOcMesher:
         else:
             self.stream_policy = stream_policy
 
+        self.cuda_sync = cuda_sync
         self._device_caps = caps
         self._backend = backend
 
@@ -287,6 +289,10 @@ class RustOcMesher:
             "max_batch_mps": self.max_batch if self.device == "mps" else None,
             "supports_async": self.device in ("cuda", "mps"),
             "default_stream_policy": self.stream_policy,
+            "cuda_sync": self.cuda_sync,
+            "zero_copy_query_dlpack_cpu": True,
+            "zero_copy_query_dlpack_f32": True,
+            "pinned_memory_cuda": self.device == "cuda" and self.stream_policy == "auto",
             "version": self.__version__,
         }
 
@@ -407,7 +413,7 @@ def make_rust_ocmesher(
     # `batch_size` and `dtype` are wrapper-only controls; the remaining runtime
     # knobs are passed to both layers so capability negotiation stays aligned.
     _wrapper_only = {"batch_size", "dtype"}
-    _shared = {"device", "max_batch", "sdf_batch_size", "stream_policy"}
+    _shared = {"device", "max_batch", "sdf_batch_size", "stream_policy", "cuda_sync"}
     backend_kwargs = {k: v for k, v in kwargs.items() if k not in _wrapper_only}
     wrapper_kwargs = {
         k: v for k, v in kwargs.items() if k in _wrapper_only or k in _shared

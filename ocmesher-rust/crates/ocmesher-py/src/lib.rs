@@ -56,6 +56,8 @@ pub struct Backend {
     stream_policy: String,
     supports_cuda: bool,
     supports_mps: bool,
+    cuda_sync: bool,
+    mps_batch_cap: Option<usize>,
 }
 
 #[pymethods]
@@ -80,6 +82,7 @@ impl Backend {
         max_batch = None,
         sdf_batch_size = None,
         stream_policy = "sync",
+        cuda_sync = false,
     ))]
     #[allow(clippy::too_many_arguments)]
     fn new(
@@ -102,6 +105,7 @@ impl Backend {
         max_batch: Option<usize>,
         sdf_batch_size: Option<usize>,
         stream_policy: &str,
+        cuda_sync: bool,
     ) -> PyResult<Self> {
         // Load the shared library
         let lib = CoreLib::load(lib_path).map_err(PyErr::from)?;
@@ -203,6 +207,26 @@ impl Backend {
             ));
         }
 
+        // MPS-specific policy enforcement -----------------------------------
+        // Apple MPS does not support float64 tensors; always downgrade to
+        // float32 to avoid runtime errors on Metal-backed evaluation.
+        const MPS_DEFAULT_BATCH: usize = 32_768;
+        let is_mps = requested_device == "mps";
+        let preferred_dtype = if is_mps && preferred_dtype == "float64" {
+            "float32".to_string()
+        } else {
+            preferred_dtype
+        };
+        // Apply a sensible default batch cap for MPS to avoid unified-memory
+        // pressure when processing very large query grids.
+        let sdf_batch_size = if is_mps && sdf_batch_size.is_none() {
+            Some(MPS_DEFAULT_BATCH)
+        } else {
+            sdf_batch_size
+        };
+        let mps_batch_cap: Option<usize> = if is_mps { Some(sdf_batch_size.unwrap_or(MPS_DEFAULT_BATCH)) } else { None };
+        // -------------------------------------------------------------------
+
         let stream_policy = stream_policy.to_string();
         if stream_policy != "sync" && stream_policy != "auto" {
             return Err(pyo3::exceptions::PyValueError::new_err(
@@ -231,6 +255,8 @@ impl Backend {
             torch_eval_device: Some(requested_device.clone()),
             torch_eval_dtype: Some(preferred_dtype.clone()),
             torch_stream_policy: Some(stream_policy.clone()),
+            cuda_sync,
+            mps_batch_cap,
         };
 
         Ok(Backend {
@@ -243,6 +269,8 @@ impl Backend {
             stream_policy,
             supports_cuda,
             supports_mps,
+            cuda_sync,
+            mps_batch_cap,
         })
     }
 
@@ -261,9 +289,22 @@ impl Backend {
         d.set_item("native_batching", true)?;
         d.set_item("native_torch_eval", true)?;
         d.set_item("supports_fused_torch_bundle", true)?;
+        // DLPack zero-copy is available on CPU for both f32 and f64 capsules.
         d.set_item("zero_copy_query_dlpack_cpu", true)?;
+        // f32 DLPack halves H2D size and eliminates GPU-side dtype conversion.
+        d.set_item("zero_copy_query_dlpack_f32", true)?;
         d.set_item("supports_async", self.device == "cuda" || self.device == "mps")?;
         d.set_item("default_stream_policy", self.stream_policy.as_str())?;
+        // Pinned CPU memory is used for CUDA non-blocking transfers (stream_policy=auto).
+        d.set_item(
+            "pinned_memory_cuda",
+            self.device == "cuda" && self.stream_policy == "auto",
+        )?;
+        d.set_item("cuda_sync", self.cuda_sync)?;
+        match self.mps_batch_cap {
+            Some(v) => d.set_item("mps_batch_cap", v)?,
+            None => d.set_item("mps_batch_cap", py.None())?,
+        }
         d.set_item("version", self.version.as_str())?;
         Ok(d)
     }
