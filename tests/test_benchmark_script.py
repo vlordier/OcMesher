@@ -221,6 +221,10 @@ class TestComparisonRow:
         assert "0.500s" in row
         assert "2.00x" in row
 
+    def test_includes_one_speedup_per_non_baseline_tier(self):
+        row = benchmark._comparison_row("small", [2.0, 1.0, 0.5], 7)
+        assert row.count("x") >= 2
+
 
 class TestComparisonCells:
     def test_speedup_cells_formats_suffix(self):
