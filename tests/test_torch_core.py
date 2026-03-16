@@ -72,6 +72,14 @@ class TestConstructorValidation:
         assert mesher.cam_inv_poses.shape == (1, 3, 4)
         assert mesher.cam_intrinsics.shape == (1, 3, 3)
 
+    def test_invalid_scalar_params_raise(self, sample_cameras, sample_bounds):
+        with pytest.raises(ValueError, match="coarse_count must be > 0"):
+            TorchOcMesher(sample_cameras, sample_bounds, device="cpu", coarse_count=0)
+
+    def test_invalid_visible_relax_iter_raises(self, sample_cameras, sample_bounds):
+        with pytest.raises(ValueError, match="visible_relax_iter must be >= 0"):
+            TorchOcMesher(sample_cameras, sample_bounds, device="cpu", visible_relax_iter=-1)
+
 
 # ---------------------------------------------------------------------------
 # Relaxation offset grid

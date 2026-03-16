@@ -46,6 +46,7 @@ from ._validation import out_of_bounds_mask as _out_of_bounds_mask
 from ._validation import preprocess_cameras as _preprocess_cameras
 from ._validation import validate_bounds as _validate_bounds
 from ._validation import validate_cameras as _validate_cameras
+from ._validation import validate_mesher_params as _validate_mesher_params
 from .utils.timer import Timer
 
 logger = logging.getLogger(__name__)
@@ -175,6 +176,15 @@ class TorchOcMesher:
         """
         cam_poses, Ks, Hs, Ws = _validate_cameras(cameras)
         bounds = _validate_bounds(bounds)
+        _validate_mesher_params(
+            pixels_per_cube=pixels_per_cube,
+            inv_scale=inv_scale,
+            min_dist=min_dist,
+            memory_limit_mb=memory_limit_mb,
+            bisection_iters=bisection_iters,
+            visible_relax_iter=visible_relax_iter,
+            coarse_count=coarse_count,
+        )
         self.device, self._fdtype = self._select_device_and_dtype(device)
         self.n_cameras = len(cam_poses)
 

@@ -20,6 +20,7 @@ __all__ = [
     "validate_bounds",
     "validate_cameras",
     "validate_kernels",
+    "validate_mesher_params",
 ]
 
 _AXIS_NAMES = ("x", "y", "z")
@@ -178,6 +179,38 @@ def preprocess_cameras(cam_poses, Ks, Hs, Ws):
     heights = tuple(int(h) for h in Hs)
     widths = tuple(int(w) for w in Ws)
     return inv_poses_3x4, intrinsics, heights, widths
+
+
+def validate_mesher_params(
+    *,
+    pixels_per_cube,
+    inv_scale,
+    min_dist,
+    memory_limit_mb,
+    bisection_iters,
+    visible_relax_iter,
+    coarse_count,
+    bisection_tol=None,
+):
+    """Validate common scalar configuration shared by both backends."""
+    positive_values = {
+        "pixels_per_cube": pixels_per_cube,
+        "inv_scale": inv_scale,
+        "min_dist": min_dist,
+        "memory_limit_mb": memory_limit_mb,
+        "bisection_iters": bisection_iters,
+        "coarse_count": coarse_count,
+    }
+    for name, value in positive_values.items():
+        if value <= 0:
+            msg = f"{name} must be > 0, got {value!r}"
+            raise ValueError(msg)
+    if visible_relax_iter < 0:
+        msg = f"visible_relax_iter must be >= 0, got {visible_relax_iter!r}"
+        raise ValueError(msg)
+    if bisection_tol is not None and bisection_tol < 0:
+        msg = f"bisection_tol must be >= 0, got {bisection_tol!r}"
+        raise ValueError(msg)
 
 
 def out_of_bounds_mask(xyz, b_min, b_max):

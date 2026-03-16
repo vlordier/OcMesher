@@ -63,6 +63,7 @@ from ._validation import preprocess_cameras as _preprocess_cameras  # noqa: E402
 from ._validation import validate_bounds as _validate_bounds  # noqa: E402
 from ._validation import validate_cameras as _validate_cameras  # noqa: E402
 from ._validation import validate_kernels as _validate_kernels  # noqa: E402
+from ._validation import validate_mesher_params as _validate_mesher_params  # noqa: E402
 
 
 @gin.configurable
@@ -149,6 +150,16 @@ class OcMesher:
         """
         cam_poses, Ks, Hs, Ws = _validate_cameras(cameras)
         bounds = _validate_bounds(bounds)
+        _validate_mesher_params(
+            pixels_per_cube=pixels_per_cube,
+            inv_scale=inv_scale,
+            min_dist=min_dist,
+            memory_limit_mb=memory_limit_mb,
+            bisection_iters=bisection_iters,
+            visible_relax_iter=visible_relax_iter,
+            coarse_count=coarse_count,
+            bisection_tol=bisection_tol,
+        )
 
         dll = load_cdll(str(Path(__file__).parent.resolve() / "lib" / "core.so"))
         self.float_type = c_double

@@ -75,6 +75,18 @@ class TestOcMesherInit:
             OcMesher(sample_cameras, [0, 1])
 
     @patch("ocmesher.core.load_cdll")
+    def test_init_validates_scalar_params(self, mock_load, sample_cameras, sample_bounds):
+        mock_load.return_value = MagicMock()
+        with pytest.raises(ValueError, match="bisection_iters must be > 0"):
+            OcMesher(sample_cameras, sample_bounds, bisection_iters=0)
+
+    @patch("ocmesher.core.load_cdll")
+    def test_init_validates_bisection_tol(self, mock_load, sample_cameras, sample_bounds):
+        mock_load.return_value = MagicMock()
+        with pytest.raises(ValueError, match="bisection_tol must be >= 0"):
+            OcMesher(sample_cameras, sample_bounds, bisection_tol=-1e-4)
+
+    @patch("ocmesher.core.load_cdll")
     @patch("ocmesher.core.register_func")
     def test_init_success_with_mock_dll(self, _mock_register, mock_load, sample_cameras, sample_bounds):
         mock_load.return_value = MagicMock()
