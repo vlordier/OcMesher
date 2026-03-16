@@ -33,8 +33,11 @@ __all__ = [
 _AXIS_NAMES = ("x", "y", "z")
 
 
-def _validate_camera_structure(cameras: CamerasTuple) -> tuple:
+def _validate_camera_structure(cameras: CamerasTuple) -> tuple[Any, Any, Any, Any]:
     """Unpack and validate the top-level camera tuple structure.
+
+    Returns:
+        ``(cam_poses, Ks, Hs, Ws)`` unpacked from *cameras*.
 
     Raises:
         ValueError: If *cameras* is not a 4-element tuple/list or if the
@@ -54,7 +57,10 @@ def _validate_camera_structure(cameras: CamerasTuple) -> tuple:
     return cam_poses, Ks, Hs, Ws
 
 
-def _validate_camera_arrays(cam_poses, Ks):
+def _validate_camera_arrays(
+    cam_poses: Any,
+    Ks: Any,
+) -> tuple[list[NDArray[np.float64]], list[NDArray[np.float64]]]:
     """Convert and shape-check pose and intrinsics arrays.
 
     Returns:
@@ -76,7 +82,7 @@ def _validate_camera_arrays(cam_poses, Ks):
     return cam_poses, Ks
 
 
-def _validate_camera_dimensions(Hs, Ws):
+def _validate_camera_dimensions(Hs: Any, Ws: Any) -> None:
     """Validate that image heights and widths are positive integers.
 
     Raises:
