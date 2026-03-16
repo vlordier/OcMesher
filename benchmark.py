@@ -384,9 +384,14 @@ def _validate_selected_configs(config_choice: str, configs: list[DemoConfig]) ->
 
 def _write_results_json(output_path: str, results: list[tuple[str, list[TierConfigResult]]]) -> None:
     """Serialize benchmark results to a JSON file."""
-    data = dict(results)
+    data = _tier_results_to_dict(results)
     with Path(output_path).open("w") as f:
         json.dump(data, f, indent=2)
+
+
+def _tier_results_to_dict(results: list[tuple[str, list[TierConfigResult]]]) -> dict[str, list[TierConfigResult]]:
+    """Convert tier result tuples into a JSON-serializable mapping."""
+    return dict(results)
 
 
 def _speedup_ratio(baseline: float, candidate: float) -> float:
