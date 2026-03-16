@@ -588,7 +588,7 @@ def _scaling_cameras(bounds, max_cameras: int = 8, n_runs: int = 1) -> list[dict
     return results
 
 
-def _memory_usage(cameras, bounds):
+def _memory_usage(cameras, bounds) -> dict[str, object]:
     """Measure peak memory usage during meshing."""
     results: dict[str, object] = {}
     try:
@@ -608,7 +608,7 @@ def _memory_usage(cameras, bounds):
     return results
 
 
-def _micro_visibility_multicam(bounds, n_runs: int = 3):
+def _micro_visibility_multicam(bounds, n_runs: int = 3) -> list[dict[str, object]]:
     """Benchmark visibility filter scaling with multiple cameras."""
     results: list[dict[str, object]] = []
     try:
