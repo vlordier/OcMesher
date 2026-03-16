@@ -13,3 +13,9 @@ strip = "debuginfo"
 
 [profile.dev]
 opt-level = 1
+
+[profile.profiling]
+inherits = "release"
+debug = true
+strip = "none"
+lto = "off"

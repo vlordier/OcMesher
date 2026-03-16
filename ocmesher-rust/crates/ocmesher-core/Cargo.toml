@@ -10,3 +10,10 @@ pyo3 = { version = "0.22", features = [] }
 numpy = "0.22"
 ndarray = "0.16"
 thiserror = "2"
+
+[dev-dependencies]
+criterion = "0.5"
+
+[[bench]]
+name = "core_benches"
+harness = false
