@@ -90,6 +90,9 @@ class TestTierSpec:
         scripts = {tier[1] for tier in benchmark.TIERS_SPEC}
         assert scripts == {benchmark.BASELINE_BUILD, benchmark.OPTIMISED_BUILD}
 
+    def test_each_tier_has_three_fields(self):
+        assert all(len(tier) == 3 for tier in benchmark.TIERS_SPEC)
+
 
 class TestBenchmarkExceptions:
     def test_output_parse_error_str_contains_stdout(self):
