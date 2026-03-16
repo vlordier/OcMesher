@@ -227,7 +227,7 @@ _BENCHMARKS = {
 }
 
 
-def main():
+def main() -> None:
     """Run Python-overhead micro-benchmarks and optionally persist JSON results."""
     parser = argparse.ArgumentParser(description="Micro-benchmark for Python orchestration overhead")
     parser.add_argument(
