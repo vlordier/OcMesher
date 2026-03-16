@@ -29,7 +29,7 @@ jobs:
           for src in tests/cpp/test_*.cpp; do
             name=$(basename "$src" .cpp)
             echo "::group::Building $name"
-            g++ -std=c++17 -O2 -o "tests/cpp/$name" "$src" -lm
+            g++ -std=c++17 -O2 -Wall -Wextra -Wpedantic -Werror -o "tests/cpp/$name" "$src" -lm
             echo "::endgroup::"
             echo "::group::Running $name"
             if ! "./tests/cpp/$name"; then
