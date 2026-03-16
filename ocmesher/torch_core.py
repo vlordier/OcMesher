@@ -57,7 +57,7 @@ from ._validation import validate_mesher_params as _validate_mesher_params
 from .utils.timer import Timer
 
 if TYPE_CHECKING:
-    from ._types import BoundsLike, CamerasTuple, MeshResult
+    from ._types import BoundsLike, CamerasTuple, KernelSequence, MeshResult
 
 logger = logging.getLogger(__name__)
 
@@ -934,7 +934,7 @@ class TorchOcMesher:
     # ------------------------------------------------------------------
     # Main pipeline
     # ------------------------------------------------------------------
-    def __call__(self, kernels) -> MeshResult:
+    def __call__(self, kernels: KernelSequence) -> MeshResult:
         """Run the full coarse-to-fine meshing pipeline and return meshes."""
         n_elements = len(kernels)
 
