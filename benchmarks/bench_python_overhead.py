@@ -37,6 +37,7 @@ import argparse
 import json
 import statistics
 import time
+from pathlib import Path
 
 import numpy as np
 
@@ -227,6 +228,7 @@ _BENCHMARKS = {
 
 
 def main():
+    """Run Python-overhead micro-benchmarks and optionally persist JSON results."""
     parser = argparse.ArgumentParser(description="Micro-benchmark for Python orchestration overhead")
     parser.add_argument(
         "--sizes",
@@ -263,7 +265,7 @@ def main():
         print()
 
     if args.json:
-        with open(args.json, "w") as f:
+        with Path(args.json).open("w") as f:
             json.dump(all_results, f, indent=2)
         print(f"Results saved to {args.json}")
 

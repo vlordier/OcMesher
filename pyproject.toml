@@ -141,8 +141,6 @@ ignore = [
     "SLF001",   # private member access (benchmarking internal methods)
     "T201",     # print statements (benchmark output)
     "B023",     # loop-variable binding in closures (intentional for timing)
-    "D103",     # missing docstring in main()
-    "PTH123",   # open() vs Path.open() (simple CLI)
 ]
 # End-to-end benchmark (branch comparison)
 "benchmarks/bench_e2e.py" = [
