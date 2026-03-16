@@ -3,8 +3,11 @@
 from __future__ import annotations
 
 from pathlib import Path
+from typing import TypeAlias
 
-MAX_LINES_BY_FILE = {
+LineLimits: TypeAlias = dict[str, int]
+
+MAX_LINES_BY_FILE: LineLimits = {
     "benchmark.py": 520,
     "benchmarks/run_benchmark.py": 1250,
     "benchmarks/bench_e2e.py": 750,
@@ -17,10 +20,10 @@ def _line_count(path: Path) -> int:
     return path.read_text(encoding="utf-8").count("\n") + 1
 
 
-def _file_length_violations(repo_root: Path, limits: dict[str, int] | None = None) -> list[str]:
+def _file_length_violations(repo_root: Path, limits: LineLimits | None = None) -> list[str]:
     limits = limits or MAX_LINES_BY_FILE
     violations = []
-    for rel_path, max_lines in limits.items():
+    for rel_path, max_lines in sorted(limits.items()):
         abs_path = repo_root / rel_path
         n_lines = _line_count(abs_path)
         if n_lines > max_lines:
