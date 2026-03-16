@@ -245,13 +245,19 @@ def run_tier(
     return results
 
 
+def _short_tier_label(name: str) -> str:
+    """Return compact tier label for comparison table columns."""
+    if "(" in name:
+        return name.split("(", 1)[0].rstrip()
+    return name
+
+
 def print_comparison(tiers: list[tuple[str, list[TierConfigResult]]]) -> None:
     """tiers: list of (label, results)"""
     names = [t[0] for t in tiers]
     tables = [t[1] for t in tiers]
     n_cols = len(tiers)
-    # Short names: text before first '(' or full name
-    short = [n.split("(")[0].rstrip() if "(" in n else n for n in names]
+    short = [_short_tier_label(n) for n in names]
     cw = max(7, max(len(s) for s in short))
 
     line_w = 20 + (cw + 3) * n_cols + 7 * max(0, n_cols - 1)
