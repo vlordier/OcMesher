@@ -246,7 +246,7 @@ class TestEvaluateSdfShapeValidation:
             return np.zeros((len(xyz), 1))
 
         positions = torch.tensor([[0.0, 0.0, 0.0]], dtype=torch.float64)
-        with pytest.raises(ValueError, match="expected"):
+        with pytest.raises(ValueError, match=r"kernels\[1\].*expected"):
             single_cam_mesher._evaluate_sdf([good_kernel, bad_kernel], positions)
 
     def test_correct_shape_passes(self, single_cam_mesher):
