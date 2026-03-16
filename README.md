@@ -3,6 +3,7 @@
 [![CI](https://github.com/princeton-vl/OcMesher/actions/workflows/ci.yml/badge.svg)](https://github.com/princeton-vl/OcMesher/actions/workflows/ci.yml)
 [![Lint](https://github.com/princeton-vl/OcMesher/actions/workflows/lint.yml/badge.svg)](https://github.com/princeton-vl/OcMesher/actions/workflows/lint.yml)
 [![Static Analysis](https://github.com/princeton-vl/OcMesher/actions/workflows/static-analysis.yml/badge.svg)](https://github.com/princeton-vl/OcMesher/actions/workflows/static-analysis.yml)
+[![Docs](https://github.com/princeton-vl/OcMesher/actions/workflows/docs.yml/badge.svg)](https://princeton-vl.github.io/OcMesher/)
 [![Python 3.10+](https://img.shields.io/badge/python-3.10%2B-blue)](https://www.python.org/downloads/)
 [![License: BSD-3-Clause](https://img.shields.io/badge/license-BSD--3--Clause-blue.svg)](LICENSE)
 

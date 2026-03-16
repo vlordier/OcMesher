@@ -1,0 +1,63 @@
+name: Docs
+
+on:
+  push:
+    branches: ["main", "develop"]
+    paths:
+      - "docs/**"
+      - "mkdocs.yml"
+      - "**.py"
+      - "README.md"
+      - "CHANGELOG.md"
+      - "CONTRIBUTING.md"
+      - ".github/workflows/docs.yml"
+  pull_request:
+    branches: ["main", "develop"]
+    paths:
+      - "docs/**"
+      - "mkdocs.yml"
+      - "**.py"
+      - "README.md"
+      - "CHANGELOG.md"
+      - "CONTRIBUTING.md"
+      - ".github/workflows/docs.yml"
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    name: build docs
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v5
+
+      - name: Install docs dependencies
+        run: uv sync --extra docs
+
+      - name: Build docs (strict)
+        run: uv run mkdocs build --strict
+
+  deploy:
+    name: deploy to GitHub Pages
+    if: github.ref == 'refs/heads/main' && github.event_name == 'push'
+    needs: build
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v5
+
+      - name: Install docs dependencies
+        run: uv sync --extra docs
+
+      - name: Deploy to GitHub Pages
+        run: uv run mkdocs gh-deploy --force
