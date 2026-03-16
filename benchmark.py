@@ -22,6 +22,8 @@ import time
 from pathlib import Path
 from typing import TypeAlias, TypedDict
 
+from benchmarks.upstream_parity import run_upstream_parity
+
 
 class DemoConfig(TypedDict):
     """Benchmark input profile for one demo configuration."""
@@ -432,6 +434,12 @@ def main() -> None:
     args = parser.parse_args()
 
     os.chdir(Path(__file__).parent)
+
+    if args.upstream_parity:
+        parity = run_upstream_parity(Path.cwd(), upstream_ref=args.upstream_parity, python_exe=PYTHON)
+        _write_stdout(json.dumps(parity, indent=2, sort_keys=True))
+        return
+
     _validate_runs(args.runs)
 
     configs = _select_configs(args.configs, DEMO_CONFIGS)
@@ -452,6 +460,13 @@ def _create_parser() -> argparse.ArgumentParser:
     parser.add_argument("--runs", type=int, default=3, help="Runs per configuration (default: 3)")
     parser.add_argument("--configs", default="all", choices=CONFIG_CHOICES)
     parser.add_argument("--json", help="Write results to JSON file")
+    parser.add_argument(
+        "--upstream-parity",
+        nargs="?",
+        const="main",
+        metavar="REF",
+        help="Compare numerical mesh signature against Git ref (default: main)",
+    )
     return parser
 
 
