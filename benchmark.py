@@ -281,19 +281,21 @@ def run_tier(
     _print_tier_banner(label)
     build_time = build(build_script)
     _write_stdout(f"  Build time: {build_time:.2f}s")
-    results = []
-    for cfg in configs:
-        times = []
-        verts = faces = 0
-        _write_stdout(f"\n  Config: {cfg['label']}")
-        for i in range(runs):
-            r = run_mesher_subprocess(cfg["pixels_per_cube"], cfg["coarse_count"], sdf_type)
-            times.append(r["elapsed_s"])
-            verts = r["n_verts"]
-            faces = r["n_faces"]
-            _write_stdout(f"    Run {i + 1}/{runs}: {r['elapsed_s']:.3f}s  ({verts} verts, {faces} faces)")
-        results.append(_summarize_tier_config(cfg["label"], times, verts, faces, runs))
-    return results
+    return [_run_config_benchmark(cfg, sdf_type, runs) for cfg in configs]
+
+
+def _run_config_benchmark(cfg: DemoConfig, sdf_type: str, runs: int) -> TierConfigResult:
+    """Benchmark one config for a tier and return aggregated metrics."""
+    times: list[float] = []
+    verts = faces = 0
+    _write_stdout(f"\n  Config: {cfg['label']}")
+    for i in range(runs):
+        r = run_mesher_subprocess(cfg["pixels_per_cube"], cfg["coarse_count"], sdf_type)
+        times.append(r["elapsed_s"])
+        verts = r["n_verts"]
+        faces = r["n_faces"]
+        _write_stdout(f"    Run {i + 1}/{runs}: {r['elapsed_s']:.3f}s  ({verts} verts, {faces} faces)")
+    return _summarize_tier_config(cfg["label"], times, verts, faces, runs)
 
 
 def _print_tier_banner(label: str) -> None:
