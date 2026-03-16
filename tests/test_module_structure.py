@@ -211,6 +211,11 @@ class TestTypesModule:
 
         assert hasattr(_types, "__all__")
 
+    def test_can_import_backend_capabilities(self):
+        from ocmesher.backend_contract import BackendCapabilities
+
+        assert BackendCapabilities is not None
+
 
 # ---------------------------------------------------------------------------
 # py.typed marker

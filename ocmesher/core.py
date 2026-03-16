@@ -532,7 +532,7 @@ class OcMesher:
         _empty = _np_empty  # module-level cache avoids LOAD_ATTR on np
 
         # octree only considering cameras, not sdf
-        with Timer("coarse step part1"):
+        with Timer("coarse step part1") as coarse_part1_timer:
             n_blocks = self.run_coarse(
                 _af(self.center),
                 self.size,
@@ -550,7 +550,7 @@ class OcMesher:
         _fine_group = self.fine_group
         _fine_iteration = self.fine_iteration
         _fine_iteration_output = self.fine_iteration_output
-        with Timer("coarse step part2"), tqdm(total=n_blocks) as pbar:
+        with Timer("coarse step part2") as coarse_part2_timer, tqdm(total=n_blocks) as pbar:
             # Growable buffers: allocated once, grown on demand, reused
             # across inner-loop iterations.  Eliminates per-iteration
             # np.empty + ctypes pointer construction overhead.
@@ -586,14 +586,14 @@ class OcMesher:
                     if not single_kernel:
                         _c_sdf[:n].min(axis=-1, out=_c_min[:n])
                     n = _fine_iteration(_c_sdf_ptr)
-        with Timer("filter visible blocks"):
+        with Timer("filter visible blocks") as visibility_timer:
             n_vis_block = self.vis_filter(self.simplify_occluded, self.visible_relax_iter)
         logger.info("visible blocks: %d", n_vis_block)
 
         _final_iteration = self.final_iteration
         _final_iteration2 = self.final_iteration2
         _final_iteration3 = self.final_iteration3
-        with Timer("fine step"), tqdm(total=n_vis_block) as pbar:
+        with Timer("fine step") as fine_timer, tqdm(total=n_vis_block) as pbar:
             # np.empty: C function writes nv before any Python read.
             nv = _empty(1, dtype=np.int32)
             nv_ptr = AsInt(nv)
@@ -637,7 +637,7 @@ class OcMesher:
             # np.empty: final_remaining fills every element before use.
             nv = _empty(n_elements, dtype=np.int32)
             self.final_remaining(AsInt(nv))
-        with Timer("construct mesh"):
+        with Timer("construct mesh") as mesh_timer:
             meshes = [None] * n_elements
             in_view_tags = [None] * n_elements
             _construct = self._construct_element_mesh
@@ -652,6 +652,15 @@ class OcMesher:
                     mesh.vertices.shape[0],
                     mesh.faces.shape[0],
                 )
+        Timer.log_phase_summary(
+            "ocmesher pipeline",
+            {
+                "coarse": coarse_part1_timer.duration + coarse_part2_timer.duration,
+                "visibility": visibility_timer.duration,
+                "fine": fine_timer.duration,
+                "mesh": mesh_timer.duration,
+            },
+        )
         return meshes, in_view_tags
 
     def _construct_element_mesh(self, e, k_e, num_verts):

@@ -177,6 +177,7 @@ class TestCreateParser:
         assert args.runs == 3
         assert args.configs == "all"
         assert args.json is None
+        assert args.snapshot_json is None
         assert args.upstream_parity is None
         assert args.upstream_parity_strict is False
         assert args.parity_pixels_per_cube == 32
@@ -251,6 +252,25 @@ class TestTierResultsToDict:
         ]
         mapped = benchmark._tier_results_to_dict(results)
         assert list(mapped.keys()) == ["Baseline", "Opt"]
+
+
+class TestRuntimeDependencyAvailability:
+    def test_builtin_vnoise_tier_requires_no_optional_runtime(self):
+        assert benchmark._runtime_dependency_available("vnoise") is True
+
+    def test_collect_tier_results_skips_empty_tiers(self, monkeypatch):
+        monkeypatch.setattr(benchmark, "TIERS_SPEC", [("A", "build-a", "vnoise"), ("B", "build-b", "numba")])
+
+        def _fake_run_tier(label, _build_script, _sdf_type, _configs, _runs):
+            if label == "A":
+                return [{"config": label, "times": [1.0], "mean": 1.0, "median": 1.0, "stdev": 0.0, "min": 1.0, "max": 1.0, "n_verts": 1, "n_faces": 2}]
+            return []
+
+        monkeypatch.setattr(benchmark, "run_tier", _fake_run_tier)
+
+        results = benchmark._collect_tier_results([], 1)
+
+        assert [label for label, _ in results] == ["A"]
 
 
 class TestPrintTierBanner:

@@ -70,6 +70,13 @@ class TestContextManager:
     def test_exit_returns_false(self, single_cam_mesher):
         assert single_cam_mesher.__exit__(None, None, None) is False
 
+    def test_exit_shuts_down_sdf_pool(self, sample_cameras, sample_bounds):
+        mesher = TorchOcMesher(sample_cameras, sample_bounds, device="cpu", n_sdf_workers=2)
+        pool = mesher._get_sdf_pool()
+        assert pool is mesher._sdf_pool
+        assert mesher.__exit__(None, None, None) is False
+        assert mesher._sdf_pool is None
+
 
 class TestConstructorValidation:
     def test_invalid_cameras_raises(self, sample_bounds):
@@ -92,6 +99,46 @@ class TestConstructorValidation:
     def test_invalid_visible_relax_iter_raises(self, sample_cameras, sample_bounds):
         with pytest.raises(ValueError, match="visible_relax_iter must be >= 0"):
             TorchOcMesher(sample_cameras, sample_bounds, device="cpu", visible_relax_iter=-1)
+
+
+class TestBackendContract:
+    def test_backend_version_is_string(self, single_cam_mesher):
+        assert isinstance(single_cam_mesher.version, str)
+        assert single_cam_mesher.version == TorchOcMesher.BACKEND_VERSION
+
+    def test_get_capabilities_reports_device_policy(self, single_cam_mesher):
+        capabilities = single_cam_mesher.get_capabilities()
+        assert capabilities.preferred_dtype == "float64"
+        assert capabilities.max_batch == torch_core.TORCH_SDF_CHUNK_SIZE
+        assert capabilities.supports_dlpack is True
+        assert capabilities.version == TorchOcMesher.BACKEND_VERSION
+
+    def test_as_backend_tensor_accepts_numpy(self, single_cam_mesher):
+        pts = np.zeros((4, 3), dtype=np.float32)
+        tensor = single_cam_mesher.as_backend_tensor(pts)
+        assert tensor.shape == (4, 3)
+        assert tensor.dtype == single_cam_mesher._fdtype
+        assert tensor.device == single_cam_mesher.device
+
+    def test_to_backend_dlpack_roundtrips_tensor(self, single_cam_mesher):
+        pts = torch.zeros((2, 3), dtype=single_cam_mesher._fdtype, device=single_cam_mesher.device)
+        capsule = single_cam_mesher.to_backend_dlpack(pts)
+        roundtrip = torch.utils.dlpack.from_dlpack(capsule)
+        torch.testing.assert_close(roundtrip, pts)
+
+    def test_evaluate_sdf_batch_matches_private_path(self, single_cam_mesher, sphere_kernel):
+        pts = torch.tensor([[0.0, 0.0, 0.0], [1.0, 0.0, 0.0]], dtype=single_cam_mesher._fdtype, device=single_cam_mesher.device)
+        result = single_cam_mesher.evaluate_sdf_batch([sphere_kernel], pts)
+        expected = single_cam_mesher._evaluate_sdf([sphere_kernel], pts)
+        torch.testing.assert_close(result, expected)
+
+    def test_stream_rejected_on_cpu(self, single_cam_mesher, sphere_kernel):
+        pts = torch.zeros((1, 3), dtype=single_cam_mesher._fdtype, device=single_cam_mesher.device)
+        with pytest.raises(ValueError, match="stream is only supported"):
+            single_cam_mesher.evaluate_sdf_batch([sphere_kernel], pts, stream=object())
+
+    def test_mps_prefers_smaller_batches(self):
+        assert TorchOcMesher._recommended_max_batch("mps") < torch_core.TORCH_SDF_CHUNK_SIZE
 
 
 # ---------------------------------------------------------------------------
@@ -612,6 +659,23 @@ class TestEvaluateSDFSingleChunk:
 
 
 class TestEvaluateSDFChunkedPrealloc:
+    def test_pinned_host_buffer_reuses_capacity(self, sample_cameras, monkeypatch):
+        mesher = TorchOcMesher(sample_cameras, [-5, 5, -5, 5, -5, 5], device="cpu")
+        allocations = []
+        real_empty = torch.empty
+
+        def _fake_empty(shape, *, dtype, device=None, pin_memory=False):
+            allocations.append((tuple(shape), dtype, device, pin_memory))
+            return real_empty(shape, dtype=dtype)
+
+        monkeypatch.setattr(torch_core, "_torch_empty", _fake_empty)
+
+        first = mesher._get_pinned_host_buffer("_sdf_results_pinned", (8, 2), torch.float32)
+        second = mesher._get_pinned_host_buffer("_sdf_results_pinned", (4, 1), torch.float32)
+
+        assert first.data_ptr() == second.data_ptr()
+        assert allocations == [((8, 2), torch.float32, "cpu", True)]
+
     def test_multiple_kernels_multi_chunk_matches_expected(self, sample_cameras, sphere_kernel, plane_kernel, monkeypatch):
         monkeypatch.setattr(torch_core, "TORCH_SDF_CHUNK_SIZE", 2)
         mesher = TorchOcMesher(sample_cameras, [-5, 5, -5, 5, -5, 5], device="cpu", n_sdf_workers=1)
@@ -640,6 +704,40 @@ class TestEvaluateSDFChunkedPrealloc:
         result = mesher._evaluate_sdf([sphere_kernel], pts).cpu().numpy()[:, 0]
 
         np.testing.assert_allclose(result, np.linalg.norm(pts.cpu().numpy(), axis=1) - 1.0, atol=1e-5)
+
+    def test_threaded_multi_chunk_reuses_pool(self, sample_cameras, sphere_kernel, monkeypatch):
+        monkeypatch.setattr(torch_core, "TORCH_SDF_CHUNK_SIZE", 2)
+        mesher = TorchOcMesher(sample_cameras, [-5, 5, -5, 5, -5, 5], device="cpu", n_sdf_workers=2)
+        pts = torch.tensor(
+            [[0, 0, 0], [1, 0, 0], [2, 0, 0], [3, 0, 0], [4, 0, 0]],
+            dtype=mesher._fdtype,
+            device=mesher.device,
+        )
+
+        mesher._evaluate_sdf([sphere_kernel], pts)
+        first_pool = mesher._sdf_pool
+        mesher._evaluate_sdf([sphere_kernel], pts)
+
+        assert first_pool is not None
+        assert mesher._sdf_pool is first_pool
+
+    def test_pinned_host_buffer_grows_when_shape_increases(self, sample_cameras, monkeypatch):
+        mesher = TorchOcMesher(sample_cameras, [-5, 5, -5, 5, -5, 5], device="cpu")
+        allocations = []
+        real_empty = torch.empty
+
+        def _fake_empty(shape, *, dtype, device=None, pin_memory=False):
+            _ = (device, pin_memory)
+            allocations.append(tuple(shape))
+            return real_empty(shape, dtype=dtype)
+
+        monkeypatch.setattr(torch_core, "_torch_empty", _fake_empty)
+
+        first = mesher._get_pinned_host_buffer("_sdf_results_pinned", (2, 1), torch.float32)
+        second = mesher._get_pinned_host_buffer("_sdf_results_pinned", (6, 3), torch.float32)
+
+        assert first.data_ptr() != second.data_ptr()
+        assert allocations == [(2, 1), (6, 3)]
 
 
 # ---------------------------------------------------------------------------

@@ -1,0 +1,117 @@
+{
+  "metadata": {
+    "command": "/Users/vincent/Work/OcMesher/benchmarks/bench_python_overhead.py --sizes 100 1000 --repeats 2 --snapshot-json benchmark_artifacts/bench_python_overhead_snapshot.json",
+    "git_branch": "develop",
+    "git_commit": "ae1f751cb3ada6c3498e4057ac265e9a40981912",
+    "label": "bench-python-overhead",
+    "platform": "macOS-26.3.1-arm64-arm-64bit",
+    "python": "3.11.13",
+    "timestamp_utc": "2026-03-16T18:57:55.559470+00:00"
+  },
+  "results": {
+    "bounds_mask_into": {
+      "100": {
+        "max_us": 4.125,
+        "mean_us": 3.8125,
+        "median_us": 3.75,
+        "min_us": 3.666,
+        "stdev_us": 0.147345587725667
+      },
+      "1000": {
+        "max_us": 4.25,
+        "mean_us": 4.125,
+        "median_us": 4.125,
+        "min_us": 4.0,
+        "stdev_us": 0.0679738511814981
+      }
+    },
+    "bounds_mask_static": {
+      "100": {
+        "max_us": 6.209,
+        "mean_us": 3.8123,
+        "median_us": 3.916,
+        "min_us": 2.75,
+        "stdev_us": 0.9918360135515234
+      },
+      "1000": {
+        "max_us": 4.291,
+        "mean_us": 4.2,
+        "median_us": 4.208,
+        "min_us": 4.125,
+        "stdev_us": 0.04707676945396991
+      }
+    },
+    "growable_buffer_pattern": {
+      "100": {
+        "alloc_each_mean_us": 3.6250999999999998,
+        "growable_mean_us": 2.1875999999999998,
+        "speedup": 1.6571128176997623
+      },
+      "1000": {
+        "alloc_each_mean_us": 7.9208,
+        "growable_mean_us": 6.6791,
+        "speedup": 1.1859082810558308
+      }
+    },
+    "kernel_caller_multi_3k": {
+      "100": {
+        "max_us": 70.125,
+        "mean_us": 44.7582,
+        "median_us": 39.458,
+        "min_us": 35.875,
+        "stdev_us": 10.651416158322695
+      },
+      "1000": {
+        "max_us": 228.458,
+        "mean_us": 119.675,
+        "median_us": 112.5,
+        "min_us": 79.416,
+        "stdev_us": 41.81196591886108
+      }
+    },
+    "kernel_caller_out_reuse": {
+      "100": {
+        "max_us": 6.792,
+        "mean_us": 6.1125,
+        "median_us": 6.271,
+        "min_us": 5.334,
+        "stdev_us": 0.5576082356318318
+      },
+      "1000": {
+        "max_us": 13.417,
+        "mean_us": 12.2917,
+        "median_us": 12.1665,
+        "min_us": 11.958,
+        "stdev_us": 0.43364682250267506
+      }
+    },
+    "kernel_caller_single": {
+      "100": {
+        "max_us": 13.5,
+        "mean_us": 7.4001,
+        "median_us": 6.792,
+        "min_us": 5.708,
+        "stdev_us": 2.2598598997873003
+      },
+      "1000": {
+        "max_us": 12.958,
+        "mean_us": 12.3125,
+        "median_us": 12.229,
+        "min_us": 12.042,
+        "stdev_us": 0.27712863038267593
+      }
+    },
+    "slice_fill_vs_concatenate": {
+      "100": {
+        "concat_mean_us": 0.6416,
+        "slice_fill_mean_us": 0.6043,
+        "speedup": 1.0617243091179878
+      },
+      "1000": {
+        "concat_mean_us": 1.2167,
+        "slice_fill_mean_us": 1.179,
+        "speedup": 1.0319762510602204
+      }
+    }
+  }
+}

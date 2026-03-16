@@ -1,0 +1,43 @@
+{
+  "metadata": {
+    "command": "benchmark.py --configs small --runs 1 --snapshot-json benchmark_artifacts/benchmark_tiers_snapshot.json",
+    "git_branch": "develop",
+    "git_commit": "ae1f751cb3ada6c3498e4057ac265e9a40981912",
+    "label": "benchmark-tiers",
+    "platform": "macOS-26.3.1-arm64-arm-64bit",
+    "python": "3.11.13",
+    "timestamp_utc": "2026-03-16T18:59:05.804577+00:00"
+  },
+  "results": {
+    "Baseline(-O3+vnoise)": [
+      {
+        "config": "small (ppc=32)",
+        "max": 0.10612166699866066,
+        "mean": 0.10612166699866066,
+        "median": 0.10612166699866066,
+        "min": 0.10612166699866066,
+        "n_faces": 2505,
+        "n_verts": 1248,
+        "stdev": 0.0,
+        "times": [
+          0.10612166699866066
+        ]
+      }
+    ],
+    "Opt-C++(M4+unordered)": [
+      {
+        "config": "small (ppc=32)",
+        "max": 0.10508266700344393,
+        "mean": 0.10508266700344393,
+        "median": 0.10508266700344393,
+        "min": 0.10508266700344393,
+        "n_faces": 2512,
+        "n_verts": 1251,
+        "stdev": 0.0,
+        "times": [
+          0.10508266700344393
+        ]
+      }
+    ]
+  }
+}

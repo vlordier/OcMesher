@@ -38,6 +38,8 @@ from typing import TYPE_CHECKING
 
 import numpy as np
 
+from benchmarks.result_utils import load_results_payload, write_snapshot_json
+
 # ---------------------------------------------------------------------------
 # Adaptive import: works on develop/main (no __slots__, no _SDF_BATCH_SIZE
 # export, no _np_empty export) and on the optimized branch.
@@ -495,10 +497,8 @@ def regression_check() -> list[str]:
 # ---------------------------------------------------------------------------
 def compare_results(file_a: str, file_b: str) -> None:
     """Print side-by-side comparison of two JSON result files."""
-    with Path(file_a).open() as f:
-        a = json.load(f)
-    with Path(file_b).open() as f:
-        b = json.load(f)
+    a, _meta_a = load_results_payload(file_a)
+    b, _meta_b = load_results_payload(file_b)
 
     header = f"{'Benchmark':<40s}  {'Size':>8s}  {'A (µs)':>10s}  {'B (µs)':>10s}  {'Speedup':>8s}"
     print("=" * len(header))
@@ -576,6 +576,7 @@ def main() -> None:
     )
     parser.add_argument("--repeats", type=int, default=10, help="Timing repeats per measurement")
     parser.add_argument("--json", type=str, default=None, help="Save results to JSON file")
+    parser.add_argument("--snapshot-json", type=str, default=None, help="Save results and metadata to JSON file")
     parser.add_argument("--compare", nargs=2, metavar=("A.json", "B.json"), help="Compare two JSON result files")
     parser.add_argument("--regression", action="store_true", help="Run regression checks only")
     args = parser.parse_args()
@@ -638,6 +639,10 @@ def main() -> None:
         with Path(args.json).open("w") as f:
             json.dump(all_results, f, indent=2)
         print(f"Results saved to {args.json}")
+    if args.snapshot_json:
+        write_snapshot_json(args.snapshot_json, all_results, label="bench-e2e")
+        print(f"Snapshot saved to {args.snapshot_json}")
+
 
     # -- Summary ---------------------------------------------------------
     print("=" * 70)

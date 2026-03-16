@@ -3,7 +3,7 @@
 
 # Authors: Zeyu Ma
 
-"""Simple wall-clock timer with memory reporting."""
+"""Simple wall-clock timer with memory reporting and phase summaries."""
 
 import logging
 import os
@@ -70,3 +70,12 @@ class Timer:
                 logger.info("%s finished in %s", self.name, self.duration)
         else:
             logger.warning("%s failed with %s: %s", self.name, exc_type.__name__, _exc_val)
+
+    @staticmethod
+    def log_phase_summary(label: str, phases: dict[str, timedelta], *, disable_timer: bool = False) -> None:
+        """Log a compact ordered summary of named phase durations."""
+        if disable_timer:
+            return
+        total = sum(phases.values(), start=timedelta())
+        phase_parts = ", ".join(f"{name}={duration}" for name, duration in phases.items())
+        logger.info("[%s] phase summary: %s, total=%s", label, phase_parts, total)

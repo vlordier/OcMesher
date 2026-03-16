@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import os
 import sys
 from pathlib import Path
 from unittest.mock import MagicMock
@@ -13,24 +14,21 @@ REPO_ROOT = Path(__file__).resolve().parents[1]
 if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
 
-
-def _available_torch_devices() -> list[str]:
-    """Return torch device strings available on this platform."""
-    try:
-        import torch
-    except ImportError:
-        return []
-    devices = ["cpu"]
-    if torch.cuda.is_available():
-        devices.append("cuda")
-    if hasattr(torch.backends, "mps") and torch.backends.mps.is_available():
-        devices.append("mps")
-    return devices
-
-
-@pytest.fixture(params=_available_torch_devices(), scope="session")
+# Local Torch installs on macOS can load a second OpenMP runtime during the
+# mixed native/Torch test session. Allowing duplicate libomp is limited to the
+# test harness so the full suite remains runnable.
+if sys.platform == "darwin":
+    os.environ.setdefault("KMP_DUPLICATE_LIB_OK", "TRUE")
+@pytest.fixture(params=["cpu", "cuda", "mps"], scope="session")
 def torch_device(request):
     """Parametrised fixture yielding each available torch device string."""
+    torch = pytest.importorskip("torch", reason="torch not installed")
+
+    if request.param == "cuda" and not torch.cuda.is_available():
+        pytest.skip("CUDA not available")
+    if request.param == "mps" and not (hasattr(torch.backends, "mps") and torch.backends.mps.is_available()):
+        pytest.skip("MPS not available")
+
     return request.param
 
 
@@ -40,10 +38,17 @@ def torch_mesher_factory(sample_bounds):
 
     from ocmesher.torch_core import TorchOcMesher
 
-    def factory(cameras, *, bounds=None, device="cpu", **kwargs):
-        return TorchOcMesher(cameras, sample_bounds if bounds is None else bounds, device=device, **kwargs)
+    created_meshers = []
 
-    return factory
+    def factory(cameras, *, bounds=None, device="cpu", **kwargs):
+        mesher = TorchOcMesher(cameras, sample_bounds if bounds is None else bounds, device=device, **kwargs)
+        created_meshers.append(mesher)
+        return mesher
+
+    yield factory
+
+    for mesher in reversed(created_meshers):
+        mesher.close()
 
 
 @pytest.fixture

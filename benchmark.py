@@ -21,7 +21,9 @@ import sys
 import textwrap
 import time
 from pathlib import Path
-from typing import TypeAlias, TypedDict
+from typing import TextIO, TypeAlias, TypedDict
+
+from benchmarks.result_utils import write_snapshot_json
 
 try:
     from benchmarks.upstream_parity import run_upstream_parity
@@ -292,6 +294,10 @@ def run_tier(
     runs: int,
 ) -> list[TierConfigResult]:
     """Benchmark one tier across all selected configs and aggregate run stats."""
+    if not _runtime_dependency_available(sdf_type):
+        _print_tier_banner(label)
+        _write_stdout(f"  Skipping tier: optional runtime for '{sdf_type}' is not available")
+        return []
     _print_tier_banner(label)
     build_time = build(build_script)
     _write_stdout(f"  Build time: {build_time:.2f}s")
@@ -491,8 +497,11 @@ def main() -> None:
         if args.json:
             _write_json_object(args.json, parity)
             _write_stdout(f"Results written to {args.json}")
+        if args.snapshot_json:
+            write_snapshot_json(args.snapshot_json, parity, label="benchmark-parity")
+            _write_stdout(f"Snapshot written to {args.snapshot_json}")
         _write_stdout(json.dumps(parity, indent=2, sort_keys=True))
-        if args.upstream_parity_strict and not bool(parity["delta"]["matches"]):
+        if args.upstream_parity_strict and not bool(parity["delta"].get("matches")):
             _write_stderr("Upstream parity mismatch under --upstream-parity-strict")
             raise SystemExit(1)
         return
@@ -509,6 +518,9 @@ def main() -> None:
     if args.json:
         _write_results_json(args.json, all_results)
         _write_stdout(f"Results written to {args.json}")
+    if args.snapshot_json:
+        write_snapshot_json(args.snapshot_json, _tier_results_to_dict(all_results), label="benchmark-tiers")
+        _write_stdout(f"Snapshot written to {args.snapshot_json}")
 
 
 def _create_parser() -> argparse.ArgumentParser:
@@ -517,6 +529,7 @@ def _create_parser() -> argparse.ArgumentParser:
     parser.add_argument("--runs", type=int, default=3, help="Runs per configuration (default: 3)")
     parser.add_argument("--configs", default="all", choices=CONFIG_CHOICES)
     parser.add_argument("--json", help="Write results to JSON file")
+    parser.add_argument("--snapshot-json", help="Write results plus metadata to JSON file")
     parser.add_argument(
         "--upstream-parity",
         nargs="?",
@@ -552,10 +565,26 @@ def _create_parser() -> argparse.ArgumentParser:
 
 def _collect_tier_results(configs: list[DemoConfig], runs: int) -> list[tuple[str, list[TierConfigResult]]]:
     """Run all configured tiers and return their aggregated results."""
-    return [
-        (label, run_tier(label, build_script, sdf_type, configs, runs))
-        for label, build_script, sdf_type in TIERS_SPEC
-    ]
+    results = []
+    for label, build_script, sdf_type in TIERS_SPEC:
+        tier_results = run_tier(label, build_script, sdf_type, configs, runs)
+        if tier_results:
+            results.append((label, tier_results))
+    return results
+
+
+def _runtime_dependency_available(sdf_type: str) -> bool:
+    """Return whether the optional runtime for *sdf_type* is importable."""
+    module_name = {
+        "numba": "numba",
+        "mlx": "mlx.core",
+    }.get(sdf_type)
+    if module_name is None:
+        return True
+    try:
+        return importlib.util.find_spec(module_name) is not None
+    except ModuleNotFoundError:
+        return False
 
 
 def _write_stdout(message: str = "") -> None:
@@ -568,7 +597,7 @@ def _write_stderr(message: str) -> None:
     _write_stream(sys.stderr, message)
 
 
-def _write_stream(stream: object, message: str = "") -> None:
+def _write_stream(stream: TextIO, message: str = "") -> None:
     """Write one line to a text stream."""
     stream.write(f"{message}\n")
 

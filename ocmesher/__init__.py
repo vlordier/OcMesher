@@ -6,8 +6,6 @@
 import logging
 from importlib.metadata import PackageNotFoundError, version
 
-from .core import OcMesher
-
 # Best practice for library packages: add NullHandler so that log records are
 # discarded unless the application configures a handler.  This prevents
 # "No handlers could be found for logger 'ocmesher'" warnings.
@@ -22,7 +20,11 @@ except PackageNotFoundError:
 
 
 def __getattr__(name: str):
-    """Lazy-import TorchOcMesher so torch is only required when used."""
+    """Lazy-import backends so optional runtimes load only when needed."""
+    if name == "OcMesher":
+        from .core import OcMesher
+
+        return OcMesher
     if name == "TorchOcMesher":
         from .torch_core import TorchOcMesher
 

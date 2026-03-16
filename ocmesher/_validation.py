@@ -200,8 +200,8 @@ def coerce_kernel_sdf(raw_sdf: Any, n_points: int, label: str) -> NDArray[Any]:
 
 
 def preprocess_cameras(
-    cam_poses: list[NDArray[np.float64]],
-    Ks: list[NDArray[np.float64]],
+    cam_poses: Sequence[NDArray[np.float64]],
+    Ks: Sequence[NDArray[np.float64]],
     Hs: Sequence[int],
     Ws: Sequence[int],
 ) -> tuple[NDArray[np.float64], NDArray[np.float64], tuple[int, ...], tuple[int, ...]]:

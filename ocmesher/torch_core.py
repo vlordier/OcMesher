@@ -31,7 +31,8 @@ from __future__ import annotations
 
 import logging
 from concurrent.futures import ThreadPoolExecutor
-from typing import TYPE_CHECKING, ClassVar, Self
+from contextlib import nullcontext, suppress
+from typing import TYPE_CHECKING, ClassVar, Literal, Self
 
 import numpy as np
 import torch
@@ -54,6 +55,7 @@ from ._validation import preprocess_cameras as _preprocess_cameras
 from ._validation import validate_bounds as _validate_bounds
 from ._validation import validate_cameras as _validate_cameras
 from ._validation import validate_mesher_params as _validate_mesher_params
+from .backend_contract import BackendCapabilities
 from .utils.timer import Timer
 
 if TYPE_CHECKING:
@@ -75,6 +77,8 @@ _DENOM_EPS = DENOM_EPS
 _HAS_COMPILE = hasattr(torch, "compile")
 
 _CORNER_QUANT_SCALE = CORNER_QUANT_SCALE
+_POSITION_RANK = 2
+_XYZ_DIM = 3
 
 # Maximum number of SDF evaluation threads for parallel chunk processing.
 _MAX_SDF_WORKERS = MAX_SDF_WORKERS
@@ -108,6 +112,7 @@ class TorchOcMesher:
 
     # Pre-computed marching-cubes lookup tables (shared across all instances).
     # Lazily initialised on first use per device.
+    BACKEND_VERSION: ClassVar[str] = "1"
     _mc_cache: ClassVar[dict[torch.device, dict[str, torch.Tensor]]] = {}
 
     @staticmethod
@@ -147,6 +152,13 @@ class TorchOcMesher:
         if dev.type == "cuda":
             torch.backends.cudnn.benchmark = True
         return dev, fdtype
+
+    @staticmethod
+    def _recommended_max_batch(device_type: str) -> int:
+        """Return the preferred SDF batch size for the selected device."""
+        if device_type == "mps":
+            return min(TORCH_SDF_CHUNK_SIZE, 250_000)
+        return TORCH_SDF_CHUNK_SIZE
 
     @staticmethod
     def _dedup_vertices(verts_flat: torch.Tensor) -> tuple[np.ndarray, np.ndarray]:
@@ -216,7 +228,7 @@ class TorchOcMesher:
         self.n_cameras = len(cam_poses)
 
         # Use shared camera preprocessing helper — DRY with OcMesher.
-        inv_poses_3x4, intrinsics_np, cam_h, cam_w = _preprocess_cameras(cam_poses, Ks, Hs, Ws)
+        inv_poses_3x4, intrinsics_np, cam_h, cam_w = _preprocess_cameras(list(cam_poses), list(Ks), Hs, Ws)
         self.cam_heights: tuple[int, ...] = cam_h
         self.cam_widths: tuple[int, ...] = cam_w
         self.cam_inv_poses = torch.from_numpy(inv_poses_3x4).to(dtype=self._fdtype, device=self.device)  # (C, 3, 4)
@@ -247,6 +259,10 @@ class TorchOcMesher:
         self.visible_relax_iter = visible_relax_iter
         self.coarse_count = coarse_count
         self.n_sdf_workers = max(1, n_sdf_workers)
+        self._max_batch = self._recommended_max_batch(self.device.type)
+        self._sdf_pool: ThreadPoolExecutor | None = None
+        self._sdf_positions_pinned: torch.Tensor | None = None
+        self._sdf_results_pinned: torch.Tensor | None = None
 
         # Pre-compute per-camera pixel angular size (vectorised) --------------
         fx_all = self.cam_intrinsics[:, 0, 0]  # (C,) in _fdtype
@@ -332,26 +348,9 @@ class TorchOcMesher:
 
         # Optionally JIT-compile hot-path methods for repeated use ----------
         if use_compile and _HAS_COMPILE:
-            try:
-                self._projected_sizes = torch.compile(  # type: ignore[method-assign]
-                    self._projected_sizes,
-                    dynamic=True,
-                    fullgraph=False,
-                )
-                self._visibility_filter = torch.compile(  # type: ignore[method-assign]
-                    self._visibility_filter,
-                    dynamic=True,
-                    fullgraph=False,
-                )
-                self._marching_cubes = torch.compile(  # type: ignore[method-assign]
-                    self._marching_cubes,
-                    dynamic=True,
-                    fullgraph=False,
-                )
-            except Exception:  # noqa: BLE001
-                logger.warning(
-                    "torch.compile failed to initialise (backend unavailable); falling back to eager execution."
-                )
+            self._compile_with_fallback("_projected_sizes")
+            self._compile_with_fallback("_visibility_filter")
+            self._compile_with_fallback("_marching_cubes")
 
     def __repr__(self) -> str:
         """Return a concise developer-friendly description of the mesher."""
@@ -368,11 +367,153 @@ class TorchOcMesher:
         """Support ``with TorchOcMesher(...) as m:`` usage."""
         return self
 
-    def __exit__(self, exc_type: object, exc_val: object, exc_tb: object) -> bool:
+    def __exit__(self, exc_type: object, exc_val: object, exc_tb: object) -> Literal[False]:
         """Release CUDA caches on context-manager exit."""
-        if self.device.type == "cuda":
-            torch.cuda.empty_cache()
+        self.close()
         return False
+
+    def __del__(self) -> None:
+        """Best-effort cleanup for unclosed meshers during teardown."""
+        with suppress(Exception):
+            self.close()
+
+    def close(self) -> None:
+        """Release background workers and any device-side caches."""
+        pool = getattr(self, "_sdf_pool", None)
+        if pool is not None:
+            pool.shutdown(wait=True, cancel_futures=True)
+            self._sdf_pool = None
+
+        self._sdf_positions_pinned = None
+        self._sdf_results_pinned = None
+
+        device = getattr(self, "device", None)
+        if device is not None and device.type == "cuda":
+            torch.cuda.empty_cache()
+
+    @property
+    def version(self) -> str:
+        """Return the explicit accelerator backend contract version."""
+        return self.BACKEND_VERSION
+
+    def get_capabilities(self) -> BackendCapabilities:
+        """Return backend availability and preferred execution settings."""
+        return BackendCapabilities(
+            supports_cuda=torch.cuda.is_available(),
+            supports_mps=_mps_available(),
+            preferred_dtype=str(self._fdtype).removeprefix("torch."),
+            max_batch=self._max_batch,
+            supports_dlpack=True,
+            supports_async_streams=self.device.type == "cuda",
+            version=self.version,
+        )
+
+    def as_backend_tensor(self, positions: object) -> torch.Tensor:
+        """Coerce NumPy, torch, or DLPack-backed inputs to backend-native tensors."""
+        if torch.is_tensor(positions):
+            tensor = positions
+        elif isinstance(positions, np.ndarray):
+            tensor = torch.from_numpy(positions)
+        else:
+            try:
+                tensor = torch.utils.dlpack.from_dlpack(positions)
+            except Exception as exc:
+                msg = "positions must be a torch.Tensor, numpy.ndarray, or DLPack-compatible object"
+                raise TypeError(msg) from exc
+
+        if tensor.ndim != _POSITION_RANK or tensor.shape[1] != _XYZ_DIM:
+            msg = f"positions must have shape (N, 3), got {tuple(tensor.shape)}"
+            raise ValueError(msg)
+        return tensor.to(device=self.device, dtype=self._fdtype)
+
+    def to_backend_dlpack(self, positions: object) -> object:
+        """Export backend-native positions as a DLPack capsule for zero-copy exchange."""
+        return torch.utils.dlpack.to_dlpack(self.as_backend_tensor(positions))
+
+    @torch.no_grad()
+    def evaluate_sdf_batch(
+        self,
+        kernels: KernelSequence,
+        positions: object,
+        *,
+        out: torch.Tensor | None = None,
+        stream: torch.cuda.Stream | None = None,
+        synchronize: bool | None = None,
+    ) -> torch.Tensor:
+        """Evaluate one large SDF batch with backend-native tensors and optional CUDA stream control."""
+        if stream is not None and self.device.type != "cuda":
+            msg = "stream is only supported when device='cuda'"
+            raise ValueError(msg)
+
+        positions_t = self.as_backend_tensor(positions)
+        context = torch.cuda.stream(stream) if stream is not None else nullcontext()
+        with context:
+            result = self._evaluate_sdf(list(kernels), positions_t)
+            if out is not None:
+                out.copy_(result, non_blocking=self.device.type == "cuda")
+                result = out
+
+        if self.device.type == "cuda":
+            if synchronize is None:
+                synchronize = stream is None
+            if synchronize:
+                active_stream = stream or torch.cuda.current_stream(self.device)
+                active_stream.synchronize()
+        return result
+
+    def _compile_with_fallback(self, method_name: str) -> None:
+        """Wrap a compiled hot path and revert to eager execution on failure."""
+        eager_method = getattr(self, method_name)
+
+        try:
+            compiled_method = torch.compile(
+                eager_method,
+                dynamic=True,
+                fullgraph=False,
+            )
+        except Exception:  # noqa: BLE001
+            logger.warning(
+                "torch.compile failed to initialise %s; falling back to eager execution.",
+                method_name,
+            )
+            return
+
+        def _compiled_with_fallback(*args: object, **kwargs: object) -> object:
+            try:
+                return compiled_method(*args, **kwargs)
+            except Exception as exc:  # noqa: BLE001
+                logger.warning(
+                    "torch.compile failed at runtime for %s; falling back to eager execution.",
+                    method_name,
+                    exc_info=exc,
+                )
+                setattr(self, method_name, eager_method)
+                return eager_method(*args, **kwargs)
+
+        setattr(self, method_name, _compiled_with_fallback)
+
+    def _get_sdf_pool(self) -> ThreadPoolExecutor:
+        """Lazily construct and reuse the SDF worker pool."""
+        if self._sdf_pool is None:
+            self._sdf_pool = ThreadPoolExecutor(max_workers=self.n_sdf_workers)
+        return self._sdf_pool
+
+    def _get_pinned_host_buffer(
+        self,
+        attr_name: str,
+        shape: tuple[int, ...],
+        dtype: torch.dtype,
+    ) -> torch.Tensor:
+        """Return a reusable pinned CPU buffer with at least *shape* capacity."""
+        buf = getattr(self, attr_name)
+        needs_alloc = buf is None or buf.dtype != dtype or buf.dim() != len(shape)
+        if not needs_alloc:
+            needs_alloc = any(current < required for current, required in zip(buf.shape, shape, strict=False))
+        if needs_alloc:
+            buf = _torch_empty(shape, dtype=dtype, device="cpu", pin_memory=True)
+            setattr(self, attr_name, buf)
+        slices = tuple(slice(0, dim) for dim in shape)
+        return buf[slices]
 
     def _ensure_mc_cache(self) -> None:
         """Lazily build marching-cubes lookup tables on *self.device*."""
@@ -481,9 +622,9 @@ class TorchOcMesher:
     # Threaded SDF evaluation
     # ------------------------------------------------------------------
     @torch.no_grad()
-    def _evaluate_sdf(  # noqa: C901
+    def _evaluate_sdf(  # noqa: C901, PLR0912
         self,
-        kernels: list,
+        kernels: KernelSequence,
         positions: torch.Tensor,
     ) -> torch.Tensor:
         """Evaluate SDF *kernels* at *positions* with thread-parallel chunking.
@@ -508,8 +649,13 @@ class TorchOcMesher:
         if n == 0:
             return _torch_zeros((0, n_kernels), dtype=torch.float32, device=self.device)
 
-        xyz_np = positions.cpu().double().numpy()
-        step = TORCH_SDF_CHUNK_SIZE
+        if self.device.type == "cuda":
+            xyz_host = self._get_pinned_host_buffer("_sdf_positions_pinned", (n, 3), torch.float64)
+            xyz_host.copy_(positions, non_blocking=False)
+            xyz_np = xyz_host.numpy()
+        else:
+            xyz_np = positions.cpu().double().numpy()
+        step = self._max_batch
         enclosed = self.enclosed
         _use_pinned = self.device.type == "cuda"
         # Vectorised bounds: pre-computed min/max arrays for broadcast compare.
@@ -540,22 +686,26 @@ class TorchOcMesher:
                     out_chunk[:, k_idx] = sdf
 
         # Single-chunk fast path: skip list/pool/concat overhead.
-        result_np = np.empty((n, n_kernels), dtype=np.float32)
+        if _use_pinned:
+            result_host = self._get_pinned_host_buffer("_sdf_results_pinned", (n, n_kernels), torch.float32)
+            result_np = result_host.numpy()
+        else:
+            result_np = np.empty((n, n_kernels), dtype=np.float32)
         if n <= step:
             _fill_chunk(xyz_np, result_np)
         elif self.n_sdf_workers > 1:
             chunk_ranges = [(i, min(i + step, n)) for i in range(0, n, step)]
-            with ThreadPoolExecutor(max_workers=min(self.n_sdf_workers, len(chunk_ranges))) as pool:
-                futures = [
-                    pool.submit(
-                        _fill_chunk,
-                        xyz_np[start:end],
-                        result_np[start:end],
-                    )
-                    for start, end in chunk_ranges
-                ]
-                for future in futures:
-                    future.result()
+            pool = self._get_sdf_pool()
+            futures = [
+                pool.submit(
+                    _fill_chunk,
+                    xyz_np[start:end],
+                    result_np[start:end],
+                )
+                for start, end in chunk_ranges
+            ]
+            for future in futures:
+                future.result()
         else:
             for start in range(0, n, step):
                 end = min(start + step, n)
@@ -563,8 +713,7 @@ class TorchOcMesher:
 
         # Use pinned memory for CUDA transfers to overlap copy with compute
         if _use_pinned:
-            result_t = torch.from_numpy(result_np).pin_memory()
-            return result_t.to(self.device, non_blocking=True)
+            return result_host.to(self.device, non_blocking=True)
         return torch.from_numpy(result_np).to(self.device)
 
     # ------------------------------------------------------------------
@@ -637,7 +786,7 @@ class TorchOcMesher:
     @torch.no_grad()
     def _find_surface_cubes(
         self,
-        kernels: list,
+        kernels: KernelSequence,
         coords: torch.Tensor,
         levels: torch.Tensor,
     ) -> tuple[torch.Tensor, torch.Tensor]:
@@ -689,7 +838,7 @@ class TorchOcMesher:
         unique_pts = flat[rep_idx]
 
         # Evaluate SDF only at unique positions, then scatter back.
-        unique_sdf = self._evaluate_sdf(kernels, unique_pts)  # (U, K)
+        unique_sdf = self.evaluate_sdf_batch(kernels, unique_pts, synchronize=False)  # (U, K)
         sdf = unique_sdf[inverse]  # (N*8, K)
 
         sdf = sdf.reshape(n, 8, -1)
@@ -704,7 +853,7 @@ class TorchOcMesher:
     @torch.no_grad()
     def _refine_surface_octree(
         self,
-        kernels: list,
+        kernels: KernelSequence,
         coords: torch.Tensor,
         levels: torch.Tensor,
         corner_sdf: torch.Tensor | None = None,
@@ -949,33 +1098,37 @@ class TorchOcMesher:
     # ------------------------------------------------------------------
     def __call__(self, kernels: KernelSequence) -> MeshResult:
         """Run the full coarse-to-fine meshing pipeline and return meshes."""
-        n_elements = len(kernels)
+        kernels_list = list(kernels)
+        n_elements = len(kernels_list)
 
         # 1. Build coarse octree -------------------------------------------
-        with Timer("torch coarse octree"):
+        with Timer("torch coarse octree") as coarse_timer:
             coords, levels = self._build_coarse_octree()
             logger.info("coarse cubes: %d", len(coords))
 
         # 2. Detect surface cubes ------------------------------------------
-        with Timer("torch find surface"):
-            surface_mask, corner_sdf = self._find_surface_cubes(kernels, coords, levels)
+        with Timer("torch find surface") as find_surface_timer:
+            surface_mask, corner_sdf = self._find_surface_cubes(kernels_list, coords, levels)
             s_coords = coords[surface_mask]
             s_levels = levels[surface_mask]
-            s_corner_sdf = corner_sdf[surface_mask]
+            s_corner_sdf: torch.Tensor | None = corner_sdf[surface_mask]
             logger.info("surface cubes: %d", len(s_coords))
 
         # 3. Refine surface cubes ------------------------------------------
-        with Timer("torch refine surface"):
-            s_coords, s_levels, s_corner_sdf = self._refine_surface_octree(
-                kernels,
+        with Timer("torch refine surface") as refine_surface_timer:
+            refined_coords, refined_levels, refined_corner_sdf = self._refine_surface_octree(
+                kernels_list,
                 s_coords,
                 s_levels,
                 corner_sdf=s_corner_sdf,
             )
+            s_coords = refined_coords
+            s_levels = refined_levels
+            s_corner_sdf = refined_corner_sdf
             logger.info("refined surface cubes: %d", len(s_coords))
 
         # 4. Visibility filter ---------------------------------------------
-        with Timer("torch visibility filter"):
+        with Timer("torch visibility filter") as visibility_timer:
             positions = self._cube_centers(s_coords, s_levels)
             vis_mask = self._visibility_filter(positions)
             vis_coords = s_coords[vis_mask]
@@ -985,7 +1138,7 @@ class TorchOcMesher:
             logger.info("visible: %d, occluded: %d", len(vis_coords), len(occ_coords))
 
         # 5. Per-element mesh construction ---------------------------------
-        with Timer("torch construct mesh"):
+        with Timer("torch construct mesh") as mesh_timer:
             meshes: list[trimesh.Trimesh] = []
             in_view_tags: list[np.ndarray] = []
             all_coords = torch.cat([vis_coords, occ_coords])
@@ -999,7 +1152,7 @@ class TorchOcMesher:
 
             for e in range(n_elements):
                 mesh, ivt = self._construct_element_mesh(
-                    kernels[e : e + 1],
+                    kernels_list[e : e + 1],
                     all_coords,
                     all_levels,
                     n_visible,
@@ -1015,12 +1168,22 @@ class TorchOcMesher:
                     mesh.faces.shape[0],
                 )
 
+        Timer.log_phase_summary(
+            "torch pipeline",
+            {
+                "coarse": coarse_timer.duration,
+                "fine": find_surface_timer.duration + refine_surface_timer.duration,
+                "visibility": visibility_timer.duration,
+                "mesh": mesh_timer.duration,
+            },
+        )
+
         return meshes, in_view_tags
 
     @torch.no_grad()
     def _construct_element_mesh(  # noqa: PLR0913
         self,
-        kernels: list,
+        kernels: KernelSequence,
         coords: torch.Tensor,
         levels: torch.Tensor,
         n_visible: int,

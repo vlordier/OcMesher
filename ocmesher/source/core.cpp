@@ -318,13 +318,14 @@ int vis_filter( // NOLINT(readability-identifier-naming, modernize-use-trailing-
     T factor = 10;
     std::vector<T> canvas;
     int cubes_n = static_cast<int>(cubes.size());
+    std::vector<T> depth(static_cast<std::size_t>(cubes_n));
+    std::vector<int> proj_x(static_cast<std::size_t>(cubes_n));
+    std::vector<int> proj_y(static_cast<std::size_t>(cubes_n));
     for (int k = 0; k < n_cams; k++) { // NOLINT(readability-identifier-length)
         T* current_cam = cams + static_cast<ptrdiff_t>(k) * (12 + 9 + 2);
         int height = static_cast<int>(current_cam[21] / factor),
             width = static_cast<int>(current_cam[22] / factor);
-        std::vector<T> depth(static_cast<std::size_t>(cubes_n));
-        std::vector<int> proj_x(static_cast<std::size_t>(cubes_n));
-        std::vector<int> proj_y(static_cast<std::size_t>(cubes_n));
+        std::size_t height_sz = static_cast<std::size_t>(height);
 #pragma omp parallel for
         for (int i = 0; i < cubes_n; i++) { // NOLINT(modernize-loop-convert)
             T image_coords[3];
@@ -338,6 +339,7 @@ int vis_filter( // NOLINT(readability-identifier-naming, modernize-use-trailing-
             // then reduce with a single sequential min-pass.
             int nth = omp_get_max_threads();
             int hw = height * width;
+            std::size_t hw_sz = static_cast<std::size_t>(hw);
             std::vector<T> tcanvas(static_cast<std::size_t>(nth) * static_cast<std::size_t>(hw),
                                    std::numeric_limits<T>::infinity());
 #pragma omp parallel for
@@ -347,23 +349,20 @@ int vis_filter( // NOLINT(readability-identifier-naming, modernize-use-trailing-
                     int x = proj_x[static_cast<std::size_t>(i)];
                     int y = proj_y[static_cast<std::size_t>(i)];
                     if (x >= 0 && y >= 0 && x < width && y < height) {
-                        T& cell = tcanvas[static_cast<std::size_t>(omp_get_thread_num()) *
-                                              static_cast<std::size_t>(hw) +
-                                          static_cast<std::size_t>(x) *
-                                              static_cast<std::size_t>(height) +
-                                          static_cast<std::size_t>(y)];
+                        std::size_t cell_idx = static_cast<std::size_t>(x) * height_sz +
+                                               static_cast<std::size_t>(y);
+                        T& cell = tcanvas[static_cast<std::size_t>(omp_get_thread_num()) * hw_sz + cell_idx];
                         if (z < cell)
                             cell = z;
                     }
                 }
             }
-            canvas = std::vector<T>(static_cast<std::size_t>(hw), std::numeric_limits<T>::infinity());
+            canvas = std::vector<T>(hw_sz, std::numeric_limits<T>::infinity());
             for (int t = 0; t < nth; t++)
                 for (int j = 0; j < hw; j++)
-                    if (tcanvas[static_cast<std::size_t>(t) * static_cast<std::size_t>(hw) + j] <
+                    if (tcanvas[static_cast<std::size_t>(t) * hw_sz + static_cast<std::size_t>(j)] <
                         canvas[j])
-                        canvas[j] =
-                            tcanvas[static_cast<std::size_t>(t) * static_cast<std::size_t>(hw) + j];
+                        canvas[j] = tcanvas[static_cast<std::size_t>(t) * hw_sz + static_cast<std::size_t>(j)];
         }
 #pragma omp parallel for
         for (int i = 0; i < cubes_n; i++) { // NOLINT(modernize-loop-convert)
@@ -378,10 +377,9 @@ int vis_filter( // NOLINT(readability-identifier-naming, modernize-use-trailing-
                             for (int dy = -relax_iters; dy <= relax_iters; dy++) {
                                 int nx = x + dx, ny = y + dy;
                                 if (nx >= 0 && ny >= 0 && nx < width && ny < height) {
-                                    if (z <=
-                                        canvas[static_cast<std::size_t>(nx) *
-                                                   static_cast<std::size_t>(height) +
-                                               static_cast<std::size_t>(ny)]) {
+                                    std::size_t cell_idx = static_cast<std::size_t>(nx) * height_sz +
+                                                           static_cast<std::size_t>(ny);
+                                    if (z <= canvas[cell_idx]) {
                                         visible[i] = true;
                                     }
                                 }

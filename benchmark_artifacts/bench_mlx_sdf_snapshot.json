@@ -1,0 +1,29 @@
+{
+  "metadata": {
+    "command": "/Users/vincent/Work/OcMesher/benchmarks/bench_mlx_sdf.py --sizes 1000 10000 --repeats 2 --snapshot-json benchmark_artifacts/bench_mlx_sdf_snapshot.json",
+    "git_branch": "develop",
+    "git_commit": "ae1f751cb3ada6c3498e4057ac265e9a40981912",
+    "label": "bench-mlx-sdf",
+    "platform": "macOS-26.3.1-arm64-arm-64bit",
+    "python": "3.11.13",
+    "timestamp_utc": "2026-03-16T18:57:56.048503+00:00"
+  },
+  "results": {
+    "sphere_sdf": {
+      "1000": {
+        "numpy_max_us": 34.875,
+        "numpy_mean_us": 22.0625,
+        "numpy_median_us": 22.0625,
+        "numpy_min_us": 9.25,
+        "numpy_stdev_us": 18.11961126790528
+      },
+      "10000": {
+        "numpy_max_us": 62.375,
+        "numpy_mean_us": 57.354,
+        "numpy_median_us": 57.354,
+        "numpy_min_us": 52.333,
+        "numpy_stdev_us": 7.100766296675311
+      }
+    }
+  }
+}

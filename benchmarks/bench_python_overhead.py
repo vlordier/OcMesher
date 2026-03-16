@@ -42,6 +42,7 @@ from typing import TYPE_CHECKING
 
 import numpy as np
 
+from benchmarks.result_utils import compare_flat_results, write_snapshot_json
 from ocmesher.core import (
     _SDF_BATCH_SIZE,
     OcMesher,
@@ -244,8 +245,15 @@ def main() -> None:
         help="Point counts to benchmark",
     )
     parser.add_argument("--json", type=str, default=None, help="Save results to JSON file")
+    parser.add_argument("--snapshot-json", type=str, default=None, help="Save results and metadata to JSON file")
+    parser.add_argument("--compare", nargs=2, metavar=("A.json", "B.json"), help="Compare two JSON result files")
     parser.add_argument("--repeats", type=int, default=10, help="Number of timing repeats")
     args = parser.parse_args()
+
+    if args.compare:
+        for line in compare_flat_results(args.compare[0], args.compare[1]):
+            print(line)
+        return
 
     print(f"{'=' * 70}")
     print("OcMesher Python Orchestration Micro-Benchmark")
@@ -274,6 +282,9 @@ def main() -> None:
         with Path(args.json).open("w") as f:
             json.dump(all_results, f, indent=2)
         print(f"Results saved to {args.json}")
+    if args.snapshot_json:
+        write_snapshot_json(args.snapshot_json, all_results, label="bench-python-overhead")
+        print(f"Snapshot saved to {args.snapshot_json}")
 
     print(f"{'=' * 70}")
     print("To compare branches, run this on each branch with --json and compare:")

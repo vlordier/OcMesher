@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import logging
 import time
+from datetime import timedelta
 from unittest.mock import patch
 
 import psutil
@@ -101,6 +102,31 @@ class TestTimerExceptionHandling:
     def test_disabled_timer_does_not_affect_exception(self):
         with pytest.raises(ZeroDivisionError), Timer("disabled error", disable_timer=True):
             _ = 1 / 0
+
+
+class TestPhaseSummary:
+    def test_logs_named_phase_summary(self, caplog):
+        with caplog.at_level(logging.INFO, logger="ocmesher.utils.timer"):
+            Timer.log_phase_summary(
+                "pipeline",
+                {
+                    "coarse": timedelta(seconds=1),
+                    "fine": timedelta(seconds=2),
+                },
+            )
+        assert "[pipeline] phase summary:" in caplog.text
+        assert "coarse=0:00:01" in caplog.text
+        assert "fine=0:00:02" in caplog.text
+        assert "total=0:00:03" in caplog.text
+
+    def test_disabled_phase_summary_does_not_log(self, caplog):
+        with caplog.at_level(logging.INFO, logger="ocmesher.utils.timer"):
+            Timer.log_phase_summary(
+                "pipeline",
+                {"coarse": timedelta(seconds=1)},
+                disable_timer=True,
+            )
+        assert caplog.text == ""
 
 
 class TestTimerMemoryReporting:
