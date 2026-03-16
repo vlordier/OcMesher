@@ -1,5 +1,4 @@
-"""
-Benchmark OcMesher with and without optimisations on Apple M4.
+"""Benchmark OcMesher with and without optimisations on Apple M4.
 
 Three tiers measured:
   1. Baseline   : install.sh  (-O3, std::map/set)             + vnoise SDF
@@ -25,18 +24,24 @@ from typing import TypeAlias, TypedDict
 
 
 class DemoConfig(TypedDict):
+    """Benchmark input profile for one demo configuration."""
+
     label: str
     pixels_per_cube: int
     coarse_count: int
 
 
 class RunResult(TypedDict):
+    """Subprocess run output for one benchmark invocation."""
+
     elapsed_s: float
     n_verts: int
     n_faces: int
 
 
 class TierConfigResult(TypedDict):
+    """Aggregated stats for one tier/config pair."""
+
     config: str
     times: list[float]
     mean: float
@@ -59,9 +64,11 @@ class BenchmarkOutputParseError(BenchmarkError):
     """Raised when benchmark subprocess output does not contain result JSON."""
 
     def __init__(self, stdout: str) -> None:
+        """Store subprocess output that failed JSON parsing."""
         self.stdout = stdout
 
     def __str__(self) -> str:
+        """Return helpful parse error details with subprocess output."""
         return f"No JSON output.\nstdout:\n{self.stdout}"
 
 
@@ -69,9 +76,11 @@ class MesherSubprocessError(BenchmarkError):
     """Raised when mesher subprocess exits with non-zero status."""
 
     def __init__(self, stderr: str) -> None:
+        """Store stderr captured from a failing subprocess run."""
         self.stderr = stderr
 
     def __str__(self) -> str:
+        """Return subprocess error details with captured stderr."""
         return f"Mesher subprocess failed.\nstderr:\n{self.stderr}"
 
 BASELINE_BUILD = "./install.sh"
@@ -220,12 +229,14 @@ def _parse_last_json_line(stdout: str) -> RunResult:
 
 
 def build(script: str) -> float:
+    """Run a build script and return elapsed wall-clock seconds."""
     t0 = time.perf_counter()
     subprocess.check_call(["/bin/bash", script], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)  # noqa: S603
     return time.perf_counter() - t0
 
 
 def run_mesher_subprocess(pixels_per_cube: int, coarse_count: int, sdf_type: str) -> RunResult:
+    """Run OcMesher in a subprocess for one configuration and parse JSON output."""
     sdf_block = textwrap.dedent(SDF_BLOCKS[sdf_type])
     script = _MESHER_TEMPLATE.format(
         sdf_block=sdf_block,
@@ -254,6 +265,7 @@ def run_tier(
     configs: list[DemoConfig],
     runs: int,
 ) -> list[TierConfigResult]:
+    """Benchmark one tier across all selected configs and aggregate run stats."""
     print(f"\n{'=' * 62}")
     print(f"  {label}")
     print(f"{'=' * 62}")
@@ -294,7 +306,7 @@ def _short_tier_label(name: str) -> str:
 
 
 def print_comparison(tiers: list[tuple[str, list[TierConfigResult]]]) -> None:
-    """tiers: list of (label, results)"""
+    """Print the cross-tier comparison table for median runtime and speedup."""
     names = [t[0] for t in tiers]
     tables = [t[1] for t in tiers]
     n_cols = len(tiers)
@@ -361,6 +373,7 @@ def _speedup_ratio(baseline: float, candidate: float) -> float:
 
 
 def main() -> None:
+    """Parse CLI arguments, run benchmarks, and optionally write JSON output."""
     parser = argparse.ArgumentParser(description="Benchmark OcMesher: baseline vs opt-C++ vs opt+numba-SDF")
     parser.add_argument("--runs", type=int, default=3, help="Runs per configuration (default: 3)")
     parser.add_argument("--configs", default="all", choices=["small", "medium", "large", "all"])
