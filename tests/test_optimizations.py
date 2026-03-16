@@ -434,6 +434,21 @@ class TestExplicitEmptyForFabsBuf:
         assert "out=_f_sdf[:n]" in source
 
 
+class TestTorchAllocationCaches:
+    """Verify torch_core caches constructor helpers at module scope."""
+
+    def test_torch_core_uses_cached_allocation_helpers(self):
+        torch = pytest.importorskip("torch", reason="torch not installed")
+
+        del torch
+        from ocmesher import torch_core
+
+        source = inspect.getsource(torch_core)
+        assert "_torch_empty = torch.empty" in source
+        assert "_torch_zeros = torch.zeros" in source
+        assert "_torch_zeros((0, n_kernels)" in source
+
+
 # ---------------------------------------------------------------------------
 # Cached SDF buffer pointer in _construct_element_mesh bisection loop
 # ---------------------------------------------------------------------------
