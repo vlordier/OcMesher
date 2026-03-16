@@ -781,7 +781,7 @@ def _micro_pipeline_breakdown(cameras, bounds, n_runs: int = 3) -> dict[str, obj
     return results
 
 
-def _micro_dtype_comparison(cameras, bounds, n_runs: int = 5):
+def _micro_dtype_comparison(cameras, bounds, n_runs: int = 5) -> dict[str, object]:
     """Benchmark float32 vs float64 throughput on available accelerators.
 
     This micro-benchmark directly measures the impact of ``_fdtype`` on GPU
