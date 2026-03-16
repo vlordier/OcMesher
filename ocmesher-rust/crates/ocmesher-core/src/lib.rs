@@ -947,11 +947,11 @@ fn eval_sdf_full(
     b_min: &[f64; 3],
     b_max: &[f64; 3],
     enclosed: bool,
+    use_fused_torch: bool,
+    torch_bundle: Option<&Py<PyAny>>,
 ) -> PyResult<Vec<f32>> {
     let mut result = vec![0.0f32; n_pts * n_kernels];
-
-    let use_fused_torch = torch_eval_device.is_some() && n_kernels > 1 && all_kernels_support_torch_eval(py, kernels);
-    let torch_bundle = if use_fused_torch { shared_torch_bundle(py, kernels) } else { None };
+    let torch_bundle = torch_bundle.map(|bundle| bundle.bind(py));
 
     if use_fused_torch {
         let chunk_size = sdf_batch_size.unwrap_or(n_pts).max(1);
@@ -1072,10 +1072,11 @@ fn eval_sdf_min(
     b_min: &[f64; 3],
     b_max: &[f64; 3],
     enclosed: bool,
+    use_fused_torch: bool,
+    torch_bundle: Option<&Py<PyAny>>,
 ) -> PyResult<Vec<f32>> {
     let n_kernels = kernels.len();
-    let use_fused_torch = torch_eval_device.is_some() && n_kernels > 1 && all_kernels_support_torch_eval(py, kernels);
-    let torch_bundle = if use_fused_torch { shared_torch_bundle(py, kernels) } else { None };
+    let torch_bundle = torch_bundle.map(|bundle| bundle.bind(py));
 
     if use_fused_torch {
         let torch = py.import_bound("torch")?;
@@ -1177,6 +1178,8 @@ fn eval_sdf_min(
         b_min,
         b_max,
         enclosed,
+        false,
+        None,
     )?;
 
     if n_kernels == 1 {
@@ -1572,6 +1575,14 @@ pub fn run_meshing_pipeline(
     let n_kerns = kernels.len();
     let torch_eval_device = params.torch_eval_device.as_deref();
     let torch_eval_dtype = params.torch_eval_dtype.as_deref();
+    let use_fused_torch = torch_eval_device.is_some()
+        && n_kerns > 1
+        && all_kernels_support_torch_eval(py, kernels);
+    let shared_bundle = if use_fused_torch {
+        shared_torch_bundle(py, kernels).map(|b| b.unbind())
+    } else {
+        None
+    };
     let torch_non_blocking = params
         .torch_stream_policy
         .as_deref()
@@ -1633,6 +1644,8 @@ pub fn run_meshing_pipeline(
                 &params.bounds_min,
                 &params.bounds_max,
                 params.enclosed,
+                use_fused_torch,
+                shared_bundle.as_ref(),
             )?;
 
             n = py.allow_threads(|| unsafe { (lib.fine_iteration)(sdf_min.as_mut_ptr()) });
@@ -1671,6 +1684,8 @@ pub fn run_meshing_pipeline(
             &params.bounds_min,
             &params.bounds_max,
             params.enclosed,
+            use_fused_torch,
+            shared_bundle.as_ref(),
         )?;
 
         py.allow_threads(|| unsafe { (lib.final_iteration3)(sdf_full.as_mut_ptr()) });
@@ -1696,6 +1711,8 @@ pub fn run_meshing_pipeline(
             &params.bounds_min,
             &params.bounds_max,
             params.enclosed,
+            use_fused_torch,
+            shared_bundle.as_ref(),
         )?;
 
         py.allow_threads(|| unsafe { (lib.final_iteration3_occluded)(sdf_full.as_mut_ptr()) });
