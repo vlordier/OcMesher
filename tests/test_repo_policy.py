@@ -40,6 +40,12 @@ def test_cpp_tests_treats_warnings_as_errors() -> None:
         assert flag in workflow
 
 
+def test_cpp_tests_uses_openmp_flag() -> None:
+    workflow = _read(".github/workflows/cpp-tests.yml")
+
+    assert "-fopenmp" in workflow
+
+
 def test_lint_workflow_pins_python_311() -> None:
     workflow = _read(".github/workflows/lint.yml")
 
