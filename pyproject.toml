@@ -117,7 +117,6 @@ ignore = [
 # benchmark script – standalone runner
 "benchmarks/run_benchmark.py" = [
     "SLF001",   # private member access (benchmarking internal methods)
-    "S101",     # assert usage
     "PLR0915",  # too-many-statements (benchmark main)
     "PLC0415",  # conditional imports (benchmarks need try/except for optional backends)
     "C901",     # complex functions (benchmark main)
