@@ -147,7 +147,6 @@ ignore = [
     "SLF001",   # private member access expected in tests
     "E402",     # module-level imports not at top (pytest.importorskip pattern)
     "PLC0415",  # test-local imports for importability checks
-    "ERA001",   # section divider comments look like commented-out code
 ]
 
 [tool.ruff.lint.isort]
