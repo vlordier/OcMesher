@@ -21,7 +21,7 @@ import sys
 import textwrap
 import time
 from pathlib import Path
-from typing import TypedDict
+from typing import TypeAlias, TypedDict
 
 
 class DemoConfig(TypedDict):
@@ -46,6 +46,9 @@ class TierConfigResult(TypedDict):
     max: float
     n_verts: int
     n_faces: int
+
+
+TierSpec: TypeAlias = tuple[str, str, str]
 
 
 class BenchmarkError(RuntimeError):
@@ -80,7 +83,7 @@ DEMO_CONFIGS: list[DemoConfig] = [
     {"label": "large (ppc=8)", "pixels_per_cube": 8, "coarse_count": 500_000},
 ]
 
-TIERS_SPEC: list[tuple[str, str, str]] = [
+TIERS_SPEC: list[TierSpec] = [
     ("Baseline(-O3+vnoise)", BASELINE_BUILD, "vnoise"),
     ("Opt-C++(M4+unordered)", OPTIMISED_BUILD, "vnoise"),
     ("Opt-numba(+numba-SDF)", OPTIMISED_BUILD, "numba"),
