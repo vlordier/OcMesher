@@ -338,11 +338,17 @@ def make_rust_ocmesher(
 
     resolved_path: str = lib_path or ocmesher_rust.find_core_so()
 
-    # Separate ocmesher_rust.Backend kwargs from RustOcMesher kwargs.
-    # Keywords consumed only by RustOcMesher (not by the C++ backend).
-    _rust_ocmesher_only = {"device", "dtype", "max_batch", "batch_size", "sdf_batch_size", "stream_policy"}
-    backend_kwargs = {k: v for k, v in kwargs.items() if k not in _rust_ocmesher_only}
-    wrapper_kwargs = {k: v for k, v in kwargs.items() if k in _rust_ocmesher_only}
+    # Split kwargs between Rust extension backend and Python wrapper.
+    # `batch_size` and `dtype` are wrapper-only controls; the remaining runtime
+    # knobs are passed to both layers so capability negotiation stays aligned.
+    _wrapper_only = {"batch_size", "dtype"}
+    _shared = {"device", "max_batch", "sdf_batch_size", "stream_policy"}
+    backend_kwargs = {k: v for k, v in kwargs.items() if k not in _wrapper_only}
+    wrapper_kwargs = {
+        k: v for k, v in kwargs.items() if k in _wrapper_only or k in _shared
+    }
+    if "sdf_batch_size" not in backend_kwargs and "batch_size" in wrapper_kwargs:
+        backend_kwargs["sdf_batch_size"] = wrapper_kwargs["batch_size"]
 
     # Pack camera poses/Ks as flat lists for Rust (it handles the SE(3) inversion).
     import numpy as _np  # noqa: PLC0415 — local import avoids top-level cost

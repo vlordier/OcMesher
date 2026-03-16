@@ -139,6 +139,23 @@ def test_make_rust_ocmesher_passes_lib_path(sample_cameras, sample_bounds):
     assert call_kwargs.kwargs.get("lib_path") == "/custom/core.so"
 
 
+def test_make_rust_ocmesher_maps_batch_size_to_backend_sdf_batch_size(
+    sample_cameras,
+    sample_bounds,
+):
+    mock_backend = DummyRustBackend()
+    mock_ext = MagicMock()
+    mock_ext.Backend.return_value = mock_backend
+    mock_ext.find_core_so.return_value = "/fake/core.so"
+
+    with patch.dict(sys.modules, {"ocmesher_rust": mock_ext}):
+        mesher = make_rust_ocmesher(sample_cameras, sample_bounds, batch_size=128)
+
+    call_kwargs = mock_ext.Backend.call_args
+    assert call_kwargs.kwargs.get("sdf_batch_size") == 128
+    assert mesher.batch_size == 128
+
+
 def test_make_rust_ocmesher_exported_from_package():
     """make_rust_ocmesher is accessible from the top-level ocmesher package."""
     import ocmesher  # noqa: PLC0415

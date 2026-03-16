@@ -50,6 +50,10 @@ pub struct Backend {
     lib: Arc<CoreLib>,
     params: MesherParams,
     version: String,
+    device: String,
+    preferred_dtype: String,
+    max_batch: Option<usize>,
+    stream_policy: String,
     supports_cuda: bool,
     supports_mps: bool,
 }
@@ -71,6 +75,11 @@ impl Backend {
         simplify_occluded = true,
         visible_relax_iter = 2,
         coarse_count = 500000,
+        device = None,
+        preferred_dtype = None,
+        max_batch = None,
+        sdf_batch_size = None,
+        stream_policy = "sync",
     ))]
     #[allow(clippy::too_many_arguments)]
     fn new(
@@ -88,6 +97,11 @@ impl Backend {
         simplify_occluded: bool,
         visible_relax_iter: i32,
         coarse_count: i32,
+        device: Option<String>,
+        preferred_dtype: Option<String>,
+        max_batch: Option<usize>,
+        sdf_batch_size: Option<usize>,
+        stream_policy: &str,
     ) -> PyResult<Self> {
         // Load the shared library
         let lib = CoreLib::load(lib_path).map_err(PyErr::from)?;
@@ -154,6 +168,48 @@ impl Backend {
         // Detect hardware capabilities for get_capabilities()
         let (supports_cuda, supports_mps) = detect_torch_capabilities(py);
 
+        let requested_device = device.unwrap_or_else(|| {
+            if supports_cuda {
+                "cuda".to_string()
+            } else if supports_mps {
+                "mps".to_string()
+            } else {
+                "cpu".to_string()
+            }
+        });
+        if requested_device != "cpu"
+            && requested_device != "cuda"
+            && requested_device != "mps"
+        {
+            return Err(pyo3::exceptions::PyValueError::new_err(
+                "device must be one of: cpu, cuda, mps",
+            ));
+        }
+        if requested_device == "cuda" && !supports_cuda {
+            return Err(pyo3::exceptions::PyRuntimeError::new_err(
+                "device='cuda' requested but torch.cuda.is_available() is false",
+            ));
+        }
+        if requested_device == "mps" && !supports_mps {
+            return Err(pyo3::exceptions::PyRuntimeError::new_err(
+                "device='mps' requested but torch.backends.mps.is_available() is false",
+            ));
+        }
+
+        let preferred_dtype = preferred_dtype.unwrap_or_else(|| "float32".to_string());
+        if preferred_dtype != "float32" && preferred_dtype != "float64" {
+            return Err(pyo3::exceptions::PyValueError::new_err(
+                "preferred_dtype must be one of: float32, float64",
+            ));
+        }
+
+        let stream_policy = stream_policy.to_string();
+        if stream_policy != "sync" && stream_policy != "auto" {
+            return Err(pyo3::exceptions::PyValueError::new_err(
+                "stream_policy must be one of: sync, auto",
+            ));
+        }
+
         let params = MesherParams {
             cameras_data,
             n_cams: n_cams as i32,
@@ -171,12 +227,17 @@ impl Backend {
             simplify_occluded,
             visible_relax_iter,
             coarse_count,
+            sdf_batch_size,
         };
 
         Ok(Backend {
             lib: Arc::new(lib),
             params,
             version: env!("CARGO_PKG_VERSION").to_string(),
+            device: requested_device,
+            preferred_dtype,
+            max_batch,
+            stream_policy,
             supports_cuda,
             supports_mps,
         })
@@ -188,10 +249,14 @@ impl Backend {
         d.set_item("supports_cpu", true)?;
         d.set_item("supports_cuda", self.supports_cuda)?;
         d.set_item("supports_mps", self.supports_mps)?;
-        d.set_item("preferred_dtype", "float32")?;
-        d.set_item("max_batch", py.None())?;
-        d.set_item("supports_async", false)?;
-        d.set_item("default_stream_policy", "sync")?;
+        d.set_item("device", self.device.as_str())?;
+        d.set_item("preferred_dtype", self.preferred_dtype.as_str())?;
+        match self.max_batch {
+            Some(v) => d.set_item("max_batch", v)?,
+            None => d.set_item("max_batch", py.None())?,
+        }
+        d.set_item("supports_async", self.device == "cuda" || self.device == "mps")?;
+        d.set_item("default_stream_policy", self.stream_policy.as_str())?;
         d.set_item("version", self.version.as_str())?;
         Ok(d)
     }

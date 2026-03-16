@@ -312,7 +312,7 @@ pub fn validate_bounds(bounds: &[f64]) -> Result<([f64; 3], [f64; 3], [f64; 3], 
 /// Call a single Python SDF kernel with `xyz` (n_pts × 3 f64) and return f32 values.
 ///
 /// Accepts numpy float32, numpy float64, or any Python object that has `.numpy()`.
-fn eval_kernel_py(
+fn eval_kernel_py_once(
     py: Python<'_>,
     kernel: &Py<PyAny>,
     xyz: &[f64],
@@ -379,6 +379,31 @@ fn eval_kernel_py(
     ))
 }
 
+fn eval_kernel_py(
+    py: Python<'_>,
+    kernel: &Py<PyAny>,
+    xyz: &[f64],
+    n_pts: usize,
+    sdf_batch_size: Option<usize>,
+) -> PyResult<Vec<f32>> {
+    let Some(batch_size) = sdf_batch_size else {
+        return eval_kernel_py_once(py, kernel, xyz, n_pts);
+    };
+
+    if batch_size == 0 || n_pts <= batch_size {
+        return eval_kernel_py_once(py, kernel, xyz, n_pts);
+    }
+
+    let mut out = Vec::with_capacity(n_pts);
+    for start in (0..n_pts).step_by(batch_size) {
+        let end = (start + batch_size).min(n_pts);
+        let chunk = &xyz[start * 3..end * 3];
+        let chunk_vals = eval_kernel_py_once(py, kernel, chunk, end - start)?;
+        out.extend(chunk_vals);
+    }
+    Ok(out)
+}
+
 /// Evaluate all `kernels` at `xyz` (n_pts × 3 f64) and return a flat f32 array of shape
 /// `(n_pts × n_kernels)` in row-major order: `result[i * n_kernels + k]` = kernel k value at
 /// point i.
@@ -390,6 +415,7 @@ fn eval_sdf_full(
     xyz: &[f64],
     n_pts: usize,
     n_kernels: usize,
+    sdf_batch_size: Option<usize>,
     b_min: &[f64; 3],
     b_max: &[f64; 3],
     enclosed: bool,
@@ -397,7 +423,7 @@ fn eval_sdf_full(
     let mut result = vec![0.0f32; n_pts * n_kernels];
 
     for (k_idx, kernel) in kernels.iter().enumerate() {
-        let sdf = eval_kernel_py(py, kernel, xyz, n_pts)?;
+        let sdf = eval_kernel_py(py, kernel, xyz, n_pts, sdf_batch_size)?;
         if sdf.len() != n_pts {
             return Err(pyo3::exceptions::PyValueError::new_err(format!(
                 "kernels[{k_idx}] returned {} values for {n_pts} query points",
@@ -439,12 +465,23 @@ fn eval_sdf_min(
     kernels: &[Py<PyAny>],
     xyz: &[f64],
     n_pts: usize,
+    sdf_batch_size: Option<usize>,
     b_min: &[f64; 3],
     b_max: &[f64; 3],
     enclosed: bool,
 ) -> PyResult<Vec<f32>> {
     let n_kernels = kernels.len();
-    let full = eval_sdf_full(py, kernels, xyz, n_pts, n_kernels, b_min, b_max, enclosed)?;
+    let full = eval_sdf_full(
+        py,
+        kernels,
+        xyz,
+        n_pts,
+        n_kernels,
+        sdf_batch_size,
+        b_min,
+        b_max,
+        enclosed,
+    )?;
 
     if n_kernels == 1 {
         return Ok(full);
@@ -490,6 +527,7 @@ fn construct_element_mesh(
     num_verts: i32,
     bisection_iters: i32,
     bisection_tol: f64,
+    sdf_batch_size: Option<usize>,
     b_min: &[f64; 3],
     b_max: &[f64; 3],
     enclosed: bool,
@@ -500,7 +538,7 @@ fn construct_element_mesh(
     let mut centers = vec![0.0f64; nv * 3];
     unsafe { (lib.get_verts_center)(element, centers.as_mut_ptr()) };
 
-    let center_sdf = eval_kernel_py(py, kernel, &centers, nv)?;
+    let center_sdf = eval_kernel_py(py, kernel, &centers, nv, sdf_batch_size)?;
     if center_sdf.len() != nv {
         return Err(pyo3::exceptions::PyValueError::new_err(format!(
             "center SDF length mismatch: got {}, expected {nv}",
@@ -525,7 +563,7 @@ fn construct_element_mesh(
     let check_tol = bisection_tol > 0.0;
 
     for _ in 0..bisection_iters {
-        let sdf_cubes = eval_kernel_py(py, kernel, &cubes, n_cubes)?;
+        let sdf_cubes = eval_kernel_py(py, kernel, &cubes, n_cubes, sdf_batch_size)?;
         sdf_buf.copy_from_slice(&sdf_cubes);
 
         unsafe {
@@ -549,8 +587,8 @@ fn construct_element_mesh(
     let mut cubes_r = vec![0.0f64; n_cubes * 3];
     unsafe { (lib.get_lr_verts)(element, cubes.as_mut_ptr(), cubes_r.as_mut_ptr()) };
 
-    let sdf_l = eval_kernel_py(py, kernel, &cubes, n_cubes)?;
-    let sdf_r = eval_kernel_py(py, kernel, &cubes_r, n_cubes)?;
+    let sdf_l = eval_kernel_py(py, kernel, &cubes, n_cubes, sdf_batch_size)?;
+    let sdf_r = eval_kernel_py(py, kernel, &cubes_r, n_cubes, sdf_batch_size)?;
 
     let mut vertices = vec![0.0f64; nv * 3];
     unsafe {
@@ -574,7 +612,7 @@ fn construct_element_mesh(
     } else {
         refine_extra_vertices(
             py, lib, kernel, &vertices, nv, nve, nvf, nf, bisection_iters, bisection_tol,
-            b_min, b_max, enclosed,
+            sdf_batch_size, b_min, b_max, enclosed,
         )?
     };
 
@@ -605,6 +643,7 @@ fn refine_extra_vertices(
     nf: usize,
     bisection_iters: i32,
     bisection_tol: f64,
+    sdf_batch_size: Option<usize>,
     _b_min: &[f64; 3],
     _b_max: &[f64; 3],
     _enclosed: bool,
@@ -618,7 +657,7 @@ fn refine_extra_vertices(
     let mut ef_centers = vec![0.0f64; ef_n * 3];
     ef_centers[..nve * 3].copy_from_slice(&edge_centers);
     ef_centers[nve * 3..].copy_from_slice(&face_centers);
-    let ef_sdf = eval_kernel_py(py, kernel, &ef_centers, ef_n)?;
+    let ef_sdf = eval_kernel_py(py, kernel, &ef_centers, ef_n, sdf_batch_size)?;
     let ecenter_sdf = ef_sdf[..nve].to_vec();
     let fcenter_sdf = ef_sdf[nve..].to_vec();
 
@@ -647,7 +686,7 @@ fn refine_extra_vertices(
         bisect_buf[..n_elr * 3].copy_from_slice(&edge_lr);
         bisect_buf[n_elr * 3..].copy_from_slice(&face_lr);
 
-        let sdf_all = eval_kernel_py(py, kernel, &bisect_buf, n_bisect)?;
+        let sdf_all = eval_kernel_py(py, kernel, &bisect_buf, n_bisect, sdf_batch_size)?;
         sdf_buf.copy_from_slice(&sdf_all);
 
         let (e_sdf, f_sdf) = sdf_buf.split_at(n_elr);
@@ -689,7 +728,7 @@ fn refine_extra_vertices(
     all_lr[n_elr * 2 * 3..(n_elr * 2 + n_flr) * 3].copy_from_slice(&face_lr);
     all_lr[(n_elr * 2 + n_flr) * 3..].copy_from_slice(&face_r);
 
-    let all_lr_sdf = eval_kernel_py(py, kernel, &all_lr, n_all_lr)?;
+    let all_lr_sdf = eval_kernel_py(py, kernel, &all_lr, n_all_lr, sdf_batch_size)?;
     let esdf_l = &all_lr_sdf[..n_elr];
     let esdf_r = &all_lr_sdf[n_elr..n_elr * 2];
     let fsdf_l = &all_lr_sdf[n_elr * 2..n_elr * 2 + n_flr];
@@ -744,6 +783,7 @@ pub struct MesherParams {
     pub simplify_occluded: bool,
     pub visible_relax_iter: i32,
     pub coarse_count: i32,
+    pub sdf_batch_size: Option<usize>,
 }
 
 /// Run the full OcMesher pipeline.
@@ -806,6 +846,7 @@ pub fn run_meshing_pipeline(
                 kernels,
                 &xyz,
                 n_pts,
+                params.sdf_batch_size,
                 &params.bounds_min,
                 &params.bounds_max,
                 params.enclosed,
@@ -840,6 +881,7 @@ pub fn run_meshing_pipeline(
             &xyz,
             n_pts,
             n_kerns,
+            params.sdf_batch_size,
             &params.bounds_min,
             &params.bounds_max,
             params.enclosed,
@@ -861,6 +903,7 @@ pub fn run_meshing_pipeline(
             &xyz,
             n_pts,
             n_kerns,
+            params.sdf_batch_size,
             &params.bounds_min,
             &params.bounds_max,
             params.enclosed,
@@ -884,6 +927,7 @@ pub fn run_meshing_pipeline(
             nv[e],
             params.bisection_iters,
             params.bisection_tol,
+            params.sdf_batch_size,
             &params.bounds_min,
             &params.bounds_max,
             params.enclosed,
