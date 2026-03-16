@@ -34,6 +34,7 @@ import sys
 import textwrap
 import time
 from pathlib import Path
+from typing import TYPE_CHECKING
 
 import numpy as np
 
@@ -42,6 +43,9 @@ import numpy as np
 # export, no _np_empty export) and on the optimized branch.
 # ---------------------------------------------------------------------------
 from ocmesher.core import OcMesher
+
+if TYPE_CHECKING:
+    from collections.abc import Callable
 
 try:
     from ocmesher.core import _SDF_BATCH_SIZE
@@ -102,7 +106,7 @@ def _make_stub(*, enclosed: bool = True) -> OcMesher:
 # ---------------------------------------------------------------------------
 # Timing helper
 # ---------------------------------------------------------------------------
-def _time_fn(fn, *, warmup: int = 3, repeats: int = 10) -> dict:
+def _time_fn(fn: Callable[[], object], *, warmup: int = 3, repeats: int = 10) -> dict[str, float]:
     """Time *fn()* and return statistics in microseconds."""
     for _ in range(warmup):
         fn()
