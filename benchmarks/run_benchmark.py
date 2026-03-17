@@ -173,16 +173,46 @@ def _stats(times: list[float]) -> dict[str, float]:
     """Compute summary statistics for a list of timings."""
     if not times:
         return {}
+
+    arr = np.array(times, dtype=np.float64)
+    q1 = float(np.percentile(arr, 25))
+    q3 = float(np.percentile(arr, 75))
+    iqr = q3 - q1
+    lower = q1 - 1.5 * iqr
+    upper = q3 + 1.5 * iqr
+    inlier = arr[(arr >= lower) & (arr <= upper)]
+    if inlier.size == 0:
+        inlier = arr
+
+    trim_k = int(arr.size * 0.1)
+    if trim_k > 0 and (arr.size - 2 * trim_k) > 0:
+        sorted_arr = np.sort(arr)
+        trimmed = sorted_arr[trim_k : arr.size - trim_k]
+    else:
+        trimmed = arr
+
     result = {
-        "mean_s": statistics.mean(times),
-        "median_s": statistics.median(times),
-        "min_s": min(times),
-        "max_s": max(times),
+        "mean_s": float(np.mean(arr)),
+        "median_s": float(np.median(arr)),
+        "min_s": float(np.min(arr)),
+        "max_s": float(np.max(arr)),
+        "trimmed_mean_s": float(np.mean(trimmed)),
+        "iqr_s": iqr,
+        "outlier_count": int(arr.size - inlier.size),
     }
-    if len(times) > 1:
-        result["std_s"] = statistics.stdev(times)
-        result["p95_s"] = float(np.percentile(times, 95))
+    if arr.size > 1:
+        result["std_s"] = float(np.std(arr, ddof=1))
+        result["cv"] = float(result["std_s"] / max(result["mean_s"], 1e-12))
+        result["p95_s"] = float(np.percentile(arr, 95))
     return result
+
+
+def _should_stop_adaptive(times: list[float], min_runs: int, target_cv: float) -> bool:
+    if len(times) < min_runs:
+        return False
+    st = _stats(times)
+    cv = float(st.get("cv", 0.0))
+    return cv <= target_cv
 
 
 # ---------------------------------------------------------------------------
@@ -195,6 +225,10 @@ def _bench_original(
     sdf_name: str,
     n_runs: int = 1,
     warmup: int = 0,
+    *,
+    adaptive_runs: bool = False,
+    max_runs: int = 10,
+    target_cv: float = 0.05,
 ):
     """Benchmark the original Python + C++ OcMesher."""
     try:
@@ -211,7 +245,8 @@ def _bench_original(
 
         times: list[float] = []
         mesh_info: dict[str, object] = {}
-        for i in range(n_runs):
+        run_limit = max(max_runs, n_runs) if adaptive_runs else n_runs
+        for i in range(run_limit):
             t0 = time.perf_counter()
             mesher = OcMesher(cameras, bounds, pixels_per_cube=pixels_per_cube)
             meshes, _tags = mesher([kernel])
@@ -222,6 +257,8 @@ def _bench_original(
                     "vertices": int(meshes[0].vertices.shape[0]),
                     "faces": int(meshes[0].faces.shape[0]),
                 }
+            if adaptive_runs and _should_stop_adaptive(times, n_runs, target_cv):
+                break
     except Exception as exc:  # noqa: BLE001
         return {"error": f"C++ backend not available: {exc}"}
 
@@ -229,6 +266,8 @@ def _bench_original(
         "backend": "python_cpp",
         "sdf": sdf_name,
         "times_s": times,
+        "adaptive_runs_enabled": adaptive_runs,
+        "run_count": len(times),
         **_stats(times),
         **mesh_info,
     }
@@ -245,6 +284,9 @@ def _bench_torch(
     n_sdf_workers: int = 4,
     *,
     use_compile: bool = False,
+    adaptive_runs: bool = False,
+    max_runs: int = 10,
+    target_cv: float = 0.05,
 ):
     """Benchmark the PyTorch TorchOcMesher."""
     try:
@@ -269,7 +311,8 @@ def _bench_torch(
 
     times: list[float] = []
     mesh_info: dict[str, object] = {}
-    for i in range(n_runs):
+    run_limit = max(max_runs, n_runs) if adaptive_runs else n_runs
+    for i in range(run_limit):
         t0 = time.perf_counter()
         mesher = TorchOcMesher(
             cameras,
@@ -287,6 +330,8 @@ def _bench_torch(
                 "vertices": int(meshes[0].vertices.shape[0]),
                 "faces": int(meshes[0].faces.shape[0]),
             }
+        if adaptive_runs and _should_stop_adaptive(times, n_runs, target_cv):
+            break
 
     backend_tag = f"pytorch_{device or 'auto'}"
     if use_compile:
@@ -295,6 +340,8 @@ def _bench_torch(
         "backend": backend_tag,
         "sdf": sdf_name,
         "times_s": times,
+        "adaptive_runs_enabled": adaptive_runs,
+        "run_count": len(times),
         **_stats(times),
         **mesh_info,
     }
@@ -1022,6 +1069,23 @@ def main() -> None:
     parser.add_argument("--full", action="store_true", help="Run full benchmark (slower, higher resolution)")
     parser.add_argument("--profile", action="store_true", help="Run sub-operation micro-benchmarks")
     parser.add_argument("--runs", type=int, default=3, help="Number of end-to-end runs (default 3)")
+    parser.add_argument(
+        "--adaptive-runs",
+        action="store_true",
+        help="Run additional iterations until coefficient of variation reaches target threshold",
+    )
+    parser.add_argument(
+        "--max-runs",
+        type=int,
+        default=10,
+        help="Maximum iterations per benchmark when --adaptive-runs is enabled",
+    )
+    parser.add_argument(
+        "--target-cv",
+        type=float,
+        default=0.05,
+        help="Coefficient-of-variation target for adaptive stopping (default 0.05)",
+    )
     parser.add_argument("--warmup", type=int, default=1, help="Number of warmup runs (default 1)")
     parser.add_argument("--sdf", type=str, default=None, help="SDF to benchmark (sphere/terrain/gyroid or 'all')")
     parser.add_argument("--output", type=str, default=None, help="Save results as JSON")
@@ -1047,6 +1111,17 @@ def main() -> None:
         help="Enable DEBUG-level logging (includes per-step mesher output)",
     )
     args = parser.parse_args()
+
+    if args.runs < 1:
+        parser.error("--runs must be >= 1")
+    if args.warmup < 0:
+        parser.error("--warmup must be >= 0")
+    if args.max_runs < 1:
+        parser.error("--max-runs must be >= 1")
+    if args.max_runs < args.runs:
+        parser.error("--max-runs must be >= --runs")
+    if args.target_cv <= 0:
+        parser.error("--target-cv must be > 0")
 
     # Configure logging: verbose mode shows DEBUG + timestamps; default shows INFO only.
     # Use stream=sys.stdout to preserve prior CLI behaviour (print() used stdout).
@@ -1093,6 +1168,10 @@ def main() -> None:
         logger.info("  %-24s: %s", k, v)
     logger.info("  %-24s: %s", "pixels_per_cube", pixels_per_cube)
     logger.info("  %-24s: %s", "runs", args.runs)
+    logger.info("  %-24s: %s", "adaptive_runs", args.adaptive_runs)
+    if args.adaptive_runs:
+        logger.info("  %-24s: %s", "max_runs", args.max_runs)
+        logger.info("  %-24s: %s", "target_cv", args.target_cv)
     logger.info("  %-24s: %s", "warmup", args.warmup)
     logger.info("  %-24s: %s", "SDFs", sdf_names)
     logger.info("  %-24s: %s", "devices", bench_devices)
@@ -1102,7 +1181,17 @@ def main() -> None:
     # End-to-end benchmarks ------------------------------------------------
     for sdf_name in sdf_names:
         _print_section(f"End-to-end: Python + C++ ({sdf_name})")
-        r_orig = _bench_original(cameras, bounds, pixels_per_cube, sdf_name, n_runs=args.runs, warmup=args.warmup)
+        r_orig = _bench_original(
+            cameras,
+            bounds,
+            pixels_per_cube,
+            sdf_name,
+            n_runs=args.runs,
+            warmup=args.warmup,
+            adaptive_runs=args.adaptive_runs,
+            max_runs=args.max_runs,
+            target_cv=args.target_cv,
+        )
         _print_result(r_orig)
         results[f"original_{sdf_name}"] = r_orig
 
@@ -1117,6 +1206,9 @@ def main() -> None:
                 n_runs=args.runs,
                 warmup=args.warmup,
                 device=dev_str,
+                adaptive_runs=args.adaptive_runs,
+                max_runs=args.max_runs,
+                target_cv=args.target_cv,
             )
             _print_result(r_torch)
             results[f"torch_{dev_str}_{sdf_name}"] = r_torch
