@@ -1,0 +1,424 @@
+{
+  "runs": 4,
+  "warmup": 1,
+  "low_precision_caps": {
+    "int4_on_mps_supported": false,
+    "int4_note": "Not exposed as a direct tensor compute dtype in this tch + MPS path; benchmarked supported modes instead."
+  },
+  "cases": {
+    "medium_1cam": {
+      "plane": {
+        "upstream_python_cpp": {
+          "ok": true,
+          "result": {
+            "times": [
+              0.03644749999511987,
+              0.032939333003014326,
+              0.03412287498940714,
+              0.03366504199220799
+            ],
+            "mean": 0.03429368749493733,
+            "steady_mean": 0.03357574999487648,
+            "min": 0.032939333003014326,
+            "max": 0.03644749999511987
+          }
+        },
+        "current_rust_native": {
+          "ok": true,
+          "result": {
+            "times": [
+              0.029984124994371086,
+              0.028965165998670273,
+              0.028763792011886835,
+              0.028955000001587905
+            ],
+            "mean": 0.029167020751629025,
+            "steady_mean": 0.028894652670715004,
+            "min": 0.028763792011886835,
+            "max": 0.029984124994371086
+          }
+        },
+        "current_rust_tch_mps": {
+          "ok": true,
+          "result": {
+            "times": [
+              0.03795791599259246,
+              0.034875707991886884,
+              0.03585683400160633,
+              0.03577750000113156
+            ],
+            "mean": 0.03611698949680431,
+            "steady_mean": 0.03550334733154159,
+            "min": 0.034875707991886884,
+            "max": 0.03795791599259246
+          }
+        },
+        "current_rust_tch_mps_fp8": {
+          "ok": true,
+          "result": {
+            "times": [
+              0.03662987500138115,
+              0.03680358300334774,
+              0.03670125000644475,
+              0.03607245799503289
+            ],
+            "mean": 0.036551791501551634,
+            "steady_mean": 0.036525763668275125,
+            "min": 0.03607245799503289,
+            "max": 0.03680358300334774
+          }
+        },
+        "ratio_upstream_over_current_rust_native": 1.1757692973500549,
+        "steady_ratio_upstream_over_current_rust_native": 1.1620056616533,
+        "ratio_upstream_over_current_rust_tch_mps": 0.9495167779133887,
+        "steady_ratio_upstream_over_current_rust_tch_mps": 0.9457066028545256,
+        "ratio_upstream_over_current_rust_tch_mps_fp8": 0.9382217966930992,
+        "steady_ratio_upstream_over_current_rust_tch_mps_fp8": 0.9192347160708124
+      },
+      "sphere": {
+        "upstream_python_cpp": {
+          "ok": true,
+          "result": {
+            "times": [
+              0.043937583002843894,
+              0.04254645800392609,
+              0.042674541007727385,
+              0.04209004100994207
+            ],
+            "mean": 0.04281215575610986,
+            "steady_mean": 0.04243701334053185,
+            "min": 0.04209004100994207,
+            "max": 0.043937583002843894
+          }
+        },
+        "current_rust_native": {
+          "ok": true,
+          "result": {
+            "times": [
+              0.03321720799431205,
+              0.032498749991646037,
+              0.03448220899736043,
+              0.03290566700161435
+            ],
+            "mean": 0.033275958496233216,
+            "steady_mean": 0.0332955419968736,
+            "min": 0.032498749991646037,
+            "max": 0.03448220899736043
+          }
+        },
+        "current_rust_tch_mps": {
+          "ok": true,
+          "result": {
+            "times": [
+              0.04125070900772698,
+              0.037582999997539446,
+              0.03794145799474791,
+              0.03768866599421017
+            ],
+            "mean": 0.038615958248556126,
+            "steady_mean": 0.03773770799549917,
+            "min": 0.037582999997539446,
+            "max": 0.04125070900772698
+          }
+        },
+        "current_rust_tch_mps_fp8": {
+          "ok": true,
+          "result": {
+            "times": [
+              0.037817832999280654,
+              0.035371959005715325,
+              0.03714233399659861,
+              0.0375132500048494
+            ],
+            "mean": 0.036961344001610996,
+            "steady_mean": 0.03667584766905444,
+            "min": 0.035371959005715325,
+            "max": 0.037817832999280654
+          }
+        },
+        "ratio_upstream_over_current_rust_native": 1.2865791908280004,
+        "steady_ratio_upstream_over_current_rust_native": 1.2745554147914642,
+        "ratio_upstream_over_current_rust_tch_mps": 1.1086648550981026,
+        "steady_ratio_upstream_over_current_rust_tch_mps": 1.1245254572851415,
+        "ratio_upstream_over_current_rust_tch_mps_fp8": 1.1582954276295756,
+        "steady_ratio_upstream_over_current_rust_tch_mps_fp8": 1.1570833678736876
+      }
+    },
+    "large_1cam": {
+      "plane": {
+        "upstream_python_cpp": {
+          "ok": true,
+          "result": {
+            "times": [
+              0.023895708000054583,
+              0.02228212499176152,
+              0.0219450830045389,
+              0.02065724998828955
+            ],
+            "mean": 0.02219504149616114,
+            "steady_mean": 0.02162815266152999,
+            "min": 0.02065724998828955,
+            "max": 0.023895708000054583
+          }
+        },
+        "current_rust_native": {
+          "ok": true,
+          "result": {
+            "times": [
+              0.01814500000909902,
+              0.0183585420018062,
+              0.01786858300329186,
+              0.018548583990195766
+            ],
+            "mean": 0.018230177251098212,
+            "steady_mean": 0.01825856966509794,
+            "min": 0.01786858300329186,
+            "max": 0.018548583990195766
+          }
+        },
+        "current_rust_tch_mps": {
+          "ok": true,
+          "result": {
+            "times": [
+              0.024097041998174973,
+              0.02388875000178814,
+              0.023991082998691127,
+              0.02343841700349003
+            ],
+            "mean": 0.023853823000536067,
+            "steady_mean": 0.0237727500013231,
+            "min": 0.02343841700349003,
+            "max": 0.024097041998174973
+          }
+        },
+        "current_rust_tch_mps_fp8": {
+          "ok": true,
+          "result": {
+            "times": [
+              0.02512666599068325,
+              0.023026333990856074,
+              0.023640583007363603,
+              0.02359858399722725
+            ],
+            "mean": 0.023848041746532544,
+            "steady_mean": 0.023421833665148977,
+            "min": 0.023026333990856074,
+            "max": 0.02512666599068325
+          }
+        },
+        "ratio_upstream_over_current_rust_native": 1.217489067190725,
+        "steady_ratio_upstream_over_current_rust_native": 1.1845480263918569,
+        "ratio_upstream_over_current_rust_tch_mps": 0.9304605595364043,
+        "steady_ratio_upstream_over_current_rust_tch_mps": 0.9097875786489258,
+        "ratio_upstream_over_current_rust_tch_mps_fp8": 0.9306861222426471,
+        "steady_ratio_upstream_over_current_rust_tch_mps_fp8": 0.9234184210654722
+      },
+      "sphere": {
+        "upstream_python_cpp": {
+          "ok": true,
+          "result": {
+            "times": [
+              0.03019191700150259,
+              0.028787583010853268,
+              0.02952516700315755,
+              0.029316624990315177
+            ],
+            "mean": 0.029455323001457145,
+            "steady_mean": 0.029209791668108664,
+            "min": 0.028787583010853268,
+            "max": 0.03019191700150259
+          }
+        },
+        "current_rust_native": {
+          "ok": true,
+          "result": {
+            "times": [
+              0.021399000004748814,
+              0.019981499994173646,
+              0.02036887500435114,
+              0.020502291998127475
+            ],
+            "mean": 0.02056291675035027,
+            "steady_mean": 0.02028422233221742,
+            "min": 0.019981499994173646,
+            "max": 0.021399000004748814
+          }
+        },
+        "current_rust_tch_mps": {
+          "ok": true,
+          "result": {
+            "times": [
+              0.024979334004456177,
+              0.02513629200984724,
+              0.02448033299879171,
+              0.026252249997924082
+            ],
+            "mean": 0.025212052252754802,
+            "steady_mean": 0.025289625002187677,
+            "min": 0.02448033299879171,
+            "max": 0.026252249997924082
+          }
+        },
+        "current_rust_tch_mps_fp8": {
+          "ok": true,
+          "result": {
+            "times": [
+              0.02683087500918191,
+              0.024189208008465357,
+              0.025296583989984356,
+              0.024168582996935584
+            ],
+            "mean": 0.0251213125011418,
+            "steady_mean": 0.0245514583317951,
+            "min": 0.024168582996935584,
+            "max": 0.02683087500918191
+          }
+        },
+        "ratio_upstream_over_current_rust_native": 1.4324486822111655,
+        "steady_ratio_upstream_over_current_rust_native": 1.4400252171223131,
+        "ratio_upstream_over_current_rust_tch_mps": 1.1683032664760047,
+        "steady_ratio_upstream_over_current_rust_tch_mps": 1.1550108657436349,
+        "ratio_upstream_over_current_rust_tch_mps_fp8": 1.1725232509295984,
+        "steady_ratio_upstream_over_current_rust_tch_mps_fp8": 1.1897375411822622
+      }
+    },
+    "large_2cam": {
+      "plane": {
+        "upstream_python_cpp": {
+          "ok": true,
+          "result": {
+            "times": [
+              0.18950537499040365,
+              0.17882379199727438,
+              0.18744370799686294,
+              0.18715137499384582
+            ],
+            "mean": 0.1857310624945967,
+            "steady_mean": 0.18447295832932772,
+            "min": 0.17882379199727438,
+            "max": 0.18950537499040365
+          }
+        },
+        "current_rust_native": {
+          "ok": true,
+          "result": {
+            "times": [
+              0.22368275000189897,
+              0.2335593330062693,
+              0.25283433400909416,
+              0.25577012498979457
+            ],
+            "mean": 0.24146163550176425,
+            "steady_mean": 0.24738793066838602,
+            "min": 0.22368275000189897,
+            "max": 0.25577012498979457
+          }
+        },
+        "current_rust_tch_mps": {
+          "ok": true,
+          "result": {
+            "times": [
+              0.25302633400133345,
+              0.2699384590086993,
+              0.24564487500174437,
+              0.251320166993537
+            ],
+            "mean": 0.2549824587513285,
+            "steady_mean": 0.25563450033466023,
+            "min": 0.24564487500174437,
+            "max": 0.2699384590086993
+          }
+        },
+        "current_rust_tch_mps_fp8": {
+          "ok": true,
+          "result": {
+            "times": [
+              0.2431910000013886,
+              0.2528778749983758,
+              0.25398766600119416,
+              0.27806687500560656
+            ],
+            "mean": 0.2570308540016413,
+            "steady_mean": 0.26164413866839215,
+            "min": 0.2431910000013886,
+            "max": 0.27806687500560656
+          }
+        },
+        "ratio_upstream_over_current_rust_native": 0.7691949162385245,
+        "steady_ratio_upstream_over_current_rust_native": 0.7456829354242289,
+        "ratio_upstream_over_current_rust_tch_mps": 0.7284072143791303,
+        "steady_ratio_upstream_over_current_rust_tch_mps": 0.7216277853256411,
+        "ratio_upstream_over_current_rust_tch_mps_fp8": 0.7226022074898865,
+        "steady_ratio_upstream_over_current_rust_tch_mps_fp8": 0.7050528984451236
+      },
+      "sphere": {
+        "upstream_python_cpp": {
+          "ok": true,
+          "result": {
+            "times": [
+              0.08796154201263562,
+              0.08730766699591186,
+              0.08593191599356942,
+              0.08788083300169092
+            ],
+            "mean": 0.08727048950095195,
+            "steady_mean": 0.08704013866372406,
+            "min": 0.08593191599356942,
+            "max": 0.08796154201263562
+          }
+        },
+        "current_rust_native": {
+          "ok": true,
+          "result": {
+            "times": [
+              0.07825162500375882,
+              0.07907987499493174,
+              0.07567049999488518,
+              0.07770366600016132
+            ],
+            "mean": 0.07767641649843426,
+            "steady_mean": 0.07748468032999274,
+            "min": 0.07567049999488518,
+            "max": 0.07907987499493174
+          }
+        },
+        "current_rust_tch_mps": {
+          "ok": true,
+          "result": {
+            "times": [
+              0.10626508400309831,
+              0.1106671669986099,
+              0.19206924999889452,
+              0.1162859589967411
+            ],
+            "mean": 0.13132186499933596,
+            "steady_mean": 0.13967412533141518,
+            "min": 0.10626508400309831,
+            "max": 0.19206924999889452
+          }
+        },
+        "current_rust_tch_mps_fp8": {
+          "ok": true,
+          "result": {
+            "times": [
+              0.105879750000895,
+              0.10491787501086947,
+              0.10026662499876693,
+              0.10650795898982324
+            ],
+            "mean": 0.10439305225008866,
+            "steady_mean": 0.10389748633315321,
+            "min": 0.10026662499876693,
+            "max": 0.10650795898982324
+          }
+        },
+        "ratio_upstream_over_current_rust_native": 1.1235133317808383,
+        "steady_ratio_upstream_over_current_rust_native": 1.1233206137398568,
+        "ratio_upstream_over_current_rust_tch_mps": 0.6645541433743212,
+        "steady_ratio_upstream_over_current_rust_tch_mps": 0.6231658043835783,
+        "ratio_upstream_over_current_rust_tch_mps_fp8": 0.8359798628349603,
+        "steady_ratio_upstream_over_current_rust_tch_mps_fp8": 0.837750187570707
+      }
+    }
+  }
+}
