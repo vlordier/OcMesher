@@ -327,6 +327,8 @@ pub mod tch_kernels {
     #[derive(Default)]
     struct TchScratch {
         xyz_f32: Vec<f32>,
+        device_xyz: Option<Tensor>,
+        device_rows: usize,
     }
 
     fn fill_xyz_f32_buffer(xyz: &[f64], out: &mut Vec<f32>) {
@@ -340,6 +342,30 @@ pub mod tch_kernels {
         out.resize(tensor.numel(), 0.0);
         let len = out.len();
         tensor.copy_data(out, len);
+    }
+
+    fn load_xyz_to_device(
+        scratch: &mut TchScratch,
+        xyz: &[f64],
+        n_pts: usize,
+        device: Device,
+    ) -> Tensor {
+        fill_xyz_f32_buffer(xyz, &mut scratch.xyz_f32);
+        let xyz_cpu = Tensor::from_slice(&scratch.xyz_f32).view([n_pts as i64, 3]);
+
+        if scratch.device_rows < n_pts {
+            scratch.device_xyz = Some(Tensor::zeros([n_pts as i64, 3], (Kind::Float, device)));
+            scratch.device_rows = n_pts;
+        }
+
+        let xyz_device = scratch
+            .device_xyz
+            .as_ref()
+            .expect("device tensor should be initialized")
+            .narrow(0, 0, n_pts as i64);
+        let mut xyz_device_view = xyz_device.shallow_clone();
+        xyz_device_view.copy_(&xyz_cpu);
+        xyz_device
     }
 
     fn normalize_normal_f32(normal: [f32; 3]) -> Result<[f32; 3], CoreError> {
@@ -451,10 +477,7 @@ pub mod tch_kernels {
                     .scratch
                     .lock()
                     .map_err(|_| CoreError::Sdf("TchSphereKernel scratch lock poisoned".to_string()))?;
-                fill_xyz_f32_buffer(xyz, &mut scratch.xyz_f32);
-                Tensor::from_slice(&scratch.xyz_f32)
-                    .view([n_pts as i64, 3])
-                    .to_device(self.device)
+                load_xyz_to_device(&mut scratch, xyz, n_pts, self.device)
             };
             let center_tensor = self
                 .center_tensor
@@ -502,10 +525,7 @@ pub mod tch_kernels {
                     .scratch
                     .lock()
                     .map_err(|_| CoreError::Sdf("TchPlaneKernel scratch lock poisoned".to_string()))?;
-                fill_xyz_f32_buffer(xyz, &mut scratch.xyz_f32);
-                Tensor::from_slice(&scratch.xyz_f32)
-                    .view([n_pts as i64, 3])
-                    .to_device(self.device)
+                load_xyz_to_device(&mut scratch, xyz, n_pts, self.device)
             };
             let normal_tensor = self
                 .normal_tensor
