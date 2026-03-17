@@ -69,6 +69,41 @@ gx2() {
 	"${compiler}" "${LDFLAGS_ARRAY[@]}" -O3 -shared ${omp_flags} -o "${out_so}" "${in_obj}"
 }
 
+patch_core_omp_runtime_macos() {
+	if [ "${OS}" != "Darwin" ]; then
+		return
+	fi
+	if [ ! -f "ocmesher/lib/core.so" ]; then
+		return
+	fi
+	local pybin=""
+	if [ -x ".venv/bin/python" ]; then
+		pybin=".venv/bin/python"
+	elif command -v python3 >/dev/null 2>&1; then
+		pybin="python3"
+	else
+		return
+	fi
+	local torch_omp
+	torch_omp=$(${pybin} -c 'from pathlib import Path
+import importlib.util
+spec = importlib.util.find_spec("torch")
+if spec is None or not spec.origin:
+    raise SystemExit(0)
+libomp = Path(spec.origin).resolve().parent / "lib" / "libomp.dylib"
+print(libomp if libomp.exists() else "")' 2>/dev/null)
+	if [ -z "${torch_omp}" ] || [ ! -f "${torch_omp}" ]; then
+		return
+	fi
+	local linked_omp
+	linked_omp=$(/usr/bin/otool -L ocmesher/lib/core.so | awk '/libomp\.dylib/ {print $1; exit}')
+	if [ -z "${linked_omp}" ] || [ "${linked_omp}" = "${torch_omp}" ]; then
+		return
+	fi
+	echo "Patching core.so OpenMP runtime: ${linked_omp} -> ${torch_omp}"
+	/usr/bin/install_name_tool -change "${linked_omp}" "${torch_omp}" ocmesher/lib/core.so
+}
+
 mkdir -p ocmesher/lib
 
 if [[ "${OCMESHER_DISABLE_OPENMP:-0}" == "1" ]]; then
@@ -81,6 +116,7 @@ else
 	echo "Building core.so (OpenMP)"
 	gx1 ocmesher/lib/core.o "" "-fopenmp"
 	gx2 ocmesher/lib/core.so ocmesher/lib/core.o "-fopenmp"
+	patch_core_omp_runtime_macos
 	rm -f ocmesher/lib/core.o
 
 	echo "Building core_noomp.so"
