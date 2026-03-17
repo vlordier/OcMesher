@@ -277,6 +277,99 @@ auto projectedSize(const Cube& c) -> T { // NOLINT(modernize-use-trailing-return
     return max_size;
 }
 
+// Batch projection: projects multiple cubes for a single camera.
+// Reduces redundant camera matrix loads and improves cache locality.
+// icoords_out and depth_out are arrays of size batch_size with stride 3 for icoords, 1 for depth.
+inline void batchProjectedCoords(                                           // NOLINT
+    const Cube* __restrict cubes,     // NOLINT(readability-identifier-length)
+    int batch_size, int k, T* __restrict icoords_out,  // NOLINT(readability-identifier-length)
+    T* __restrict depth_out) {
+    using namespace params;
+    T* __restrict current_cam = cams + static_cast<ptrdiff_t>(k) * (12 + 9 + 2); // NOLINT
+    // Cache camera matrix elements to reduce indirection
+    const T cam_rot[3][3] = {
+        {current_cam[0], current_cam[1], current_cam[2]},
+        {current_cam[4], current_cam[5], current_cam[6]},
+        {current_cam[8], current_cam[9], current_cam[10]},
+    };
+    const T cam_trans[3] = {current_cam[3], current_cam[7], current_cam[11]};
+    const T proj_matrix[3][3] = {
+        {current_cam[12], current_cam[13], current_cam[14]},
+        {current_cam[15], current_cam[16], current_cam[17]},
+        {current_cam[18], current_cam[19], current_cam[20]},
+    };
+
+#pragma omp parallel for schedule(static)
+    for (int b = 0; b < batch_size; b++) { // NOLINT(modernize-loop-convert)
+        const Cube& c = cubes[b];
+        T scale = size / (1 << c.m_l);
+        T cx = center[0] - size / 2 + scale * (c.m_coords[0] + 0.5);
+        T cy = center[1] - size / 2 + scale * (c.m_coords[1] + 0.5);
+        T cz = center[2] - size / 2 + scale * (c.m_coords[2] + 0.5);
+        T pc0 = cam_trans[0] + cx * cam_rot[0][0] + cy * cam_rot[0][1] + cz * cam_rot[0][2];
+        T pc1 = cam_trans[1] + cx * cam_rot[1][0] + cy * cam_rot[1][1] + cz * cam_rot[1][2];
+        T pc2 = cam_trans[2] + cx * cam_rot[2][0] + cy * cam_rot[2][1] + cz * cam_rot[2][2];
+
+        if (depth_out != nullptr) {
+            T r = std::sqrt(pc0 * pc0 + pc1 * pc1 + pc2 * pc2);
+            depth_out[b] = std::max(r, min_dist);
+        }
+
+        if (icoords_out != nullptr) {
+            T ic0 = pc0 * proj_matrix[0][0] + pc1 * proj_matrix[0][1] + pc2 * proj_matrix[0][2];
+            T ic1 = pc0 * proj_matrix[1][0] + pc1 * proj_matrix[1][1] + pc2 * proj_matrix[1][2];
+            T ic2 = pc0 * proj_matrix[2][0] + pc1 * proj_matrix[2][1] + pc2 * proj_matrix[2][2];
+            icoords_out[b * 3 + 0] = static_cast<T>(ic0 / ic2);
+            icoords_out[b * 3 + 1] = static_cast<T>(ic1 / ic2);
+            icoords_out[b * 3 + 2] = ic2;
+        }
+    }
+}
+
+// Batch projected size: compute max projected sizes for multiple cubes across all cameras.
+// Reduces redundant sqrt/division operations when projecting many cubes.
+inline void batchProjectedSize(const Cube* __restrict cubes, int batch_size,
+                               T* __restrict sizes_out) { // NOLINT
+    using namespace params;
+    std::vector<std::vector<T>> proj_sizes(static_cast<std::size_t>(batch_size),
+                                           std::vector<T>(static_cast<std::size_t>(n_cams), 0.0));
+
+    for (int k = 0; k < n_cams; k++) { // NOLINT(readability-identifier-length)
+        T* __restrict current_cam = cams + static_cast<ptrdiff_t>(k) * (12 + 9 + 2); // NOLINT
+        const T cam_rot[3][3] = {
+            {current_cam[0], current_cam[1], current_cam[2]},
+            {current_cam[4], current_cam[5], current_cam[6]},
+            {current_cam[8], current_cam[9], current_cam[10]},
+        };
+        const T cam_trans[3] = {current_cam[3], current_cam[7], current_cam[11]};
+        T cam_pix_ang = cam_pix_ang_ppc[static_cast<std::size_t>(k)];
+
+#pragma omp parallel for schedule(static)
+        for (int b = 0; b < batch_size; b++) { // NOLINT(modernize-loop-convert)
+            const Cube& c = cubes[b];
+            T scale = size / (1 << c.m_l);
+            T cx = center[0] - size / 2 + scale * (c.m_coords[0] + 0.5);
+            T cy = center[1] - size / 2 + scale * (c.m_coords[1] + 0.5);
+            T cz = center[2] - size / 2 + scale * (c.m_coords[2] + 0.5);
+            T pc0 = cam_trans[0] + cx * cam_rot[0][0] + cy * cam_rot[0][1] + cz * cam_rot[0][2];
+            T pc1 = cam_trans[1] + cx * cam_rot[1][0] + cy * cam_rot[1][1] + cz * cam_rot[1][2];
+            T pc2 = cam_trans[2] + cx * cam_rot[2][0] + cy * cam_rot[2][1] + cz * cam_rot[2][2];
+            T r = std::sqrt(pc0 * pc0 + pc1 * pc1 + pc2 * pc2);
+            r = std::max(r, min_dist);
+            proj_sizes[static_cast<std::size_t>(b)][static_cast<std::size_t>(k)] =
+                size / (1 << c.m_l) / r / cam_pix_ang;
+        }
+    }
+    // Reduce to max per cube
+    for (int b = 0; b < batch_size; b++) { // NOLINT(modernize-loop-convert)
+        T max_size = 0;
+        for (int k = 0; k < n_cams; k++) { // NOLINT(readability-identifier-length)
+            max_size = std::max(max_size, proj_sizes[static_cast<std::size_t>(b)][static_cast<std::size_t>(k)]);
+        }
+        sizes_out[b] = max_size;
+    }
+}
+
 void expandOctree(std::vector<Node>& nodes, int index) {
     assert(isLeafNode(nodes[index]));
     for (int i = 0; i < 8; i++) {

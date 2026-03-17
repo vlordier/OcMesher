@@ -356,36 +356,69 @@ int vis_filter( // NOLINT(readability-identifier-naming, modernize-use-trailing-
             int min_y = -relax_iters;
             int max_x = width + relax_iters;
             int max_y = height + relax_iters;
+            // Batch-project all unresolved cubes for this camera to improve cache locality
+            std::vector<int> unresolved_idx;
+            for (int i = 0; i < cubes_n; i++)
+                if (visible[static_cast<std::size_t>(i)] == 0)
+                    unresolved_idx.push_back(i);
+            
+            if (!unresolved_idx.empty()) {
+                std::vector<T> batch_icoords(unresolved_idx.size() * 3);
+                std::vector<Cube> batch_cubes(unresolved_idx.size());
+                for (std::size_t b = 0; b < unresolved_idx.size(); b++)
+                    batch_cubes[b] = cubes[static_cast<std::size_t>(unresolved_idx[b])];
+                
+                batchProjectedCoords(batch_cubes.data(), static_cast<int>(unresolved_idx.size()), k,
+                                     batch_icoords.data(), nullptr);
 #pragma omp parallel for
-            for (int i = 0; i < cubes_n; i++) { // NOLINT(modernize-loop-convert)
-                if (visible[static_cast<std::size_t>(i)] != 0)
-                    continue;
-                T image_coords[3];
-                projectedCoords(cubes[i], k, image_coords, nullptr);
-                T z = image_coords[2];
-                if (z < 0)
-                    continue;
-                int x = static_cast<int>(std::floor(image_coords[0] / factor));
-                int y = static_cast<int>(std::floor(image_coords[1] / factor));
-                if (x >= min_x && y >= min_y && x < max_x && y < max_y)
-                    visible[static_cast<std::size_t>(i)] = 1;
+                for (std::size_t b = 0; b < unresolved_idx.size(); b++) { // NOLINT
+                    int i = unresolved_idx[b];
+                    T z = batch_icoords[b * 3 + 2];
+                    if (z >= 0) {
+                        int x = static_cast<int>(std::floor(batch_icoords[b * 3 + 0] / factor));
+                        int y = static_cast<int>(std::floor(batch_icoords[b * 3 + 1] / factor));
+                        if (x >= min_x && y >= min_y && x < max_x && y < max_y)
+                            visible[static_cast<std::size_t>(i)] = 1;
+                    }
+                }
             }
             continue;
         } else {
             // Only project unresolved cubes; already-visible cubes can be skipped for later cameras.
             std::size_t cubes_n_sz = static_cast<std::size_t>(cubes_n);
+            std::vector<int> unresolved_idx;
+            for (int i = 0; i < cubes_n; i++)
+                if (visible[static_cast<std::size_t>(i)] == 0)
+                    unresolved_idx.push_back(i);
+            
+            if (!unresolved_idx.empty()) {
+                std::vector<T> batch_icoords(unresolved_idx.size() * 3);
+                std::vector<T> batch_depth(unresolved_idx.size());
+                std::vector<Cube> batch_cubes(unresolved_idx.size());
+                for (std::size_t b = 0; b < unresolved_idx.size(); b++)
+                    batch_cubes[b] = cubes[static_cast<std::size_t>(unresolved_idx[b])];
+                
+                batchProjectedCoords(batch_cubes.data(), static_cast<int>(unresolved_idx.size()), k,
+                                     batch_icoords.data(), batch_depth.data());
+                
 #pragma omp parallel for
-            for (int i = 0; i < cubes_n; i++) { // NOLINT(modernize-loop-convert)
-                std::size_t is = static_cast<std::size_t>(i);
-                if (visible[is] != 0) {
-                    depth[is] = static_cast<T>(-1);
-                    continue;
+                for (std::size_t b = 0; b < unresolved_idx.size(); b++) { // NOLINT
+                    int i = unresolved_idx[b];
+                    std::size_t is = static_cast<std::size_t>(i);
+                    T z = batch_icoords[b * 3 + 2];
+                    if (z >= 0) {
+                        depth[is] = z;
+                        proj_x[is] = static_cast<int>(std::floor(batch_icoords[b * 3 + 0] / factor));
+                        proj_y[is] = static_cast<int>(std::floor(batch_icoords[b * 3 + 1] / factor));
+                    } else {
+                        depth[is] = static_cast<T>(-1);
+                    }
                 }
-                T image_coords[3];
-                projectedCoords(cubes[i], k, image_coords, nullptr);
-                depth[is] = image_coords[2];
-                proj_x[is] = static_cast<int>(std::floor(image_coords[0] / factor));
-                proj_y[is] = static_cast<int>(std::floor(image_coords[1] / factor));
+            } else {
+                // All cubes already visible, fill defaults
+                for (int i = 0; i < cubes_n; i++) {
+                    depth[static_cast<std::size_t>(i)] = static_cast<T>(-1);
+                }
             }
             // Build per-thread depth buffers to avoid omp critical contention,
             // then reduce with a single sequential min-pass.
