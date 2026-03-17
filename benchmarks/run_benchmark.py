@@ -1,7 +1,7 @@
 # Copyright (c) Princeton University.
 # This source code is licensed under the BSD 3-Clause license found in the LICENSE file in the root directory of this source tree.
 
-"""Comprehensive benchmark: original Python + C++ backend vs. Rust+tch backend.
+"""Comprehensive benchmark: original Python + C++ backend vs. PyTorch backend.
 
 Run from the repository root::
 
@@ -273,7 +273,7 @@ def _bench_original(
     }
 
 
-def _bench_rust_tch(
+def _bench_torch(
     cameras,
     bounds,
     pixels_per_cube: int,
@@ -281,25 +281,31 @@ def _bench_rust_tch(
     n_runs: int = 1,
     warmup: int = 0,
     device: str | None = None,
+    n_sdf_workers: int = 4,
     *,
+    use_compile: bool = False,
     adaptive_runs: bool = False,
     max_runs: int = 10,
     target_cv: float = 0.05,
 ):
-    """Benchmark the Rust+tch backend directly via RustOcMesher factory."""
+    """Benchmark the PyTorch TorchOcMesher backend."""
     try:
-        from ocmesher import make_rust_ocmesher
+        import torch  # noqa: F401
+
+        from ocmesher.torch_core import TorchOcMesher
     except Exception as exc:  # noqa: BLE001
-        return {"error": f"Could not load Rust+tch backend: {exc}"}
+        return {"error": f"Could not load TorchOcMesher: {exc}"}
 
     kernel = _SDF_KERNELS[sdf_name]
-    # Warmup run to amortize initialization overhead.
+    # Warmup (especially important when use_compile=True to amortise JIT cost)
     for _ in range(warmup):
-        mesher = make_rust_ocmesher(
+        mesher = TorchOcMesher(
             cameras,
             bounds,
             pixels_per_cube=pixels_per_cube,
             device=device,
+            n_sdf_workers=n_sdf_workers,
+            use_compile=use_compile,
         )
         mesher([kernel])
 
@@ -308,11 +314,13 @@ def _bench_rust_tch(
     run_limit = max(max_runs, n_runs) if adaptive_runs else n_runs
     for i in range(run_limit):
         t0 = time.perf_counter()
-        mesher = make_rust_ocmesher(
+        mesher = TorchOcMesher(
             cameras,
             bounds,
             pixels_per_cube=pixels_per_cube,
             device=device,
+            n_sdf_workers=n_sdf_workers,
+            use_compile=use_compile,
         )
         meshes, _tags = mesher([kernel])
         elapsed = time.perf_counter() - t0
@@ -325,7 +333,9 @@ def _bench_rust_tch(
         if adaptive_runs and _should_stop_adaptive(times, n_runs, target_cv):
             break
 
-    backend_tag = f"rust_tch_{device or 'auto'}"
+    backend_tag = f"pytorch_{device or 'auto'}"
+    if use_compile:
+        backend_tag += "+compile"
     return {
         "backend": backend_tag,
         "sdf": sdf_name,
@@ -1055,7 +1065,7 @@ def _run_profile_benchmark(
 # ---------------------------------------------------------------------------
 def main() -> None:
     """Run benchmarks and log results."""
-    parser = argparse.ArgumentParser(description="OcMesher benchmark: Python+C++ vs Rust+tch")
+    parser = argparse.ArgumentParser(description="OcMesher benchmark: Python+C++ vs PyTorch")
     parser.add_argument("--full", action="store_true", help="Run full benchmark (slower, higher resolution)")
     parser.add_argument("--profile", action="store_true", help="Run sub-operation micro-benchmarks")
     parser.add_argument("--runs", type=int, default=3, help="Number of end-to-end runs (default 3)")
@@ -1187,8 +1197,8 @@ def main() -> None:
 
         for dev_str in bench_devices:
             label = {"cpu": "CPU", "cuda": "CUDA", "mps": "MPS"}.get(dev_str, dev_str.upper())
-            _print_section(f"End-to-end: Rust+tch {label} ({sdf_name})")
-            r_torch = _bench_rust_tch(
+            _print_section(f"End-to-end: PyTorch {label} ({sdf_name})")
+            r_torch = _bench_torch(
                 cameras,
                 bounds,
                 pixels_per_cube,
@@ -1201,7 +1211,7 @@ def main() -> None:
                 target_cv=args.target_cv,
             )
             _print_result(r_torch)
-            results[f"rust_tch_{dev_str}_{sdf_name}"] = r_torch
+            results[f"torch_{dev_str}_{sdf_name}"] = r_torch
 
     # Micro-benchmarks (only with --profile) --------------------------------
     if args.profile:
@@ -1235,15 +1245,15 @@ def main() -> None:
     logger.info("%s", "=" * 70)
     for sdf_name in sdf_names:
         r_orig = results.get(f"original_{sdf_name}", {})
-        r_torch_cpu = results.get(f"rust_tch_cpu_{sdf_name}", {})
-        r_gpu = results.get(f"rust_tch_cuda_{sdf_name}", {})
-        r_mps = results.get(f"rust_tch_mps_{sdf_name}", {})
+        r_torch_cpu = results.get(f"torch_cpu_{sdf_name}", {})
+        r_gpu = results.get(f"torch_cuda_{sdf_name}", {})
+        r_mps = results.get(f"torch_mps_{sdf_name}", {})
 
         if r_orig and "error" not in r_orig and r_torch_cpu and "error" not in r_torch_cpu:
             sp = r_orig["mean_s"] / max(r_torch_cpu["mean_s"], 1e-6)
             tag = "faster" if sp > 1 else "slower"
             logger.info(
-                "  [%s] Rust+tch CPU vs C++: %.2fx %s  (%.3fs vs %.3fs)",
+                "  [%s] PyTorch CPU  vs C++: %.2fx %s  (%.3fs vs %.3fs)",
                 sdf_name,
                 sp,
                 tag,
@@ -1254,7 +1264,7 @@ def main() -> None:
             sp_g = r_orig["mean_s"] / max(r_gpu["mean_s"], 1e-6)
             tag_g = "faster" if sp_g > 1 else "slower"
             logger.info(
-                "  [%s] Rust+tch CUDA vs C++: %.2fx %s  (%.3fs vs %.3fs)",
+                "  [%s] PyTorch CUDA vs C++: %.2fx %s  (%.3fs vs %.3fs)",
                 sdf_name,
                 sp_g,
                 tag_g,
@@ -1265,7 +1275,7 @@ def main() -> None:
             sp_m = r_orig["mean_s"] / max(r_mps["mean_s"], 1e-6)
             tag_m = "faster" if sp_m > 1 else "slower"
             logger.info(
-                "  [%s] Rust+tch MPS vs C++: %.2fx %s  (%.3fs vs %.3fs)",
+                "  [%s] PyTorch MPS  vs C++: %.2fx %s  (%.3fs vs %.3fs)",
                 sdf_name,
                 sp_m,
                 tag_m,
@@ -1278,7 +1288,7 @@ def main() -> None:
             sp_gc = r_torch_cpu["mean_s"] / max(r_gpu["mean_s"], 1e-6)
             tag_gc = "faster" if sp_gc > 1 else "slower"
             logger.info(
-                "  [%s] Rust+tch CUDA vs CPU: %.2fx %s  (%.3fs vs %.3fs)",
+                "  [%s] PyTorch CUDA vs CPU: %.2fx %s  (%.3fs vs %.3fs)",
                 sdf_name,
                 sp_gc,
                 tag_gc,
@@ -1289,7 +1299,7 @@ def main() -> None:
             sp_mc = r_torch_cpu["mean_s"] / max(r_mps["mean_s"], 1e-6)
             tag_mc = "faster" if sp_mc > 1 else "slower"
             logger.info(
-                "  [%s] Rust+tch MPS vs CPU: %.2fx %s  (%.3fs vs %.3fs)",
+                "  [%s] PyTorch MPS  vs CPU: %.2fx %s  (%.3fs vs %.3fs)",
                 sdf_name,
                 sp_mc,
                 tag_mc,
