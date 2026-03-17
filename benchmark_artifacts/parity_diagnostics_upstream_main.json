@@ -1,0 +1,475 @@
+{
+  "baseline_ref": "upstream/main",
+  "upstream_repo": "https://github.com/princeton-vl/OcMesher.git",
+  "case": {
+    "sdf": "sphere(radius=5.0)",
+    "bounds": [
+      -5,
+      5,
+      -5,
+      5,
+      -2,
+      2
+    ],
+    "pixels_per_cube": 32,
+    "coarse_count": 100000
+  },
+  "baseline": {
+    "verts": 1336,
+    "faces": 2668,
+    "verts_sum": 1368.7496361732483,
+    "faces_sum": 5281315
+  },
+  "modes_ranked": [
+    {
+      "mode": "tch_scene_cpu",
+      "signature": {
+        "verts": 1370,
+        "faces": 2734,
+        "verts_sum": 1352.9367498034521,
+        "faces_sum": 5485650
+      },
+      "delta": {
+        "verts_delta": 34,
+        "faces_delta": 66,
+        "verts_sum_delta": -15.81288636979616,
+        "faces_sum_delta": 204335
+      },
+      "score": 122.01478863697962
+    },
+    {
+      "mode": "tch_scene_mps",
+      "signature": {
+        "verts": 1370,
+        "faces": 2734,
+        "verts_sum": 1352.9367498034521,
+        "faces_sum": 5485650
+      },
+      "delta": {
+        "verts_delta": 34,
+        "faces_delta": 66,
+        "verts_sum_delta": -15.81288636979616,
+        "faces_sum_delta": 204335
+      },
+      "score": 122.01478863697962
+    },
+    {
+      "mode": "native_scene",
+      "signature": {
+        "verts": 1386,
+        "faces": 2760,
+        "verts_sum": 1356.2719502359153,
+        "faces_sum": 5570794
+      },
+      "delta": {
+        "verts_delta": 50,
+        "faces_delta": 92,
+        "verts_sum_delta": -12.477685937333035,
+        "faces_sum_delta": 289479
+      },
+      "score": 172.1956685937333
+    }
+  ],
+  "wrapper_sweep_top": [
+    {
+      "params": {
+        "inv_scale": 10,
+        "min_dist": 1,
+        "bisection_iters": 22
+      },
+      "signature": {
+        "verts": 1349,
+        "faces": 2692,
+        "verts_sum": 1385.8245021998882,
+        "faces_sum": 5361884
+      },
+      "delta": {
+        "verts_delta": 13,
+        "faces_delta": 24,
+        "verts_sum_delta": 17.07486602663994,
+        "faces_sum_delta": 80569
+      },
+      "score": 46.76438660266399
+    },
+    {
+      "params": {
+        "inv_scale": 10,
+        "min_dist": 2,
+        "bisection_iters": 18
+      },
+      "signature": {
+        "verts": 1328,
+        "faces": 2646,
+        "verts_sum": 1286.665922164917,
+        "faces_sum": 5133468
+      },
+      "delta": {
+        "verts_delta": -8,
+        "faces_delta": -22,
+        "verts_sum_delta": -82.0837140083313,
+        "faces_sum_delta": -147847
+      },
+      "score": 52.99307140083313
+    },
+    {
+      "params": {
+        "inv_scale": 10,
+        "min_dist": 1,
+        "bisection_iters": 18
+      },
+      "signature": {
+        "verts": 1376,
+        "faces": 2742,
+        "verts_sum": 1384.290922164917,
+        "faces_sum": 5513974
+      },
+      "delta": {
+        "verts_delta": 40,
+        "faces_delta": 74,
+        "verts_sum_delta": 15.541285991668701,
+        "faces_sum_delta": 232659
+      },
+      "score": 138.82002859916687
+    },
+    {
+      "params": {
+        "inv_scale": 10,
+        "min_dist": 2,
+        "bisection_iters": 22
+      },
+      "signature": {
+        "verts": 1301,
+        "faces": 2596,
+        "verts_sum": 1288.1995021998882,
+        "faces_sum": 4986288
+      },
+      "delta": {
+        "verts_delta": -35,
+        "faces_delta": -72,
+        "verts_sum_delta": -80.55013397336006,
+        "faces_sum_delta": -295027
+      },
+      "score": 144.55771339733602
+    },
+    {
+      "params": {
+        "inv_scale": 10,
+        "min_dist": 2,
+        "bisection_iters": 26
+      },
+      "signature": {
+        "verts": 1375,
+        "faces": 2740,
+        "verts_sum": 1152.4832663368434,
+        "faces_sum": 5407912
+      },
+      "delta": {
+        "verts_delta": 39,
+        "faces_delta": 72,
+        "verts_sum_delta": -216.26636983640492,
+        "faces_sum_delta": 126597
+      },
+      "score": 145.28633698364047
+    },
+    {
+      "params": {
+        "inv_scale": 10,
+        "min_dist": 1,
+        "bisection_iters": 26
+      },
+      "signature": {
+        "verts": 1423,
+        "faces": 2836,
+        "verts_sum": 1250.1082663368434,
+        "faces_sum": 5797421
+      },
+      "delta": {
+        "verts_delta": 87,
+        "faces_delta": 168,
+        "verts_sum_delta": -118.64136983640492,
+        "faces_sum_delta": 516106
+      },
+      "score": 318.47473698364047
+    },
+    {
+      "params": {
+        "inv_scale": 12,
+        "min_dist": 1,
+        "bisection_iters": 26
+      },
+      "signature": {
+        "verts": 1142,
+        "faces": 2280,
+        "verts_sum": 734.3522078455426,
+        "faces_sum": 3735193
+      },
+      "delta": {
+        "verts_delta": -194,
+        "faces_delta": -388,
+        "verts_sum_delta": -634.3974283277057,
+        "faces_sum_delta": -1546122
+      },
+      "score": 800.0519428327706
+    },
+    {
+      "params": {
+        "inv_scale": 12,
+        "min_dist": 1,
+        "bisection_iters": 18
+      },
+      "signature": {
+        "verts": 1095,
+        "faces": 2186,
+        "verts_sum": 864.9749133586884,
+        "faces_sum": 3505056
+      },
+      "delta": {
+        "verts_delta": -241,
+        "faces_delta": -482,
+        "verts_sum_delta": -503.77472281455994,
+        "faces_sum_delta": -1776259
+      },
+      "score": 951.003372281456
+    },
+    {
+      "params": {
+        "inv_scale": 12,
+        "min_dist": 1,
+        "bisection_iters": 22
+      },
+      "signature": {
+        "verts": 1073,
+        "faces": 2142,
+        "verts_sum": 863.6682521998882,
+        "faces_sum": 3398965
+      },
+      "delta": {
+        "verts_delta": -263,
+        "faces_delta": -526,
+        "verts_sum_delta": -505.08138397336006,
+        "faces_sum_delta": -1882350
+      },
+      "score": 1027.743138397336
+    },
+    {
+      "params": {
+        "inv_scale": 12,
+        "min_dist": 2,
+        "bisection_iters": 26
+      },
+      "signature": {
+        "verts": 962,
+        "faces": 1920,
+        "verts_sum": 373.4147078455426,
+        "faces_sum": 2640000
+      },
+      "delta": {
+        "verts_delta": -374,
+        "faces_delta": -748,
+        "verts_sum_delta": -995.3349283277057,
+        "faces_sum_delta": -2641315
+      },
+      "score": 1485.6649928327706
+    },
+    {
+      "params": {
+        "inv_scale": 12,
+        "min_dist": 2,
+        "bisection_iters": 18
+      },
+      "signature": {
+        "verts": 915,
+        "faces": 1826,
+        "verts_sum": 504.03741335868835,
+        "faces_sum": 2443387
+      },
+      "delta": {
+        "verts_delta": -421,
+        "faces_delta": -842,
+        "verts_sum_delta": -864.7122228145599,
+        "faces_sum_delta": -2837928
+      },
+      "score": 1633.264022281456
+    },
+    {
+      "params": {
+        "inv_scale": 12,
+        "min_dist": 2,
+        "bisection_iters": 22
+      },
+      "signature": {
+        "verts": 893,
+        "faces": 1782,
+        "verts_sum": 502.73075219988823,
+        "faces_sum": 2353079
+      },
+      "delta": {
+        "verts_delta": -443,
+        "faces_delta": -886,
+        "verts_sum_delta": -866.0188839733601,
+        "faces_sum_delta": -2928236
+      },
+      "score": 1708.425488397336
+    },
+    {
+      "params": {
+        "inv_scale": 16,
+        "min_dist": 1,
+        "bisection_iters": 26
+      },
+      "signature": {
+        "verts": 699,
+        "faces": 1384,
+        "verts_sum": 557.4146146127023,
+        "faces_sum": 1362308
+      },
+      "delta": {
+        "verts_delta": -637,
+        "faces_delta": -1284,
+        "verts_sum_delta": -811.335021560546,
+        "faces_sum_delta": -3919007
+      },
+      "score": 2394.0342021560546
+    },
+    {
+      "params": {
+        "inv_scale": 16,
+        "min_dist": 1,
+        "bisection_iters": 18
+      },
+      "signature": {
+        "verts": 685,
+        "faces": 1360,
+        "verts_sum": 519.5673477486959,
+        "faces_sum": 1320311
+      },
+      "delta": {
+        "verts_delta": -651,
+        "faces_delta": -1308,
+        "verts_sum_delta": -849.1822884245524,
+        "faces_sum_delta": -3961004
+      },
+      "score": 2440.018628842455
+    },
+    {
+      "params": {
+        "inv_scale": 16,
+        "min_dist": 1,
+        "bisection_iters": 22
+      },
+      "signature": {
+        "verts": 661,
+        "faces": 1312,
+        "verts_sum": 574.0009424760938,
+        "faces_sum": 1248706
+      },
+      "delta": {
+        "verts_delta": -675,
+        "faces_delta": -1356,
+        "verts_sum_delta": -794.7486936971545,
+        "faces_sum_delta": -4032609
+      },
+      "score": 2513.735769369716
+    },
+    {
+      "params": {
+        "inv_scale": 16,
+        "min_dist": 2,
+        "bisection_iters": 26
+      },
+      "signature": {
+        "verts": 651,
+        "faces": 1288,
+        "verts_sum": 461.1646146127023,
+        "faces_sum": 1178459
+      },
+      "delta": {
+        "verts_delta": -685,
+        "faces_delta": -1380,
+        "verts_sum_delta": -907.585021560546,
+        "faces_sum_delta": -4102856
+      },
+      "score": 2566.0441021560546
+    },
+    {
+      "params": {
+        "inv_scale": 16,
+        "min_dist": 2,
+        "bisection_iters": 18
+      },
+      "signature": {
+        "verts": 637,
+        "faces": 1264,
+        "verts_sum": 423.3173477486958,
+        "faces_sum": 1138932
+      },
+      "delta": {
+        "verts_delta": -699,
+        "faces_delta": -1404,
+        "verts_sum_delta": -945.4322884245526,
+        "faces_sum_delta": -4142383
+      },
+      "score": 2611.7815288424554
+    },
+    {
+      "params": {
+        "inv_scale": 16,
+        "min_dist": 2,
+        "bisection_iters": 22
+      },
+      "signature": {
+        "verts": 613,
+        "faces": 1216,
+        "verts_sum": 477.75094247609377,
+        "faces_sum": 1071886
+      },
+      "delta": {
+        "verts_delta": -723,
+        "faces_delta": -1452,
+        "verts_sum_delta": -890.9986936971545,
+        "faces_sum_delta": -4209429
+      },
+      "score": 2685.0427693697156
+    },
+    {
+      "params": {
+        "inv_scale": 8,
+        "min_dist": 2,
+        "bisection_iters": 22
+      },
+      "signature": {
+        "verts": 2265,
+        "faces": 4516,
+        "verts_sum": 2202.7507216259837,
+        "faces_sum": 14935764
+      },
+      "delta": {
+        "verts_delta": 929,
+        "faces_delta": 1848,
+        "verts_sum_delta": 834.0010854527354,
+        "faces_sum_delta": 9654449
+      },
+      "score": 3825.8450085452737
+    },
+    {
+      "params": {
+        "inv_scale": 8,
+        "min_dist": 2,
+        "bisection_iters": 18
+      },
+      "signature": {
+        "verts": 2268,
+        "faces": 4526,
+        "verts_sum": 2199.1428623437882,
+        "faces_sum": 14973960
+      },
+      "delta": {
+        "verts_delta": 932,
+        "faces_delta": 1858,
+        "verts_sum_delta": 830.39322617054,
+        "faces_sum_delta": 9692645
+      },
+      "score": 3842.303822617054
+    }
+  ]
+}
