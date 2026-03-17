@@ -319,9 +319,28 @@ pub(crate) fn eval_sdf_min_native(
 pub mod tch_kernels {
     use super::{BoxedSdfEvaluator, PrimitiveSpec, SdfEvaluator};
     use crate::CoreError;
+    use std::sync::Mutex;
     use tch::{Device, Kind, Tensor};
 
     const GPU_BATCH_THRESHOLD: usize = 131072;
+
+    #[derive(Default)]
+    struct TchScratch {
+        xyz_f32: Vec<f32>,
+    }
+
+    fn fill_xyz_f32_buffer(xyz: &[f64], out: &mut Vec<f32>) {
+        out.clear();
+        out.reserve(xyz.len().saturating_sub(out.capacity()));
+        out.extend(xyz.iter().map(|value| *value as f32));
+    }
+
+    fn copy_tensor_to_vec(tensor: &Tensor, out: &mut Vec<f32>) {
+        out.clear();
+        out.resize(tensor.numel(), 0.0);
+        let len = out.len();
+        tensor.copy_data(out, len);
+    }
 
     fn normalize_normal_f32(normal: [f32; 3]) -> Result<[f32; 3], CoreError> {
         let norm = (normal[0] * normal[0] + normal[1] * normal[1] + normal[2] * normal[2]).sqrt();
@@ -358,11 +377,11 @@ pub mod tch_kernels {
         Ok(kernels)
     }
 
-    #[derive(Clone, Debug)]
     pub struct TchPlaneKernel {
         normal: [f32; 3],
         offset: f32,
         device: Device,
+        scratch: Mutex<TchScratch>,
     }
 
     impl TchPlaneKernel {
@@ -372,15 +391,16 @@ pub mod tch_kernels {
                 normal,
                 offset,
                 device,
+                scratch: Mutex::new(TchScratch::default()),
             })
         }
     }
 
-    #[derive(Clone, Debug)]
     pub struct TchSphereKernel {
         center: [f32; 3],
         radius: f32,
         device: Device,
+        scratch: Mutex<TchScratch>,
     }
 
     impl TchSphereKernel {
@@ -389,6 +409,7 @@ pub mod tch_kernels {
                 center,
                 radius,
                 device,
+                scratch: Mutex::new(TchScratch::default()),
             }
         }
     }
@@ -415,10 +436,16 @@ pub mod tch_kernels {
                 return Ok(());
             }
 
-            let xyz_tensor = Tensor::from_slice(xyz)
-                .view([n_pts as i64, 3])
-                .to_kind(Kind::Float)
-                .to_device(self.device);
+            let xyz_tensor = {
+                let mut scratch = self
+                    .scratch
+                    .lock()
+                    .map_err(|_| CoreError::Sdf("TchSphereKernel scratch lock poisoned".to_string()))?;
+                fill_xyz_f32_buffer(xyz, &mut scratch.xyz_f32);
+                Tensor::from_slice(&scratch.xyz_f32)
+                    .view([n_pts as i64, 3])
+                    .to_device(self.device)
+            };
             let center = Tensor::from_slice(&self.center)
                 .view([1, 3])
                 .to_device(self.device);
@@ -430,10 +457,7 @@ pub mod tch_kernels {
                 - (self.radius as f64);
             let dist_cpu = dist.to_device(Device::Cpu);
 
-            out.clear();
-            out.resize(dist_cpu.numel(), 0.0);
-            let len = out.len();
-            dist_cpu.copy_data(out, len);
+            copy_tensor_to_vec(&dist_cpu, out);
             Ok(())
         }
     }
@@ -462,20 +486,23 @@ pub mod tch_kernels {
                 return Ok(());
             }
 
-            let xyz_tensor = Tensor::from_slice(xyz)
-                .view([n_pts as i64, 3])
-                .to_kind(Kind::Float)
-                .to_device(self.device);
+            let xyz_tensor = {
+                let mut scratch = self
+                    .scratch
+                    .lock()
+                    .map_err(|_| CoreError::Sdf("TchPlaneKernel scratch lock poisoned".to_string()))?;
+                fill_xyz_f32_buffer(xyz, &mut scratch.xyz_f32);
+                Tensor::from_slice(&scratch.xyz_f32)
+                    .view([n_pts as i64, 3])
+                    .to_device(self.device)
+            };
             let normal = Tensor::from_slice(&self.normal)
                 .view([3, 1])
                 .to_device(self.device);
             let dist = xyz_tensor.matmul(&normal).squeeze_dim(1) - (self.offset as f64);
             let dist_cpu = dist.to_device(Device::Cpu);
 
-            out.clear();
-            out.resize(dist_cpu.numel(), 0.0);
-            let len = out.len();
-            dist_cpu.copy_data(out, len);
+            copy_tensor_to_vec(&dist_cpu, out);
             Ok(())
         }
     }
