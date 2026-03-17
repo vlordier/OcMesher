@@ -401,11 +401,8 @@ void findEdges(const Node& n, std::unordered_map<KeyCube, int, KeyCubeHash>& ver
                std::vector<std::vector<KeyEdge>>& bipolar_edges) {
     int s = gridNodeLevel(n), ss = 1 << s;
     const int n_vertices = cubex(ss + 1);
-    // Reuse static buffers to avoid per-call heap allocation.
-    static std::vector<Vertex> vertices_local;
-    static std::vector<sdfT*> sdf_vertices;
-    vertices_local.resize(static_cast<size_t>(n_vertices));
-    sdf_vertices.resize(static_cast<size_t>(n_vertices));
+    std::vector<Vertex> vertices_local(static_cast<size_t>(n_vertices));
+    std::vector<sdfT*> sdf_vertices(static_cast<size_t>(n_vertices));
     enumerateVertices(vertices_local.data(), n);
     for (int i = 0; i < n_vertices; i++) {
         sdf_vertices[static_cast<size_t>(i)] =

@@ -569,7 +569,6 @@ int final_iteration() { // NOLINT(readability-identifier-naming, modernize-use-t
     assert(end_node != start_node);
 
     vertices.clear();
-    vertices.reserve(static_cast<size_t>(total_verts));
     size0 = static_cast<int>(nodes.size());
     assert(new_nodes.empty());
     for (int i = start_node; i < end_node; i++) {
