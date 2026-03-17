@@ -34,6 +34,25 @@ class DummyRustBackend:
         return ["mesh"], [np.ones((5,), dtype=bool)]
 
 
+class DummyRustBackendWithScenes(DummyRustBackend):
+    def __init__(self):
+        super().__init__()
+        self.extract_native_scene_calls = 0
+        self.extract_tch_scene_calls = 0
+
+    def extract_native_scene(self, specs: list[dict[str, Any]]) -> tuple[list[str], list[np.ndarray[Any, Any]]]:
+        self.extract_native_scene_calls += 1
+        self.last_calls.append(("native", specs))
+        return ["mesh"], [np.ones((5,), dtype=bool)]
+
+    def extract_tch_scene(
+        self, specs: list[dict[str, Any]], device: str | None = None
+    ) -> tuple[list[str], list[np.ndarray[Any, Any]]]:
+        self.extract_tch_scene_calls += 1
+        self.last_calls.append(("tch", specs, device))
+        return ["mesh"], [np.ones((5,), dtype=bool)]
+
+
 def test_build_batched_sdf_kernels_prefers_evaluate_batch():
     calls = []
 
@@ -74,6 +93,33 @@ def test_rust_ocmesher_returns_backend_payload(sample_cameras, sample_bounds, sp
     assert meshes == ["mesh"]
     assert len(tags) == 1
     assert tags[0].shape == (5,)
+
+
+def test_rust_ocmesher_prefers_tch_scene_on_mps(sample_cameras, sample_bounds, sphere_kernel):
+    backend = DummyRustBackendWithScenes()
+    mesher = RustOcMesher(sample_cameras, sample_bounds, backend=backend, device="mps")
+
+    meshes, tags = mesher([sphere_kernel])
+
+    assert meshes == ["mesh"]
+    assert len(tags) == 1
+    assert backend.extract_tch_scene_calls == 1
+    assert backend.extract_native_scene_calls == 0
+    assert backend.last_calls[-1][0] == "tch"
+    assert backend.last_calls[-1][2] == "mps"
+
+
+def test_rust_ocmesher_prefers_native_scene_on_cpu(sample_cameras, sample_bounds, sphere_kernel):
+    backend = DummyRustBackendWithScenes()
+    mesher = RustOcMesher(sample_cameras, sample_bounds, backend=backend, device="cpu")
+
+    meshes, tags = mesher([sphere_kernel])
+
+    assert meshes == ["mesh"]
+    assert len(tags) == 1
+    assert backend.extract_native_scene_calls == 1
+    assert backend.extract_tch_scene_calls == 0
+    assert backend.last_calls[-1][0] == "native"
 
 
 def test_capabilities_exposes_contract_fields(sample_cameras, sample_bounds):

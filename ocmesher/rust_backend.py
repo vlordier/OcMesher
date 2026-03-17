@@ -347,10 +347,20 @@ class RustOcMesher:
             raise RuntimeError(msg)
 
         kernels_list = list(kernels)
-        if hasattr(self._backend, "extract_native_scene"):
-            specs = _infer_native_primitive_specs(kernels_list)
-            if specs is not None:
+        specs = _infer_native_primitive_specs(kernels_list)
+
+        if specs is not None:
+            # On accelerator devices, prefer tch scene extraction when supported.
+            if self.device in ("mps", "cuda") and hasattr(self._backend, "extract_tch_scene"):
+                try:
+                    result = self._backend.extract_tch_scene(specs, device=self.device)
+                except TypeError:
+                    # Some backends expose extract_tch_scene without a device kwarg.
+                    result = self._backend.extract_tch_scene(specs)
+            elif hasattr(self._backend, "extract_native_scene"):
                 result = self._backend.extract_native_scene(specs)
+            elif hasattr(self._backend, "extract_tch_scene"):
+                result = self._backend.extract_tch_scene(specs)
             else:
                 sdf_kernels = build_batched_sdf_kernels(
                     kernels_list,
