@@ -660,6 +660,26 @@ fn find_core_so(py: Python<'_>) -> PyResult<String> {
     }
 }
 
+/// Return the path to the OcMesher ``core_noomp.so`` if available.
+///
+/// Falls back to ``core.so`` when ``core_noomp.so`` is not present.
+#[pyfunction]
+fn find_core_noomp_so(py: Python<'_>) -> PyResult<String> {
+    let ocmesher = py.import_bound("ocmesher")?;
+    let pkg_file: String = ocmesher
+        .getattr("__file__")?
+        .extract()?;
+    let pkg_dir = std::path::Path::new(&pkg_file)
+        .parent()
+        .ok_or_else(|| pyo3::exceptions::PyRuntimeError::new_err("cannot resolve package dir"))?;
+    let noomp_path = pkg_dir.join("lib").join("core_noomp.so");
+    if noomp_path.exists() {
+        Ok(noomp_path.to_string_lossy().into_owned())
+    } else {
+        find_core_so(py)
+    }
+}
+
 // ---------------------------------------------------------------------------
 // Module definition
 // ---------------------------------------------------------------------------
@@ -669,6 +689,7 @@ fn find_core_so(py: Python<'_>) -> PyResult<String> {
 fn ocmesher_rust(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_class::<Backend>()?;
     m.add_function(wrap_pyfunction!(find_core_so, m)?)?;
+    m.add_function(wrap_pyfunction!(find_core_noomp_so, m)?)?;
     m.add("__version__", env!("CARGO_PKG_VERSION"))?;
     Ok(())
 }

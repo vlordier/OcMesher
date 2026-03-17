@@ -55,21 +55,39 @@ if [ -n "${MARCH_FLAGS}" ]; then
 	fi
 fi
 
-OPENMP_FLAGS="-fopenmp"
-OPENMP_DEFINES=""
-if [[ "${OCMESHER_DISABLE_OPENMP:-0}" == "1" ]]; then
-	OPENMP_FLAGS=""
-	OPENMP_DEFINES="-DOCMESHER_NO_OPENMP=1"
-	echo "Building core.so without OpenMP (OCMESHER_DISABLE_OPENMP=1)"
-fi
+gx1() {
+	local out_obj="$1"
+	local defines="$2"
+	local omp_flags="$3"
+	"${compiler}" "${CXXFLAGS_ARRAY[@]}" -O3 -std=c++17 ${MARCH_FLAGS} ${defines} -c -fpic ${omp_flags} -o "${out_obj}" ocmesher/source/core.cpp
+}
 
-gx1() { "${compiler}" "${CXXFLAGS_ARRAY[@]}" -O3 -std=c++17 ${MARCH_FLAGS} ${OPENMP_DEFINES} -c -fpic ${OPENMP_FLAGS} "$@"; }
-gx2() { "${compiler}" "${LDFLAGS_ARRAY[@]}" -O3 -shared ${OPENMP_FLAGS} "$@"; }
+gx2() {
+	local out_so="$1"
+	local in_obj="$2"
+	local omp_flags="$3"
+	"${compiler}" "${LDFLAGS_ARRAY[@]}" -O3 -shared ${omp_flags} -o "${out_so}" "${in_obj}"
+}
 
 mkdir -p ocmesher/lib
-gx1 -o ocmesher/lib/core.o ocmesher/source/core.cpp
-gx2 -o ocmesher/lib/core.so ocmesher/lib/core.o
-rm -f ocmesher/lib/core.o
+
+if [[ "${OCMESHER_DISABLE_OPENMP:-0}" == "1" ]]; then
+	echo "Building only core_noomp.so (OCMESHER_DISABLE_OPENMP=1)"
+	gx1 ocmesher/lib/core_noomp.o "-DOCMESHER_NO_OPENMP=1" ""
+	gx2 ocmesher/lib/core_noomp.so ocmesher/lib/core_noomp.o ""
+	cp ocmesher/lib/core_noomp.so ocmesher/lib/core.so
+	rm -f ocmesher/lib/core_noomp.o
+else
+	echo "Building core.so (OpenMP)"
+	gx1 ocmesher/lib/core.o "" "-fopenmp"
+	gx2 ocmesher/lib/core.so ocmesher/lib/core.o "-fopenmp"
+	rm -f ocmesher/lib/core.o
+
+	echo "Building core_noomp.so"
+	gx1 ocmesher/lib/core_noomp.o "-DOCMESHER_NO_OPENMP=1" ""
+	gx2 ocmesher/lib/core_noomp.so ocmesher/lib/core_noomp.o ""
+	rm -f ocmesher/lib/core_noomp.o
+fi
 
 echo "Building Rust core crate"
 cargo build --release -p ocmesher-core --manifest-path ocmesher-rust/Cargo.toml
