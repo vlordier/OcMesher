@@ -381,16 +381,21 @@ pub mod tch_kernels {
         normal: [f32; 3],
         offset: f32,
         device: Device,
+        normal_tensor: Mutex<Tensor>,
         scratch: Mutex<TchScratch>,
     }
 
     impl TchPlaneKernel {
         pub fn new(normal: [f32; 3], offset: f32, device: Device) -> Result<Self, CoreError> {
             let normal = normalize_normal_f32(normal)?;
+            let normal_tensor = Tensor::from_slice(&normal)
+                .view([3, 1])
+                .to_device(device);
             Ok(Self {
                 normal,
                 offset,
                 device,
+                normal_tensor: Mutex::new(normal_tensor),
                 scratch: Mutex::new(TchScratch::default()),
             })
         }
@@ -400,15 +405,20 @@ pub mod tch_kernels {
         center: [f32; 3],
         radius: f32,
         device: Device,
+        center_tensor: Mutex<Tensor>,
         scratch: Mutex<TchScratch>,
     }
 
     impl TchSphereKernel {
         pub fn new(center: [f32; 3], radius: f32, device: Device) -> Self {
+            let center_tensor = Tensor::from_slice(&center)
+                .view([1, 3])
+                .to_device(device);
             Self {
                 center,
                 radius,
                 device,
+                center_tensor: Mutex::new(center_tensor),
                 scratch: Mutex::new(TchScratch::default()),
             }
         }
@@ -446,10 +456,11 @@ pub mod tch_kernels {
                     .view([n_pts as i64, 3])
                     .to_device(self.device)
             };
-            let center = Tensor::from_slice(&self.center)
-                .view([1, 3])
-                .to_device(self.device);
-            let diff = xyz_tensor - center;
+            let center_tensor = self
+                .center_tensor
+                .lock()
+                .map_err(|_| CoreError::Sdf("TchSphereKernel center tensor lock poisoned".to_string()))?;
+            let diff = xyz_tensor - &*center_tensor;
             let dims = [1i64];
             let dist = (&diff * &diff)
                 .sum_dim_intlist(&dims[..], false, Kind::Float)
@@ -496,10 +507,11 @@ pub mod tch_kernels {
                     .view([n_pts as i64, 3])
                     .to_device(self.device)
             };
-            let normal = Tensor::from_slice(&self.normal)
-                .view([3, 1])
-                .to_device(self.device);
-            let dist = xyz_tensor.matmul(&normal).squeeze_dim(1) - (self.offset as f64);
+            let normal_tensor = self
+                .normal_tensor
+                .lock()
+                .map_err(|_| CoreError::Sdf("TchPlaneKernel normal tensor lock poisoned".to_string()))?;
+            let dist = xyz_tensor.matmul(&*normal_tensor).squeeze_dim(1) - (self.offset as f64);
             let dist_cpu = dist.to_device(Device::Cpu);
 
             copy_tensor_to_vec(&dist_cpu, out);
