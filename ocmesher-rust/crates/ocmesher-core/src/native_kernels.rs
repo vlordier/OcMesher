@@ -377,6 +377,8 @@ pub mod tch_kernels {
     const ADAPTIVE_GPU_MARGIN_PCT: u128 = 98;
     const KERNEL_KIND_SPHERE: u8 = 0;
     const KERNEL_KIND_PLANE: u8 = 1;
+    const DEVICE_KIND_MPS: u8 = 0;
+    const DEVICE_KIND_CUDA: u8 = 1;
 
     fn parse_threshold_env(name: &str, default_value: usize) -> usize {
         std::env::var(name)
@@ -429,27 +431,46 @@ pub mod tch_kernels {
         })
     }
 
+    fn cuda_adaptive_enabled() -> bool {
+        static ENABLED: OnceLock<bool> = OnceLock::new();
+        *ENABLED.get_or_init(|| {
+            std::env::var("OCMESHER_TCH_CUDA_ADAPTIVE")
+                .ok()
+                .as_deref()
+                .map(|v| v == "1" || v.eq_ignore_ascii_case("true") || v.eq_ignore_ascii_case("yes"))
+                .unwrap_or(false)
+        })
+    }
+
+    fn adaptive_device_kind(device: Device) -> Option<u8> {
+        match device {
+            Device::Mps if mps_adaptive_enabled() => Some(DEVICE_KIND_MPS),
+            Device::Cuda(_) if cuda_adaptive_enabled() => Some(DEVICE_KIND_CUDA),
+            _ => None,
+        }
+    }
+
     fn bucket_for_points(n_pts: usize) -> usize {
         n_pts.max(1).next_power_of_two()
     }
 
-    fn adaptive_route_cache() -> &'static Mutex<HashMap<(u8, usize), bool>> {
-        static CACHE: OnceLock<Mutex<HashMap<(u8, usize), bool>>> = OnceLock::new();
+    fn adaptive_route_cache() -> &'static Mutex<HashMap<(u8, u8, usize), bool>> {
+        static CACHE: OnceLock<Mutex<HashMap<(u8, u8, usize), bool>>> = OnceLock::new();
         CACHE.get_or_init(|| Mutex::new(HashMap::new()))
     }
 
-    fn adaptive_cached_route(kernel_kind: u8, n_pts: usize) -> Option<bool> {
+    fn adaptive_cached_route(kernel_kind: u8, device_kind: u8, n_pts: usize) -> Option<bool> {
         let bucket = bucket_for_points(n_pts);
         adaptive_route_cache()
             .lock()
             .ok()
-            .and_then(|cache| cache.get(&(kernel_kind, bucket)).copied())
+            .and_then(|cache| cache.get(&(kernel_kind, device_kind, bucket)).copied())
     }
 
-    fn adaptive_store_route(kernel_kind: u8, n_pts: usize, use_gpu: bool) {
+    fn adaptive_store_route(kernel_kind: u8, device_kind: u8, n_pts: usize, use_gpu: bool) {
         let bucket = bucket_for_points(n_pts);
         if let Ok(mut cache) = adaptive_route_cache().lock() {
-            cache.insert((kernel_kind, bucket), use_gpu);
+            cache.insert((kernel_kind, device_kind, bucket), use_gpu);
         }
     }
 
@@ -815,8 +836,8 @@ pub mod tch_kernels {
                 )));
             }
 
-            if self.device == Device::Mps && mps_adaptive_enabled() {
-                if let Some(use_gpu) = adaptive_cached_route(KERNEL_KIND_SPHERE, n_pts) {
+            if let Some(device_kind) = adaptive_device_kind(self.device) {
+                if let Some(use_gpu) = adaptive_cached_route(KERNEL_KIND_SPHERE, device_kind, n_pts) {
                     if !use_gpu {
                         eval_sphere_cpu(self.center, self.radius, xyz, out);
                         return Ok(());
@@ -847,7 +868,7 @@ pub mod tch_kernels {
                 let gpu_us = gpu_start.elapsed().as_micros();
 
                 let use_gpu = gpu_us.saturating_mul(100) <= cpu_us.saturating_mul(ADAPTIVE_GPU_MARGIN_PCT);
-                adaptive_store_route(KERNEL_KIND_SPHERE, n_pts, use_gpu);
+                adaptive_store_route(KERNEL_KIND_SPHERE, device_kind, n_pts, use_gpu);
                 if use_gpu {
                     *out = gpu_out;
                 } else {
@@ -880,8 +901,8 @@ pub mod tch_kernels {
                 )));
             }
 
-            if self.device == Device::Mps && mps_adaptive_enabled() {
-                if let Some(use_gpu) = adaptive_cached_route(KERNEL_KIND_PLANE, n_pts) {
+            if let Some(device_kind) = adaptive_device_kind(self.device) {
+                if let Some(use_gpu) = adaptive_cached_route(KERNEL_KIND_PLANE, device_kind, n_pts) {
                     if !use_gpu {
                         eval_plane_cpu(self.normal, self.offset, xyz, out);
                         return Ok(());
@@ -912,7 +933,7 @@ pub mod tch_kernels {
                 let gpu_us = gpu_start.elapsed().as_micros();
 
                 let use_gpu = gpu_us.saturating_mul(100) <= cpu_us.saturating_mul(ADAPTIVE_GPU_MARGIN_PCT);
-                adaptive_store_route(KERNEL_KIND_PLANE, n_pts, use_gpu);
+                adaptive_store_route(KERNEL_KIND_PLANE, device_kind, n_pts, use_gpu);
                 if use_gpu {
                     *out = gpu_out;
                 } else {

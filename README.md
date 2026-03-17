@@ -207,6 +207,7 @@ Notes:
 - The compiled extension also exposes `Backend.extract_native_sphere(...)`, `Backend.extract_native_plane(...)`, `Backend.extract_native_sphere_plane(...)`, and `Backend.extract_native_scene(...)` as no-Python-callback pilot paths, including a small primitive-spec scene API.
 - The optional `tch-kernels` feature adds tensor-backed Rust paths, including `Backend.extract_tch_sphere(...)`, `Backend.extract_tch_plane(...)`, `Backend.extract_tch_sphere_plane(...)`, and `Backend.extract_tch_scene(...)`, and builds when `LIBTORCH` points at a valid libtorch root; on macOS the extension links with an rpath targeting the Python `torch/lib` bundle.
 - For Apple Silicon, set `OCMESHER_TCH_MPS_ADAPTIVE=1` to enable adaptive per-batch MPS routing (CPU vs GPU) in the Rust `tch` kernels; this is useful when medium-sized batches run faster on CPU due transfer/dispatch overhead.
+- On CUDA systems, set `OCMESHER_TCH_CUDA_ADAPTIVE=1` to enable the same adaptive CPU-vs-GPU routing policy for Rust `tch` kernels.
 
 Relevant files:
 - [ocmesher/rust_backend.py](ocmesher/rust_backend.py)
