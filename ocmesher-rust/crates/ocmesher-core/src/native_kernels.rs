@@ -322,7 +322,16 @@ pub mod tch_kernels {
     use std::sync::Mutex;
     use tch::{Device, Kind, Tensor};
 
-    const GPU_BATCH_THRESHOLD: usize = 131072;
+    const CUDA_BATCH_THRESHOLD: usize = 8192;
+    const MPS_BATCH_THRESHOLD: usize = 32768;
+
+    fn should_use_gpu(device: Device, n_pts: usize) -> bool {
+        match device {
+            Device::Cuda(_) => n_pts >= CUDA_BATCH_THRESHOLD,
+            Device::Mps => n_pts >= MPS_BATCH_THRESHOLD,
+            _ => false,
+        }
+    }
 
     #[derive(Default)]
     struct TchScratch {
@@ -430,21 +439,21 @@ pub mod tch_kernels {
         normal: [f32; 3],
         offset: f32,
         device: Device,
-        normal_tensor: Mutex<Tensor>,
+        normal_row_tensor: Mutex<Tensor>,
         scratch: Mutex<TchScratch>,
     }
 
     impl TchPlaneKernel {
         pub fn new(normal: [f32; 3], offset: f32, device: Device) -> Result<Self, CoreError> {
             let normal = normalize_normal_f32(normal)?;
-            let normal_tensor = Tensor::from_slice(&normal)
-                .view([3, 1])
+            let normal_row_tensor = Tensor::from_slice(&normal)
+                .view([1, 3])
                 .to_device(device);
             Ok(Self {
                 normal,
                 offset,
                 device,
-                normal_tensor: Mutex::new(normal_tensor),
+                normal_row_tensor: Mutex::new(normal_row_tensor),
                 scratch: Mutex::new(TchScratch::default()),
             })
         }
@@ -483,7 +492,7 @@ pub mod tch_kernels {
                 )));
             }
 
-            if self.device == Device::Cpu || n_pts < GPU_BATCH_THRESHOLD {
+            if !should_use_gpu(self.device, n_pts) {
                 out.clear();
                 out.reserve(n_pts);
                 for point in xyz.chunks_exact(3) {
@@ -525,7 +534,7 @@ pub mod tch_kernels {
                 )));
             }
 
-            if self.device == Device::Cpu || n_pts < GPU_BATCH_THRESHOLD {
+            if !should_use_gpu(self.device, n_pts) {
                 out.clear();
                 out.reserve(n_pts);
                 for point in xyz.chunks_exact(3) {
@@ -544,11 +553,14 @@ pub mod tch_kernels {
                 .lock()
                 .map_err(|_| CoreError::Sdf("TchPlaneKernel scratch lock poisoned".to_string()))?;
             let xyz_tensor = load_xyz_to_device(&mut scratch, xyz, n_pts, self.device);
-            let normal_tensor = self
-                .normal_tensor
+            let normal_row_tensor = self
+                .normal_row_tensor
                 .lock()
                 .map_err(|_| CoreError::Sdf("TchPlaneKernel normal tensor lock poisoned".to_string()))?;
-            let dist = xyz_tensor.matmul(&*normal_tensor).squeeze_dim(1) - (self.offset as f64);
+            let dims = [1i64];
+            let dist = (&xyz_tensor * &*normal_row_tensor)
+                .sum_dim_intlist(&dims[..], false, Kind::Float)
+                - (self.offset as f64);
             copy_from_device_into_vec(&mut scratch, &dist, n_pts, out);
             Ok(())
         }
