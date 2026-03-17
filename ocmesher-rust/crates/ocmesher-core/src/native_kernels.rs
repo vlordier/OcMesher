@@ -1,7 +1,13 @@
 use crate::CoreError;
 
 pub trait SdfEvaluator: Send + Sync {
-    fn evaluate_batch(&self, xyz: &[f64], n_pts: usize) -> Result<Vec<f32>, CoreError>;
+    fn evaluate_batch_into(&self, xyz: &[f64], n_pts: usize, out: &mut Vec<f32>) -> Result<(), CoreError>;
+
+    fn evaluate_batch(&self, xyz: &[f64], n_pts: usize) -> Result<Vec<f32>, CoreError> {
+        let mut out = Vec::with_capacity(n_pts);
+        self.evaluate_batch_into(xyz, n_pts, &mut out)?;
+        Ok(out)
+    }
 }
 
 pub type BoxedSdfEvaluator = Box<dyn SdfEvaluator>;
@@ -86,7 +92,7 @@ impl Default for PlaneKernel {
 }
 
 impl SdfEvaluator for PlaneKernel {
-    fn evaluate_batch(&self, xyz: &[f64], n_pts: usize) -> Result<Vec<f32>, CoreError> {
+    fn evaluate_batch_into(&self, xyz: &[f64], n_pts: usize, out: &mut Vec<f32>) -> Result<(), CoreError> {
         if xyz.len() != n_pts * 3 {
             return Err(CoreError::Sdf(format!(
                 "PlaneKernel expected {} coordinates, got {}",
@@ -94,14 +100,16 @@ impl SdfEvaluator for PlaneKernel {
                 xyz.len()
             )));
         }
-        let mut out = Vec::with_capacity(n_pts);
+
+        out.clear();
+        out.reserve(n_pts);
         for point in xyz.chunks_exact(3) {
             out.push(
                 (point[0] * self.normal[0] + point[1] * self.normal[1] + point[2] * self.normal[2] - self.offset)
                     as f32,
             );
         }
-        Ok(out)
+        Ok(())
     }
 }
 
@@ -124,7 +132,7 @@ impl Default for SphereKernel {
 }
 
 impl SdfEvaluator for SphereKernel {
-    fn evaluate_batch(&self, xyz: &[f64], n_pts: usize) -> Result<Vec<f32>, CoreError> {
+    fn evaluate_batch_into(&self, xyz: &[f64], n_pts: usize, out: &mut Vec<f32>) -> Result<(), CoreError> {
         if xyz.len() != n_pts * 3 {
             return Err(CoreError::Sdf(format!(
                 "SphereKernel expected {} coordinates, got {}",
@@ -132,14 +140,16 @@ impl SdfEvaluator for SphereKernel {
                 xyz.len()
             )));
         }
-        let mut out = Vec::with_capacity(n_pts);
+
+        out.clear();
+        out.reserve(n_pts);
         for point in xyz.chunks_exact(3) {
             let dx = point[0] - self.center[0];
             let dy = point[1] - self.center[1];
             let dz = point[2] - self.center[2];
             out.push(((dx * dx + dy * dy + dz * dz).sqrt() - self.radius) as f32);
         }
-        Ok(out)
+        Ok(())
     }
 }
 
@@ -153,7 +163,8 @@ pub(crate) fn eval_sdf_full_native(
     enclosed: bool,
 ) -> Result<Vec<f32>, CoreError> {
     if n_kernels == 1 {
-        let mut sdf = kernels[0].evaluate_batch(xyz, n_pts)?;
+        let mut sdf = Vec::with_capacity(n_pts);
+        kernels[0].evaluate_batch_into(xyz, n_pts, &mut sdf)?;
         if sdf.len() != n_pts {
             return Err(CoreError::Sdf(format!(
                 "native kernel 0 returned {} values for {n_pts} query points",
@@ -182,16 +193,17 @@ pub(crate) fn eval_sdf_full_native(
     }
 
     let mut result = vec![0.0f32; n_pts * n_kernels];
+    let mut kernel_sdf = Vec::with_capacity(n_pts);
 
     for (k_idx, kernel) in kernels.iter().enumerate() {
-        let sdf = kernel.evaluate_batch(xyz, n_pts)?;
-        if sdf.len() != n_pts {
+        kernel.evaluate_batch_into(xyz, n_pts, &mut kernel_sdf)?;
+        if kernel_sdf.len() != n_pts {
             return Err(CoreError::Sdf(format!(
                 "native kernel {k_idx} returned {} values for {n_pts} query points",
-                sdf.len()
+                kernel_sdf.len()
             )));
         }
-        for (i, value) in sdf.iter().enumerate() {
+        for (i, value) in kernel_sdf.iter().enumerate() {
             result[i * n_kernels + k_idx] = *value;
         }
     }
@@ -228,7 +240,8 @@ pub(crate) fn eval_sdf_min_native(
 ) -> Result<Vec<f32>, CoreError> {
     let n_kernels = kernels.len();
     if n_kernels == 1 {
-        let mut sdf = kernels[0].evaluate_batch(xyz, n_pts)?;
+        let mut sdf = Vec::with_capacity(n_pts);
+        kernels[0].evaluate_batch_into(xyz, n_pts, &mut sdf)?;
         if sdf.len() != n_pts {
             return Err(CoreError::Sdf(format!(
                 "native kernel 0 returned {} values for {n_pts} query points",
@@ -276,7 +289,7 @@ pub mod tch_kernels {
     use crate::CoreError;
     use tch::{Device, Kind, Tensor};
 
-    const GPU_BATCH_THRESHOLD: usize = 65536;
+    const GPU_BATCH_THRESHOLD: usize = 131072;
 
     fn normalize_normal_f32(normal: [f32; 3]) -> Result<[f32; 3], CoreError> {
         let norm = (normal[0] * normal[0] + normal[1] * normal[1] + normal[2] * normal[2]).sqrt();
@@ -349,7 +362,7 @@ pub mod tch_kernels {
     }
 
     impl SdfEvaluator for TchSphereKernel {
-        fn evaluate_batch(&self, xyz: &[f64], n_pts: usize) -> Result<Vec<f32>, CoreError> {
+        fn evaluate_batch_into(&self, xyz: &[f64], n_pts: usize, out: &mut Vec<f32>) -> Result<(), CoreError> {
             if xyz.len() != n_pts * 3 {
                 return Err(CoreError::Sdf(format!(
                     "TchSphereKernel expected {} coordinates, got {}",
@@ -359,14 +372,15 @@ pub mod tch_kernels {
             }
 
             if self.device == Device::Cpu || n_pts < GPU_BATCH_THRESHOLD {
-                let mut out = Vec::with_capacity(n_pts);
+                out.clear();
+                out.reserve(n_pts);
                 for point in xyz.chunks_exact(3) {
                     let dx = point[0] as f32 - self.center[0];
                     let dy = point[1] as f32 - self.center[1];
                     let dz = point[2] as f32 - self.center[2];
                     out.push((dx * dx + dy * dy + dz * dz).sqrt() - self.radius);
                 }
-                return Ok(out);
+                return Ok(());
             }
 
             let xyz_tensor = Tensor::from_slice(xyz)
@@ -383,15 +397,17 @@ pub mod tch_kernels {
                 .sqrt()
                 - (self.radius as f64);
             let dist_cpu = dist.to_device(Device::Cpu);
-            let mut out = vec![0f32; dist_cpu.numel()];
+
+            out.clear();
+            out.resize(dist_cpu.numel(), 0.0);
             let len = out.len();
-            dist_cpu.copy_data(&mut out, len);
-            Ok(out)
+            dist_cpu.copy_data(out, len);
+            Ok(())
         }
     }
 
     impl SdfEvaluator for TchPlaneKernel {
-        fn evaluate_batch(&self, xyz: &[f64], n_pts: usize) -> Result<Vec<f32>, CoreError> {
+        fn evaluate_batch_into(&self, xyz: &[f64], n_pts: usize, out: &mut Vec<f32>) -> Result<(), CoreError> {
             if xyz.len() != n_pts * 3 {
                 return Err(CoreError::Sdf(format!(
                     "TchPlaneKernel expected {} coordinates, got {}",
@@ -401,7 +417,8 @@ pub mod tch_kernels {
             }
 
             if self.device == Device::Cpu || n_pts < GPU_BATCH_THRESHOLD {
-                let mut out = Vec::with_capacity(n_pts);
+                out.clear();
+                out.reserve(n_pts);
                 for point in xyz.chunks_exact(3) {
                     out.push(
                         point[0] as f32 * self.normal[0]
@@ -410,7 +427,7 @@ pub mod tch_kernels {
                             - self.offset,
                     );
                 }
-                return Ok(out);
+                return Ok(());
             }
 
             let xyz_tensor = Tensor::from_slice(xyz)
@@ -422,10 +439,12 @@ pub mod tch_kernels {
                 .to_device(self.device);
             let dist = xyz_tensor.matmul(&normal).squeeze_dim(1) - (self.offset as f64);
             let dist_cpu = dist.to_device(Device::Cpu);
-            let mut out = vec![0f32; dist_cpu.numel()];
+
+            out.clear();
+            out.resize(dist_cpu.numel(), 0.0);
             let len = out.len();
-            dist_cpu.copy_data(&mut out, len);
-            Ok(out)
+            dist_cpu.copy_data(out, len);
+            Ok(())
         }
     }
 }
