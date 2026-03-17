@@ -1,0 +1,29 @@
+{
+  "baseline_ref": "upstream/main",
+  "upstream_repo": "https://github.com/princeton-vl/OcMesher.git",
+  "current_mode": "rust_tch_mps",
+  "baseline_mode": "python_cpp_upstream_main",
+  "mesh_config": {
+    "pixels_per_cube": 32,
+    "coarse_count": 100000
+  },
+  "current": {
+    "faces": 17639,
+    "faces_sum": 228110285,
+    "verts": 8833,
+    "verts_sum": 48516.18088025949
+  },
+  "baseline": {
+    "faces": 17070,
+    "faces_sum": 214843707,
+    "verts": 8537,
+    "verts_sum": 47808.18956092
+  },
+  "delta_current_minus_baseline": {
+    "verts_delta": 296,
+    "faces_delta": 569,
+    "verts_sum_delta": 707.9913193394896,
+    "faces_sum_delta": 13266578
+  },
+  "matches_strict": false
+}
