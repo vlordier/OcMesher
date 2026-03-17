@@ -214,6 +214,19 @@ def _infer_native_primitive_specs(kernels: Sequence[Any]) -> list[dict[str, Any]
     return specs
 
 
+def _split_sphere_plane_specs(
+    specs: list[dict[str, Any]],
+) -> tuple[dict[str, Any] | None, dict[str, Any] | None]:
+    sphere: dict[str, Any] | None = None
+    plane: dict[str, Any] | None = None
+    for spec in specs:
+        if spec.get("type") == "sphere" and sphere is None:
+            sphere = spec
+        elif spec.get("type") == "plane" and plane is None:
+            plane = spec
+    return sphere, plane
+
+
 class RustBackendProtocol(Protocol):
     """Protocol for Rust-backed mesh extractor bridge."""
 
@@ -351,12 +364,69 @@ class RustOcMesher:
 
         if specs is not None:
             # On accelerator devices, prefer tch scene extraction when supported.
-            if self.device in ("mps", "cuda") and hasattr(self._backend, "extract_tch_scene"):
-                try:
-                    result = self._backend.extract_tch_scene(specs, device=self.device)
-                except TypeError:
-                    # Some backends expose extract_tch_scene without a device kwarg.
-                    result = self._backend.extract_tch_scene(specs)
+            sphere_spec, plane_spec = _split_sphere_plane_specs(specs)
+            if self.device in ("mps", "cuda"):
+                if len(specs) == 1 and sphere_spec is not None and hasattr(self._backend, "extract_tch_sphere"):
+                    result = self._backend.extract_tch_sphere(
+                        radius=float(sphere_spec["radius"]),
+                        center=list(sphere_spec["center"]),
+                        device=self.device,
+                    )
+                elif len(specs) == 1 and plane_spec is not None and hasattr(self._backend, "extract_tch_plane"):
+                    result = self._backend.extract_tch_plane(
+                        offset=float(plane_spec["offset"]),
+                        normal=list(plane_spec["normal"]),
+                        device=self.device,
+                    )
+                elif (
+                    len(specs) == 2
+                    and sphere_spec is not None
+                    and plane_spec is not None
+                    and hasattr(self._backend, "extract_tch_sphere_plane")
+                ):
+                    result = self._backend.extract_tch_sphere_plane(
+                        sphere_radius=float(sphere_spec["radius"]),
+                        sphere_center=list(sphere_spec["center"]),
+                        plane_offset=float(plane_spec["offset"]),
+                        plane_normal=list(plane_spec["normal"]),
+                        device=self.device,
+                    )
+                elif hasattr(self._backend, "extract_tch_scene"):
+                    try:
+                        result = self._backend.extract_tch_scene(specs, device=self.device)
+                    except TypeError:
+                        # Some backends expose extract_tch_scene without a device kwarg.
+                        result = self._backend.extract_tch_scene(specs)
+                elif hasattr(self._backend, "extract_native_scene"):
+                    result = self._backend.extract_native_scene(specs)
+                else:
+                    sdf_kernels = build_batched_sdf_kernels(
+                        kernels_list,
+                        batch_size=self._effective_batch_size,
+                    )
+                    result = self._backend.extract_meshes(sdf_kernels)
+            elif len(specs) == 1 and sphere_spec is not None and hasattr(self._backend, "extract_native_sphere"):
+                result = self._backend.extract_native_sphere(
+                    radius=float(sphere_spec["radius"]),
+                    center=list(sphere_spec["center"]),
+                )
+            elif len(specs) == 1 and plane_spec is not None and hasattr(self._backend, "extract_native_plane"):
+                result = self._backend.extract_native_plane(
+                    offset=float(plane_spec["offset"]),
+                    normal=list(plane_spec["normal"]),
+                )
+            elif (
+                len(specs) == 2
+                and sphere_spec is not None
+                and plane_spec is not None
+                and hasattr(self._backend, "extract_native_sphere_plane")
+            ):
+                result = self._backend.extract_native_sphere_plane(
+                    sphere_radius=float(sphere_spec["radius"]),
+                    sphere_center=list(sphere_spec["center"]),
+                    plane_offset=float(plane_spec["offset"]),
+                    plane_normal=list(plane_spec["normal"]),
+                )
             elif hasattr(self._backend, "extract_native_scene"):
                 result = self._backend.extract_native_scene(specs)
             elif hasattr(self._backend, "extract_tch_scene"):

@@ -39,6 +39,8 @@ class DummyRustBackendWithScenes(DummyRustBackend):
         super().__init__()
         self.extract_native_scene_calls = 0
         self.extract_tch_scene_calls = 0
+        self.extract_tch_sphere_calls = 0
+        self.extract_native_sphere_calls = 0
 
     def extract_native_scene(self, specs: list[dict[str, Any]]) -> tuple[list[str], list[np.ndarray[Any, Any]]]:
         self.extract_native_scene_calls += 1
@@ -50,6 +52,25 @@ class DummyRustBackendWithScenes(DummyRustBackend):
     ) -> tuple[list[str], list[np.ndarray[Any, Any]]]:
         self.extract_tch_scene_calls += 1
         self.last_calls.append(("tch", specs, device))
+        return ["mesh"], [np.ones((5,), dtype=bool)]
+
+    def extract_tch_sphere(
+        self,
+        radius: float = 1.0,
+        center: list[float] | None = None,
+        device: str | None = None,
+    ) -> tuple[list[str], list[np.ndarray[Any, Any]]]:
+        self.extract_tch_sphere_calls += 1
+        self.last_calls.append(("tch_sphere", radius, center, device))
+        return ["mesh"], [np.ones((5,), dtype=bool)]
+
+    def extract_native_sphere(
+        self,
+        radius: float = 1.0,
+        center: list[float] | None = None,
+    ) -> tuple[list[str], list[np.ndarray[Any, Any]]]:
+        self.extract_native_sphere_calls += 1
+        self.last_calls.append(("native_sphere", radius, center))
         return ["mesh"], [np.ones((5,), dtype=bool)]
 
 
@@ -103,10 +124,11 @@ def test_rust_ocmesher_prefers_tch_scene_on_mps(sample_cameras, sample_bounds, s
 
     assert meshes == ["mesh"]
     assert len(tags) == 1
-    assert backend.extract_tch_scene_calls == 1
+    assert backend.extract_tch_sphere_calls == 1
+    assert backend.extract_tch_scene_calls == 0
     assert backend.extract_native_scene_calls == 0
-    assert backend.last_calls[-1][0] == "tch"
-    assert backend.last_calls[-1][2] == "mps"
+    assert backend.last_calls[-1][0] == "tch_sphere"
+    assert backend.last_calls[-1][3] == "mps"
 
 
 def test_rust_ocmesher_prefers_native_scene_on_cpu(sample_cameras, sample_bounds, sphere_kernel):
@@ -117,9 +139,10 @@ def test_rust_ocmesher_prefers_native_scene_on_cpu(sample_cameras, sample_bounds
 
     assert meshes == ["mesh"]
     assert len(tags) == 1
-    assert backend.extract_native_scene_calls == 1
+    assert backend.extract_native_sphere_calls == 1
+    assert backend.extract_native_scene_calls == 0
     assert backend.extract_tch_scene_calls == 0
-    assert backend.last_calls[-1][0] == "native"
+    assert backend.last_calls[-1][0] == "native_sphere"
 
 
 def test_capabilities_exposes_contract_fields(sample_cameras, sample_bounds):
