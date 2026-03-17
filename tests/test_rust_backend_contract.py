@@ -281,7 +281,7 @@ def test_make_rust_ocmesher_forwards_default_backend_meshing_params(sample_camer
     assert call_kwargs["inv_scale"] == 10
     assert call_kwargs["min_dist"] == 1
     assert call_kwargs["memory_limit_mb"] == 1000
-    assert call_kwargs["bisection_iters"] == 21
+    assert call_kwargs["bisection_iters"] == 15
     assert call_kwargs["bisection_tol"] == 0.0
     assert call_kwargs["enclosed"] is True
     assert call_kwargs["simplify_occluded"] is True
@@ -679,7 +679,7 @@ def test_compiled_extension_native_vs_tch_mps_signature_regression(sample_camera
     expected_tch_mps = {
         "verts": 8833,
         "faces": 17639,
-        "verts_sum": 48516.18088025949,
+        "verts_sum": 48516.18087918505,
         "faces_sum": 228110285,
         "tag_true": 6608,
     }

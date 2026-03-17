@@ -643,10 +643,11 @@ pub mod tch_kernels {
                 out.clear();
                 out.reserve(n_pts);
                 for point in xyz.chunks_exact(3) {
-                    let dx = point[0] as f32 - self.center[0];
-                    let dy = point[1] as f32 - self.center[1];
-                    let dz = point[2] as f32 - self.center[2];
-                    out.push((dx * dx + dy * dy + dz * dz).sqrt() - self.radius);
+                    // Use f64 arithmetic (matching native SphereKernel), cast to f32 at the end.
+                    let dx = point[0] - self.center[0] as f64;
+                    let dy = point[1] - self.center[1] as f64;
+                    let dz = point[2] - self.center[2] as f64;
+                    out.push(((dx * dx + dy * dy + dz * dz).sqrt() - self.radius as f64) as f32);
                 }
                 return Ok(());
             }
@@ -709,11 +710,12 @@ pub mod tch_kernels {
                 out.clear();
                 out.reserve(n_pts);
                 for point in xyz.chunks_exact(3) {
+                    // Use f64 arithmetic (matching native PlaneKernel), cast to f32 at the end.
                     out.push(
-                        point[0] as f32 * self.normal[0]
-                            + point[1] as f32 * self.normal[1]
-                            + point[2] as f32 * self.normal[2]
-                            - self.offset,
+                        (point[0] * self.normal[0] as f64
+                            + point[1] * self.normal[1] as f64
+                            + point[2] * self.normal[2] as f64
+                            - self.offset as f64) as f32,
                     );
                 }
                 return Ok(());
