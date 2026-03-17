@@ -19,7 +19,23 @@
 #include <unordered_map>
 #include <unordered_set>
 #include <vector>
+
+#if defined(__has_include)
+#if __has_include(<omp.h>)
 #include <omp.h>
+#define OCMESHER_HAS_OPENMP 1
+#endif
+#endif
+
+#ifndef OCMESHER_HAS_OPENMP
+inline auto omp_get_max_threads() -> int {
+    return 1;
+}
+
+inline auto omp_get_thread_num() -> int {
+    return 0;
+}
+#endif
 
 using T = double;
 using sdfT = float; // NOLINT(readability-identifier-naming)
