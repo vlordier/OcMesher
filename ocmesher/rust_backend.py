@@ -273,6 +273,7 @@ class RustOcMesher:
         batch_size: int | None = None,
         sdf_batch_size: int | None = None,
         stream_policy: str = "sync",
+        use_primitive_inference: bool = True,
         backend: RustBackendProtocol | None = None,
     ):
         """Create a Rust-backed mesher with OcMesher-compatible arguments."""
@@ -321,6 +322,7 @@ class RustOcMesher:
             self.stream_policy = "sync"
         else:
             self.stream_policy = stream_policy
+        self.use_primitive_inference = use_primitive_inference
 
         self._device_caps = caps
         self._backend = backend
@@ -365,13 +367,15 @@ class RustOcMesher:
             raise RuntimeError(msg)
 
         kernels_list = list(kernels)
-        cache_key = tuple(id(kernel) for kernel in kernels_list)
-        specs = self._inferred_specs_cache.get(cache_key)
-        if specs is None and cache_key not in self._inferred_specs_cache:
-            specs = _infer_native_primitive_specs(kernels_list)
-            if len(self._inferred_specs_cache) > 128:
-                self._inferred_specs_cache.clear()
-            self._inferred_specs_cache[cache_key] = specs
+        specs: list[dict[str, Any]] | None = None
+        if self.use_primitive_inference:
+            cache_key = tuple(id(kernel) for kernel in kernels_list)
+            specs = self._inferred_specs_cache.get(cache_key)
+            if specs is None and cache_key not in self._inferred_specs_cache:
+                specs = _infer_native_primitive_specs(kernels_list)
+                if len(self._inferred_specs_cache) > 128:
+                    self._inferred_specs_cache.clear()
+                self._inferred_specs_cache[cache_key] = specs
 
         if specs is not None:
             # On accelerator devices, prefer tch scene extraction when supported.
@@ -480,9 +484,33 @@ def make_rust_ocmesher(
 
     resolved_path: str = lib_path or ocmesher_rust.find_core_so()
 
-    rust_ocmesher_only = {"device", "dtype", "max_batch", "batch_size", "sdf_batch_size", "stream_policy"}
+    rust_ocmesher_only = {
+        "device",
+        "dtype",
+        "max_batch",
+        "batch_size",
+        "sdf_batch_size",
+        "stream_policy",
+        "use_primitive_inference",
+    }
     backend_kwargs = {k: v for k, v in kwargs.items() if k not in rust_ocmesher_only}
     wrapper_kwargs = {k: v for k, v in kwargs.items() if k in rust_ocmesher_only}
+
+    # Keep backend defaults aligned with RustOcMesher/OcMesher-compatible defaults.
+    backend_defaults = {
+        "pixels_per_cube": 8,
+        "inv_scale": 10,
+        "min_dist": 1,
+        "memory_limit_mb": 1000,
+        "bisection_iters": 15,
+        "bisection_tol": 0.0,
+        "enclosed": True,
+        "simplify_occluded": True,
+        "visible_relax_iter": 2,
+        "coarse_count": 500000,
+    }
+    for k, v in backend_defaults.items():
+        backend_kwargs.setdefault(k, v)
 
     cam_poses, ks, hs, ws = cameras
     cam_poses_flat = [np.asarray(p, dtype=np.float64).ravel().tolist() for p in cam_poses]

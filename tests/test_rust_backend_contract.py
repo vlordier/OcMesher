@@ -183,6 +183,28 @@ def test_rust_ocmesher_caches_inferred_specs(sample_cameras, sample_bounds):
     assert kernel.calls == 1
 
 
+def test_rust_ocmesher_can_disable_primitive_inference(sample_cameras, sample_bounds, sphere_kernel):
+    backend = DummyRustBackendWithScenes()
+    mesher = RustOcMesher(
+        sample_cameras,
+        sample_bounds,
+        backend=backend,
+        device="mps",
+        use_primitive_inference=False,
+    )
+
+    meshes, tags = mesher([sphere_kernel])
+
+    assert meshes == ["mesh"]
+    assert len(tags) == 1
+    assert backend.extract_tch_sphere_calls == 0
+    assert backend.extract_native_sphere_calls == 0
+    assert backend.extract_tch_scene_calls == 0
+    assert backend.extract_native_scene_calls == 0
+    assert len(backend.last_calls) == 1
+    assert isinstance(backend.last_calls[0], list)
+
+
 def test_capabilities_exposes_contract_fields(sample_cameras, sample_bounds):
     backend = DummyRustBackend()
     mesher = RustOcMesher(sample_cameras, sample_bounds, backend=backend, max_batch=32)
@@ -243,6 +265,28 @@ def test_make_rust_ocmesher_passes_lib_path(sample_cameras, sample_bounds):
     mock_ext.find_core_so.assert_not_called()
     call_kwargs = mock_ext.Backend.call_args
     assert call_kwargs.kwargs.get("lib_path") == "/custom/core.so"
+
+
+def test_make_rust_ocmesher_forwards_default_backend_meshing_params(sample_cameras, sample_bounds):
+    mock_backend = DummyRustBackend()
+    mock_ext = MagicMock()
+    mock_ext.find_core_so.return_value = "/fake/core.so"
+    mock_ext.Backend.return_value = mock_backend
+
+    with patch.dict(sys.modules, {"ocmesher_rust": mock_ext}):
+        make_rust_ocmesher(sample_cameras, sample_bounds)
+
+    call_kwargs = mock_ext.Backend.call_args.kwargs
+    assert call_kwargs["pixels_per_cube"] == 8
+    assert call_kwargs["inv_scale"] == 10
+    assert call_kwargs["min_dist"] == 1
+    assert call_kwargs["memory_limit_mb"] == 1000
+    assert call_kwargs["bisection_iters"] == 15
+    assert call_kwargs["bisection_tol"] == 0.0
+    assert call_kwargs["enclosed"] is True
+    assert call_kwargs["simplify_occluded"] is True
+    assert call_kwargs["visible_relax_iter"] == 2
+    assert call_kwargs["coarse_count"] == 500000
 
 
 def test_make_rust_ocmesher_exported_from_package():
