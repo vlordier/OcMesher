@@ -336,25 +336,57 @@ int vis_filter( // NOLINT(readability-identifier-naming, modernize-use-trailing-
 
     std::vector<char> visible(cubes.size(), 0); // char avoids vector<bool> bit-packing data races
     T factor = 10;
-    std::vector<T> canvas;
     int cubes_n = static_cast<int>(cubes.size());
-    std::vector<T> depth(static_cast<std::size_t>(cubes_n));
-    std::vector<int> proj_x(static_cast<std::size_t>(cubes_n));
-    std::vector<int> proj_y(static_cast<std::size_t>(cubes_n));
+    std::vector<T> canvas;
+    std::vector<T> depth;
+    std::vector<int> proj_x;
+    std::vector<int> proj_y;
+    if (simplify_occluded) {
+        depth.resize(static_cast<std::size_t>(cubes_n));
+        proj_x.resize(static_cast<std::size_t>(cubes_n));
+        proj_y.resize(static_cast<std::size_t>(cubes_n));
+    }
     for (int k = 0; k < n_cams; k++) { // NOLINT(readability-identifier-length)
         T* current_cam = cams + static_cast<ptrdiff_t>(k) * (12 + 9 + 2);
         int height = static_cast<int>(current_cam[21] / factor),
             width = static_cast<int>(current_cam[22] / factor);
         std::size_t height_sz = static_cast<std::size_t>(height);
+        if (!simplify_occluded) {
+            int min_x = -relax_iters;
+            int min_y = -relax_iters;
+            int max_x = width + relax_iters;
+            int max_y = height + relax_iters;
 #pragma omp parallel for
-        for (int i = 0; i < cubes_n; i++) { // NOLINT(modernize-loop-convert)
-            T image_coords[3];
-            projectedCoords(cubes[i], k, image_coords, nullptr);
-            depth[static_cast<std::size_t>(i)] = image_coords[2];
-            proj_x[static_cast<std::size_t>(i)] = static_cast<int>(std::floor(image_coords[0] / factor));
-            proj_y[static_cast<std::size_t>(i)] = static_cast<int>(std::floor(image_coords[1] / factor));
-        }
-        if (simplify_occluded) {
+            for (int i = 0; i < cubes_n; i++) { // NOLINT(modernize-loop-convert)
+                if (visible[static_cast<std::size_t>(i)] != 0)
+                    continue;
+                T image_coords[3];
+                projectedCoords(cubes[i], k, image_coords, nullptr);
+                T z = image_coords[2];
+                if (z < 0)
+                    continue;
+                int x = static_cast<int>(std::floor(image_coords[0] / factor));
+                int y = static_cast<int>(std::floor(image_coords[1] / factor));
+                if (x >= min_x && y >= min_y && x < max_x && y < max_y)
+                    visible[static_cast<std::size_t>(i)] = 1;
+            }
+            continue;
+        } else {
+            // Only project unresolved cubes; already-visible cubes can be skipped for later cameras.
+            std::size_t cubes_n_sz = static_cast<std::size_t>(cubes_n);
+#pragma omp parallel for
+            for (int i = 0; i < cubes_n; i++) { // NOLINT(modernize-loop-convert)
+                std::size_t is = static_cast<std::size_t>(i);
+                if (visible[is] != 0) {
+                    depth[is] = static_cast<T>(-1);
+                    continue;
+                }
+                T image_coords[3];
+                projectedCoords(cubes[i], k, image_coords, nullptr);
+                depth[is] = image_coords[2];
+                proj_x[is] = static_cast<int>(std::floor(image_coords[0] / factor));
+                proj_y[is] = static_cast<int>(std::floor(image_coords[1] / factor));
+            }
             // Build per-thread depth buffers to avoid omp critical contention,
             // then reduce with a single sequential min-pass.
             int nth = ocmesher_omp_get_max_threads();
@@ -383,16 +415,14 @@ int vis_filter( // NOLINT(readability-identifier-naming, modernize-use-trailing-
                     if (tcanvas[static_cast<std::size_t>(t) * hw_sz + static_cast<std::size_t>(j)] <
                         canvas[j])
                         canvas[j] = tcanvas[static_cast<std::size_t>(t) * hw_sz + static_cast<std::size_t>(j)];
-        }
-#pragma omp parallel for
-        for (int i = 0; i < cubes_n; i++) { // NOLINT(modernize-loop-convert)
-            T z = depth[static_cast<std::size_t>(i)];
-            if (z >= 0) {
-                int x = proj_x[static_cast<std::size_t>(i)];
-                int y = proj_y[static_cast<std::size_t>(i)];
-                if (x >= -relax_iters && y >= -relax_iters && x < width + relax_iters &&
-                    y < height + relax_iters) {
-                    if (simplify_occluded) {
+            #pragma omp parallel for
+            for (int i = 0; i < cubes_n; i++) { // NOLINT(modernize-loop-convert)
+                T z = depth[static_cast<std::size_t>(i)];
+                if (z >= 0) {
+                    int x = proj_x[static_cast<std::size_t>(i)];
+                    int y = proj_y[static_cast<std::size_t>(i)];
+                    if (x >= -relax_iters && y >= -relax_iters && x < width + relax_iters &&
+                        y < height + relax_iters) {
                         bool is_visible = false;
                         int min_nx = std::max(0, x - relax_iters);
                         int max_nx = std::min(width - 1, x + relax_iters);
@@ -404,13 +434,11 @@ int vis_filter( // NOLINT(readability-identifier-naming, modernize-use-trailing-
                                                        static_cast<std::size_t>(ny);
                                 if (z <= canvas[cell_idx]) {
                                     is_visible = true;
-                                    visible[i] = true;
+                                    visible[static_cast<std::size_t>(i)] = 1;
                                     break;
                                 }
                             }
                         }
-                    } else {
-                        visible[i] = true;
                     }
                 }
             }
