@@ -6,6 +6,14 @@
 
 #include "core.h"
 
+#ifdef OCMESHER_NO_OPENMP
+static inline auto ocmesher_omp_get_max_threads() -> int { return 1; }
+static inline auto ocmesher_omp_get_thread_num() -> int { return 0; }
+#else
+static inline auto ocmesher_omp_get_max_threads() -> int { return omp_get_max_threads(); }
+static inline auto ocmesher_omp_get_thread_num() -> int { return omp_get_thread_num(); }
+#endif
+
 namespace coarse {
 std::vector<Node> nodes; // NOLINT(cppcoreguidelines-avoid-non-const-global-variables)
 std::priority_queue<std::pair<T, int>>
@@ -349,7 +357,7 @@ int vis_filter( // NOLINT(readability-identifier-naming, modernize-use-trailing-
         if (simplify_occluded) {
             // Build per-thread depth buffers to avoid omp critical contention,
             // then reduce with a single sequential min-pass.
-            int nth = omp_get_max_threads();
+            int nth = ocmesher_omp_get_max_threads();
             int hw = height * width;
             std::size_t hw_sz = static_cast<std::size_t>(hw);
             std::vector<T> tcanvas(static_cast<std::size_t>(nth) * static_cast<std::size_t>(hw),
@@ -363,7 +371,7 @@ int vis_filter( // NOLINT(readability-identifier-naming, modernize-use-trailing-
                     if (x >= 0 && y >= 0 && x < width && y < height) {
                         std::size_t cell_idx = static_cast<std::size_t>(x) * height_sz +
                                                static_cast<std::size_t>(y);
-                        T& cell = tcanvas[static_cast<std::size_t>(omp_get_thread_num()) * hw_sz + cell_idx];
+                        T& cell = tcanvas[static_cast<std::size_t>(ocmesher_omp_get_thread_num()) * hw_sz + cell_idx];
                         if (z < cell)
                             cell = z;
                     }
@@ -1108,9 +1116,13 @@ void finalize_extra_verts( // NOLINT(readability-identifier-naming,
                 }
             }
         }
-        assert(w != 0);
-        for (int k = 0; k < 3; k++)
-            everts[i * 3 + k] = vx[k] / w;
+        if (w == 0) {
+            for (int k = 0; k < 3; k++)
+                everts[i * 3 + k] = edge_vertices[i].second.m_c[k];
+        } else {
+            for (int k = 0; k < 3; k++)
+                everts[i * 3 + k] = vx[k] / w;
+        }
     }
     edge_vertices.clear();
 #pragma omp parallel for
