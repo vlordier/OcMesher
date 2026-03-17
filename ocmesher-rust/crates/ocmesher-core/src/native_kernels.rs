@@ -221,6 +221,8 @@ pub mod tch_kernels {
     use crate::CoreError;
     use tch::{Device, Kind, Tensor};
 
+    const GPU_BATCH_THRESHOLD: usize = 4096;
+
     fn normalize_normal_f32(normal: [f32; 3]) -> Result<[f32; 3], CoreError> {
         let norm = (normal[0] * normal[0] + normal[1] * normal[1] + normal[2] * normal[2]).sqrt();
         if norm <= f32::EPSILON {
@@ -301,9 +303,20 @@ pub mod tch_kernels {
                 )));
             }
 
-            let xyz_f32: Vec<f32> = xyz.iter().map(|&value| value as f32).collect();
-            let xyz_tensor = Tensor::from_slice(&xyz_f32)
+            if self.device == Device::Cpu || n_pts < GPU_BATCH_THRESHOLD {
+                let mut out = Vec::with_capacity(n_pts);
+                for point in xyz.chunks_exact(3) {
+                    let dx = point[0] as f32 - self.center[0];
+                    let dy = point[1] as f32 - self.center[1];
+                    let dz = point[2] as f32 - self.center[2];
+                    out.push((dx * dx + dy * dy + dz * dz).sqrt() - self.radius);
+                }
+                return Ok(out);
+            }
+
+            let xyz_tensor = Tensor::from_slice(xyz)
                 .view([n_pts as i64, 3])
+                .to_kind(Kind::Float)
                 .to_device(self.device);
             let center = Tensor::from_slice(&self.center)
                 .view([1, 3])
@@ -332,9 +345,22 @@ pub mod tch_kernels {
                 )));
             }
 
-            let xyz_f32: Vec<f32> = xyz.iter().map(|&value| value as f32).collect();
-            let xyz_tensor = Tensor::from_slice(&xyz_f32)
+            if self.device == Device::Cpu || n_pts < GPU_BATCH_THRESHOLD {
+                let mut out = Vec::with_capacity(n_pts);
+                for point in xyz.chunks_exact(3) {
+                    out.push(
+                        point[0] as f32 * self.normal[0]
+                            + point[1] as f32 * self.normal[1]
+                            + point[2] as f32 * self.normal[2]
+                            - self.offset,
+                    );
+                }
+                return Ok(out);
+            }
+
+            let xyz_tensor = Tensor::from_slice(xyz)
                 .view([n_pts as i64, 3])
+                .to_kind(Kind::Float)
                 .to_device(self.device);
             let normal = Tensor::from_slice(&self.normal)
                 .view([3, 1])
