@@ -334,12 +334,22 @@ pub mod tch_kernels {
     }
 
     #[derive(Default)]
-    struct TchScratch {
+    struct TchIoScratch {
         xyz_f32: Vec<f32>,
         device_xyz: Option<Tensor>,
         device_rows: usize,
         cpu_out: Option<Tensor>,
         cpu_rows: usize,
+    }
+
+    struct TchSphereScratch {
+        io: TchIoScratch,
+        center_row: Tensor,
+    }
+
+    struct TchPlaneScratch {
+        io: TchIoScratch,
+        normal_row: Tensor,
     }
 
     fn fill_xyz_f32_buffer(xyz: &[f64], out: &mut Vec<f32>) {
@@ -356,7 +366,7 @@ pub mod tch_kernels {
     }
 
     fn copy_from_device_into_vec(
-        scratch: &mut TchScratch,
+        scratch: &mut TchIoScratch,
         device_tensor: &Tensor,
         n_pts: usize,
         out: &mut Vec<f32>,
@@ -377,7 +387,7 @@ pub mod tch_kernels {
     }
 
     fn load_xyz_to_device(
-        scratch: &mut TchScratch,
+        scratch: &mut TchIoScratch,
         xyz: &[f64],
         n_pts: usize,
         device: Device,
@@ -439,8 +449,7 @@ pub mod tch_kernels {
         normal: [f32; 3],
         offset: f32,
         device: Device,
-        normal_row_tensor: Mutex<Tensor>,
-        scratch: Mutex<TchScratch>,
+        scratch: Mutex<TchPlaneScratch>,
     }
 
     impl TchPlaneKernel {
@@ -453,8 +462,10 @@ pub mod tch_kernels {
                 normal,
                 offset,
                 device,
-                normal_row_tensor: Mutex::new(normal_row_tensor),
-                scratch: Mutex::new(TchScratch::default()),
+                scratch: Mutex::new(TchPlaneScratch {
+                    io: TchIoScratch::default(),
+                    normal_row: normal_row_tensor,
+                }),
             })
         }
     }
@@ -463,8 +474,7 @@ pub mod tch_kernels {
         center: [f32; 3],
         radius: f32,
         device: Device,
-        center_tensor: Mutex<Tensor>,
-        scratch: Mutex<TchScratch>,
+        scratch: Mutex<TchSphereScratch>,
     }
 
     impl TchSphereKernel {
@@ -476,8 +486,10 @@ pub mod tch_kernels {
                 center,
                 radius,
                 device,
-                center_tensor: Mutex::new(center_tensor),
-                scratch: Mutex::new(TchScratch::default()),
+                scratch: Mutex::new(TchSphereScratch {
+                    io: TchIoScratch::default(),
+                    center_row: center_tensor,
+                }),
             }
         }
     }
@@ -508,18 +520,14 @@ pub mod tch_kernels {
                 .scratch
                 .lock()
                 .map_err(|_| CoreError::Sdf("TchSphereKernel scratch lock poisoned".to_string()))?;
-            let xyz_tensor = load_xyz_to_device(&mut scratch, xyz, n_pts, self.device);
-            let center_tensor = self
-                .center_tensor
-                .lock()
-                .map_err(|_| CoreError::Sdf("TchSphereKernel center tensor lock poisoned".to_string()))?;
-            let diff = xyz_tensor - &*center_tensor;
+            let xyz_tensor = load_xyz_to_device(&mut scratch.io, xyz, n_pts, self.device);
+            let diff = xyz_tensor - &scratch.center_row;
             let dims = [1i64];
             let dist = (&diff * &diff)
                 .sum_dim_intlist(&dims[..], false, Kind::Float)
                 .sqrt()
                 - (self.radius as f64);
-            copy_from_device_into_vec(&mut scratch, &dist, n_pts, out);
+            copy_from_device_into_vec(&mut scratch.io, &dist, n_pts, out);
             Ok(())
         }
     }
@@ -552,16 +560,12 @@ pub mod tch_kernels {
                 .scratch
                 .lock()
                 .map_err(|_| CoreError::Sdf("TchPlaneKernel scratch lock poisoned".to_string()))?;
-            let xyz_tensor = load_xyz_to_device(&mut scratch, xyz, n_pts, self.device);
-            let normal_row_tensor = self
-                .normal_row_tensor
-                .lock()
-                .map_err(|_| CoreError::Sdf("TchPlaneKernel normal tensor lock poisoned".to_string()))?;
+            let xyz_tensor = load_xyz_to_device(&mut scratch.io, xyz, n_pts, self.device);
             let dims = [1i64];
-            let dist = (&xyz_tensor * &*normal_row_tensor)
+            let dist = (&xyz_tensor * &scratch.normal_row)
                 .sum_dim_intlist(&dims[..], false, Kind::Float)
                 - (self.offset as f64);
-            copy_from_device_into_vec(&mut scratch, &dist, n_pts, out);
+            copy_from_device_into_vec(&mut scratch.io, &dist, n_pts, out);
             Ok(())
         }
     }
