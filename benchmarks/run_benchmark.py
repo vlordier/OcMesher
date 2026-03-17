@@ -155,7 +155,7 @@ def _system_info() -> dict[str, object]:
     try:
         import torch
 
-        info["pytorch_version"] = torch.__version__
+        info["torch_version"] = torch.__version__
         info["cuda_available"] = torch.cuda.is_available()
         if torch.cuda.is_available():
             info["cuda_device"] = torch.cuda.get_device_name(0)
@@ -165,7 +165,7 @@ def _system_info() -> dict[str, object]:
         info["torch_compile"] = hasattr(torch, "compile")
         info["cpu_threads"] = torch.get_num_threads()
     except ImportError:
-        info["pytorch_version"] = "NOT INSTALLED"
+        info["torch_version"] = "NOT INSTALLED"
     return info
 
 
@@ -273,7 +273,7 @@ def _bench_original(
     }
 
 
-def _bench_torch(
+def _bench_rust_tch(
     cameras,
     bounds,
     pixels_per_cube: int,
@@ -281,31 +281,25 @@ def _bench_torch(
     n_runs: int = 1,
     warmup: int = 0,
     device: str | None = None,
-    n_sdf_workers: int = 4,
     *,
-    use_compile: bool = False,
     adaptive_runs: bool = False,
     max_runs: int = 10,
     target_cv: float = 0.05,
 ):
-    """Benchmark the Rust+tch backend via the TorchOcMesher compatibility API."""
+    """Benchmark the Rust+tch backend directly via RustOcMesher factory."""
     try:
-        import torch  # noqa: F401
-
-        from ocmesher.torch_core import TorchOcMesher
+        from ocmesher import make_rust_ocmesher
     except Exception as exc:  # noqa: BLE001
         return {"error": f"Could not load Rust+tch backend: {exc}"}
 
     kernel = _SDF_KERNELS[sdf_name]
-    # Warmup (especially important when use_compile=True to amortise JIT cost)
+    # Warmup run to amortize initialization overhead.
     for _ in range(warmup):
-        mesher = TorchOcMesher(
+        mesher = make_rust_ocmesher(
             cameras,
             bounds,
             pixels_per_cube=pixels_per_cube,
             device=device,
-            n_sdf_workers=n_sdf_workers,
-            use_compile=use_compile,
         )
         mesher([kernel])
 
@@ -314,13 +308,11 @@ def _bench_torch(
     run_limit = max(max_runs, n_runs) if adaptive_runs else n_runs
     for i in range(run_limit):
         t0 = time.perf_counter()
-        mesher = TorchOcMesher(
+        mesher = make_rust_ocmesher(
             cameras,
             bounds,
             pixels_per_cube=pixels_per_cube,
             device=device,
-            n_sdf_workers=n_sdf_workers,
-            use_compile=use_compile,
         )
         meshes, _tags = mesher([kernel])
         elapsed = time.perf_counter() - t0
@@ -334,8 +326,6 @@ def _bench_torch(
             break
 
     backend_tag = f"rust_tch_{device or 'auto'}"
-    if use_compile:
-        backend_tag += "+compile"
     return {
         "backend": backend_tag,
         "sdf": sdf_name,
@@ -1198,7 +1188,7 @@ def main() -> None:
         for dev_str in bench_devices:
             label = {"cpu": "CPU", "cuda": "CUDA", "mps": "MPS"}.get(dev_str, dev_str.upper())
             _print_section(f"End-to-end: Rust+tch {label} ({sdf_name})")
-            r_torch = _bench_torch(
+            r_torch = _bench_rust_tch(
                 cameras,
                 bounds,
                 pixels_per_cube,
