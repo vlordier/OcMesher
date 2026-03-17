@@ -137,6 +137,22 @@ Notes:
 - `--parity-pixels-per-cube` and `--parity-coarse-count` must be >= 1.
 - `--parity-atol` must be >= 0.
 
+### Speedup Plot (Plotters)
+
+To visualize scene-level speedups from the parity artifact, use the Rust Plotters
+utility in the Rust workspace:
+
+```bash
+cargo run --release --manifest-path ocmesher-rust/Cargo.toml -p ocmesher-benchplot -- \
+    --input benchmark_artifacts/bench_api_parity_upstream_main.json \
+    --output benchmark_artifacts/bench_api_speedups.png
+```
+
+The chart below uses speedup defined as `upstream_avg_ms / current_avg_ms`, so
+values above `1.0x` mean the current Rust wrapper is faster.
+
+![API parity speedups](benchmark_artifacts/bench_api_speedups.png)
+
 ### Torch Backend Contract
 
 `ocmesher.TorchOcMesher` now exposes a small backend contract intended for

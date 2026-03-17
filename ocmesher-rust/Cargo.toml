@@ -1,5 +1,6 @@
 [workspace]
 members = [
+    "crates/ocmesher-benchplot",
     "crates/ocmesher-core",
     "crates/ocmesher-py",
 ]

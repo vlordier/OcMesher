@@ -1,0 +1,10 @@
+[package]
+name = "ocmesher-benchplot"
+version = "0.1.0"
+edition = "2021"
+description = "Plot parity benchmark speedups using Plotters"
+
+[dependencies]
+plotters = { version = "0.3", default-features = false, features = ["bitmap_backend", "bitmap_encoder", "ttf", "line_series"] }
+serde_json = "1"
+thiserror = "2"
