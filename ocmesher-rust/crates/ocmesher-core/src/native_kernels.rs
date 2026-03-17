@@ -366,12 +366,30 @@ pub mod tch_kernels {
     use std::sync::{Mutex, OnceLock};
     use tch::{Device, Kind, Tensor};
 
-    const CUDA_BATCH_THRESHOLD: usize = 8192;
-    const MPS_BATCH_THRESHOLD: usize = 32768;
+    const CUDA_BATCH_THRESHOLD_DEFAULT: usize = 8192;
+    const MPS_BATCH_THRESHOLD_DEFAULT: usize = 32768;
     const CUDA_FP16_THRESHOLD: usize = 65536;
     const MPS_FP16_THRESHOLD: usize = 131072;
     const MPS_BF16_THRESHOLD: usize = 131072;
     const CUDA_FP8_THRESHOLD: usize = 262144;
+
+    fn parse_threshold_env(name: &str, default_value: usize) -> usize {
+        std::env::var(name)
+            .ok()
+            .and_then(|v| v.parse::<usize>().ok())
+            .filter(|v| *v > 0)
+            .unwrap_or(default_value)
+    }
+
+    fn cuda_batch_threshold() -> usize {
+        static THRESHOLD: OnceLock<usize> = OnceLock::new();
+        *THRESHOLD.get_or_init(|| parse_threshold_env("OCMESHER_TCH_CUDA_BATCH_THRESHOLD", CUDA_BATCH_THRESHOLD_DEFAULT))
+    }
+
+    fn mps_batch_threshold() -> usize {
+        static THRESHOLD: OnceLock<usize> = OnceLock::new();
+        *THRESHOLD.get_or_init(|| parse_threshold_env("OCMESHER_TCH_MPS_BATCH_THRESHOLD", MPS_BATCH_THRESHOLD_DEFAULT))
+    }
 
     fn experimental_fp8_enabled() -> bool {
         static ENABLED: OnceLock<bool> = OnceLock::new();
@@ -397,8 +415,8 @@ pub mod tch_kernels {
 
     fn should_use_gpu(device: Device, n_pts: usize) -> bool {
         match device {
-            Device::Cuda(_) => n_pts >= CUDA_BATCH_THRESHOLD,
-            Device::Mps => n_pts >= MPS_BATCH_THRESHOLD,
+            Device::Cuda(_) => n_pts >= cuda_batch_threshold(),
+            Device::Mps => n_pts >= mps_batch_threshold(),
             _ => false,
         }
     }
