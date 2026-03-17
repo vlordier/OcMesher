@@ -329,6 +329,8 @@ pub mod tch_kernels {
         xyz_f32: Vec<f32>,
         device_xyz: Option<Tensor>,
         device_rows: usize,
+        cpu_out: Option<Tensor>,
+        cpu_rows: usize,
     }
 
     fn fill_xyz_f32_buffer(xyz: &[f64], out: &mut Vec<f32>) {
@@ -342,6 +344,27 @@ pub mod tch_kernels {
         out.resize(tensor.numel(), 0.0);
         let len = out.len();
         tensor.copy_data(out, len);
+    }
+
+    fn copy_from_device_into_vec(
+        scratch: &mut TchScratch,
+        device_tensor: &Tensor,
+        n_pts: usize,
+        out: &mut Vec<f32>,
+    ) {
+        if scratch.cpu_rows < n_pts {
+            scratch.cpu_out = Some(Tensor::zeros([n_pts as i64], (Kind::Float, Device::Cpu)));
+            scratch.cpu_rows = n_pts;
+        }
+
+        let cpu_view = scratch
+            .cpu_out
+            .as_ref()
+            .expect("cpu output tensor should be initialized")
+            .narrow(0, 0, n_pts as i64);
+        let mut cpu_view_mut = cpu_view.shallow_clone();
+        cpu_view_mut.copy_(device_tensor);
+        copy_tensor_to_vec(&cpu_view, out);
     }
 
     fn load_xyz_to_device(
@@ -472,13 +495,11 @@ pub mod tch_kernels {
                 return Ok(());
             }
 
-            let xyz_tensor = {
-                let mut scratch = self
-                    .scratch
-                    .lock()
-                    .map_err(|_| CoreError::Sdf("TchSphereKernel scratch lock poisoned".to_string()))?;
-                load_xyz_to_device(&mut scratch, xyz, n_pts, self.device)
-            };
+            let mut scratch = self
+                .scratch
+                .lock()
+                .map_err(|_| CoreError::Sdf("TchSphereKernel scratch lock poisoned".to_string()))?;
+            let xyz_tensor = load_xyz_to_device(&mut scratch, xyz, n_pts, self.device);
             let center_tensor = self
                 .center_tensor
                 .lock()
@@ -489,9 +510,7 @@ pub mod tch_kernels {
                 .sum_dim_intlist(&dims[..], false, Kind::Float)
                 .sqrt()
                 - (self.radius as f64);
-            let dist_cpu = dist.to_device(Device::Cpu);
-
-            copy_tensor_to_vec(&dist_cpu, out);
+            copy_from_device_into_vec(&mut scratch, &dist, n_pts, out);
             Ok(())
         }
     }
@@ -520,21 +539,17 @@ pub mod tch_kernels {
                 return Ok(());
             }
 
-            let xyz_tensor = {
-                let mut scratch = self
-                    .scratch
-                    .lock()
-                    .map_err(|_| CoreError::Sdf("TchPlaneKernel scratch lock poisoned".to_string()))?;
-                load_xyz_to_device(&mut scratch, xyz, n_pts, self.device)
-            };
+            let mut scratch = self
+                .scratch
+                .lock()
+                .map_err(|_| CoreError::Sdf("TchPlaneKernel scratch lock poisoned".to_string()))?;
+            let xyz_tensor = load_xyz_to_device(&mut scratch, xyz, n_pts, self.device);
             let normal_tensor = self
                 .normal_tensor
                 .lock()
                 .map_err(|_| CoreError::Sdf("TchPlaneKernel normal tensor lock poisoned".to_string()))?;
             let dist = xyz_tensor.matmul(&*normal_tensor).squeeze_dim(1) - (self.offset as f64);
-            let dist_cpu = dist.to_device(Device::Cpu);
-
-            copy_tensor_to_vec(&dist_cpu, out);
+            copy_from_device_into_vec(&mut scratch, &dist, n_pts, out);
             Ok(())
         }
     }
