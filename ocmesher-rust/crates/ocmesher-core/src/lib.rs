@@ -495,7 +495,8 @@ fn construct_element_mesh_native(
     let mut centers = vec![0.0f64; nv * 3];
     unsafe { (lib.get_verts_center)(element, centers.as_mut_ptr()) };
 
-    let center_sdf = kernel.evaluate_batch(&centers, nv)?;
+    let mut center_sdf = Vec::with_capacity(nv);
+    kernel.evaluate_batch_into(&centers, nv, &mut center_sdf)?;
     if center_sdf.len() != nv {
         return Err(CoreError::Sdf(format!(
             "native center SDF length mismatch: got {}, expected {nv}",
@@ -514,18 +515,17 @@ fn construct_element_mesh_native(
     };
 
     let n_cubes = nv * 8;
-    let mut sdf_buf = vec![0.0f32; n_cubes];
+    let mut sdf_buf = Vec::with_capacity(n_cubes);
     let check_tol = bisection_tol > 0.0;
 
     for _ in 0..bisection_iters {
-        let sdf_cubes = kernel.evaluate_batch(&cubes, n_cubes)?;
-        if sdf_cubes.len() != n_cubes {
+        kernel.evaluate_batch_into(&cubes, n_cubes, &mut sdf_buf)?;
+        if sdf_buf.len() != n_cubes {
             return Err(CoreError::Sdf(format!(
                 "native cube SDF length mismatch: got {}, expected {n_cubes}",
-                sdf_cubes.len()
+                sdf_buf.len()
             )));
         }
-        sdf_buf.copy_from_slice(&sdf_cubes);
 
         unsafe {
             (lib.update_verts)(
@@ -547,8 +547,10 @@ fn construct_element_mesh_native(
     let mut cubes_r = vec![0.0f64; n_cubes * 3];
     unsafe { (lib.get_lr_verts)(element, cubes.as_mut_ptr(), cubes_r.as_mut_ptr()) };
 
-    let sdf_l = kernel.evaluate_batch(&cubes, n_cubes)?;
-    let sdf_r = kernel.evaluate_batch(&cubes_r, n_cubes)?;
+    let mut sdf_l = Vec::with_capacity(n_cubes);
+    kernel.evaluate_batch_into(&cubes, n_cubes, &mut sdf_l)?;
+    let mut sdf_r = Vec::with_capacity(n_cubes);
+    kernel.evaluate_batch_into(&cubes_r, n_cubes, &mut sdf_r)?;
     if sdf_l.len() != n_cubes || sdf_r.len() != n_cubes {
         return Err(CoreError::Sdf(format!(
             "native LR SDF length mismatch: left={}, right={}, expected {n_cubes}",
@@ -628,15 +630,18 @@ fn refine_extra_vertices_native(
     let mut ef_centers = vec![0.0f64; ef_n * 3];
     ef_centers[..nve * 3].copy_from_slice(&edge_centers);
     ef_centers[nve * 3..].copy_from_slice(&face_centers);
-    let ef_sdf = kernel.evaluate_batch(&ef_centers, ef_n)?;
+    let mut ef_sdf = Vec::with_capacity(ef_n);
+    kernel.evaluate_batch_into(&ef_centers, ef_n, &mut ef_sdf)?;
     if ef_sdf.len() != ef_n {
         return Err(CoreError::Sdf(format!(
             "native extra center SDF length mismatch: got {}, expected {ef_n}",
             ef_sdf.len()
         )));
     }
-    let ecenter_sdf = ef_sdf[..nve].to_vec();
-    let fcenter_sdf = ef_sdf[nve..].to_vec();
+    let mut ecenter_sdf = vec![0.0f32; nve];
+    let mut fcenter_sdf = vec![0.0f32; nvf];
+    ecenter_sdf.copy_from_slice(&ef_sdf[..nve]);
+    fcenter_sdf.copy_from_slice(&ef_sdf[nve..]);
 
     let mut edge_lr = vec![0.0f64; nve * 2 * 3];
     let mut face_lr = vec![0.0f64; nvf * 4 * 3];
@@ -656,20 +661,19 @@ fn refine_extra_vertices_native(
     let n_bisect = n_elr + n_flr;
     let check_tol = bisection_tol > 0.0;
     let mut bisect_buf = vec![0.0f64; n_bisect * 3];
-    let mut sdf_buf = vec![0.0f32; n_bisect];
+    let mut sdf_buf = Vec::with_capacity(n_bisect);
 
     for _ in 0..bisection_iters {
         bisect_buf[..n_elr * 3].copy_from_slice(&edge_lr);
         bisect_buf[n_elr * 3..].copy_from_slice(&face_lr);
 
-        let sdf_all = kernel.evaluate_batch(&bisect_buf, n_bisect)?;
-        if sdf_all.len() != n_bisect {
+        kernel.evaluate_batch_into(&bisect_buf, n_bisect, &mut sdf_buf)?;
+        if sdf_buf.len() != n_bisect {
             return Err(CoreError::Sdf(format!(
                 "native extra bisection SDF length mismatch: got {}, expected {n_bisect}",
-                sdf_all.len()
+                sdf_buf.len()
             )));
         }
-        sdf_buf.copy_from_slice(&sdf_all);
 
         let (e_sdf, f_sdf) = sdf_buf.split_at(n_elr);
         unsafe {
@@ -709,7 +713,8 @@ fn refine_extra_vertices_native(
     all_lr[n_elr * 2 * 3..(n_elr * 2 + n_flr) * 3].copy_from_slice(&face_lr);
     all_lr[(n_elr * 2 + n_flr) * 3..].copy_from_slice(&face_r);
 
-    let all_lr_sdf = kernel.evaluate_batch(&all_lr, n_all_lr)?;
+    let mut all_lr_sdf = Vec::with_capacity(n_all_lr);
+    kernel.evaluate_batch_into(&all_lr, n_all_lr, &mut all_lr_sdf)?;
     if all_lr_sdf.len() != n_all_lr {
         return Err(CoreError::Sdf(format!(
             "native LR-extra SDF length mismatch: got {}, expected {n_all_lr}",
