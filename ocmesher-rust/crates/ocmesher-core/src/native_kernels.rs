@@ -326,12 +326,24 @@ pub mod tch_kernels {
     const MPS_BATCH_THRESHOLD: usize = 32768;
     const CUDA_FP16_THRESHOLD: usize = 65536;
     const MPS_FP16_THRESHOLD: usize = 131072;
+    const MPS_BF16_THRESHOLD: usize = 131072;
     const CUDA_FP8_THRESHOLD: usize = 262144;
 
     fn experimental_fp8_enabled() -> bool {
         static ENABLED: OnceLock<bool> = OnceLock::new();
         *ENABLED.get_or_init(|| {
             std::env::var("OCMESHER_TCH_EXPERIMENTAL_FP8")
+                .ok()
+                .as_deref()
+                .map(|v| v == "1" || v.eq_ignore_ascii_case("true") || v.eq_ignore_ascii_case("yes"))
+                .unwrap_or(false)
+        })
+    }
+
+    fn mps_bf16_enabled() -> bool {
+        static ENABLED: OnceLock<bool> = OnceLock::new();
+        *ENABLED.get_or_init(|| {
+            std::env::var("OCMESHER_TCH_MPS_BF16")
                 .ok()
                 .as_deref()
                 .map(|v| v == "1" || v.eq_ignore_ascii_case("true") || v.eq_ignore_ascii_case("yes"))
@@ -355,6 +367,7 @@ pub mod tch_kernels {
                 Kind::Float8e4m3fn
             }
             Device::Cuda(_) if n_pts >= CUDA_FP16_THRESHOLD => Kind::Half,
+            Device::Mps if mps_bf16_enabled() && n_pts >= MPS_BF16_THRESHOLD => Kind::BFloat16,
             Device::Mps if n_pts >= MPS_FP16_THRESHOLD => Kind::Half,
             _ => Kind::Float,
         }
@@ -367,6 +380,8 @@ pub mod tch_kernels {
         device_rows: usize,
         device_xyz_half: Option<Tensor>,
         device_half_rows: usize,
+        device_xyz_bf16: Option<Tensor>,
+        device_bf16_rows: usize,
         device_xyz_fp8: Option<Tensor>,
         device_fp8_rows: usize,
         cpu_out: Option<Tensor>,
@@ -377,6 +392,7 @@ pub mod tch_kernels {
         io: TchIoScratch,
         center_row: Tensor,
         center_row_half: Option<Tensor>,
+        center_row_bf16: Option<Tensor>,
         center_row_fp8: Option<Tensor>,
     }
 
@@ -384,6 +400,7 @@ pub mod tch_kernels {
         io: TchIoScratch,
         normal_row: Tensor,
         normal_row_half: Option<Tensor>,
+        normal_row_bf16: Option<Tensor>,
         normal_row_fp8: Option<Tensor>,
     }
 
@@ -440,6 +457,16 @@ pub mod tch_kernels {
                 .device_xyz_half
                 .as_ref()
                 .expect("half device tensor should be initialized")
+                .narrow(0, 0, n_pts as i64)
+        } else if kind == Kind::BFloat16 {
+            if scratch.device_bf16_rows < n_pts {
+                scratch.device_xyz_bf16 = Some(Tensor::zeros([n_pts as i64, 3], (Kind::BFloat16, device)));
+                scratch.device_bf16_rows = n_pts;
+            }
+            scratch
+                .device_xyz_bf16
+                .as_ref()
+                .expect("bf16 device tensor should be initialized")
                 .narrow(0, 0, n_pts as i64)
         } else if kind == Kind::Float8e4m3fn {
             if scratch.device_fp8_rows < n_pts {
@@ -524,6 +551,7 @@ pub mod tch_kernels {
                     io: TchIoScratch::default(),
                     normal_row: normal_row_tensor,
                     normal_row_half: None,
+                    normal_row_bf16: None,
                     normal_row_fp8: None,
                 }),
             })
@@ -550,6 +578,7 @@ pub mod tch_kernels {
                     io: TchIoScratch::default(),
                     center_row: center_tensor,
                     center_row_half: None,
+                    center_row_bf16: None,
                     center_row_fp8: None,
                 }),
             }
@@ -592,6 +621,14 @@ pub mod tch_kernels {
                     .center_row_half
                     .as_ref()
                     .expect("half center tensor should be initialized")
+            } else if compute_kind == Kind::BFloat16 {
+                if scratch.center_row_bf16.is_none() {
+                    scratch.center_row_bf16 = Some(scratch.center_row.to_kind(Kind::BFloat16));
+                }
+                scratch
+                    .center_row_bf16
+                    .as_ref()
+                    .expect("bf16 center tensor should be initialized")
             } else if compute_kind == Kind::Float8e4m3fn {
                 if scratch.center_row_fp8.is_none() {
                     scratch.center_row_fp8 = Some(scratch.center_row.to_kind(Kind::Float8e4m3fn));
@@ -652,6 +689,14 @@ pub mod tch_kernels {
                     .normal_row_half
                     .as_ref()
                     .expect("half normal tensor should be initialized")
+            } else if compute_kind == Kind::BFloat16 {
+                if scratch.normal_row_bf16.is_none() {
+                    scratch.normal_row_bf16 = Some(scratch.normal_row.to_kind(Kind::BFloat16));
+                }
+                scratch
+                    .normal_row_bf16
+                    .as_ref()
+                    .expect("bf16 normal tensor should be initialized")
             } else if compute_kind == Kind::Float8e4m3fn {
                 if scratch.normal_row_fp8.is_none() {
                     scratch.normal_row_fp8 = Some(scratch.normal_row.to_kind(Kind::Float8e4m3fn));
