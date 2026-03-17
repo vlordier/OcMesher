@@ -104,3 +104,128 @@ def _meta_label(metadata: dict[str, Any] | None, fallback: str) -> str:
 def _size_sort_key(value: str) -> int:
     """Sort numeric size strings numerically, everything else lexically later."""
     return int(value) if value.isdigit() else sys.maxsize
+
+
+def nested_compare(
+    results_a: dict[str, Any],
+    results_b: dict[str, Any],
+    *,
+    path: str = "",
+    threshold_pct: float = 5.0,
+    verbose: bool = False,
+) -> list[str]:
+    """Recursively compare nested benchmark results and report significant differences.
+
+    Args:
+        results_a: First benchmark results (typically "before"/baseline)
+        results_b: Second benchmark results (typically "after"/current)
+        path: Current path in the nested structure (used for recursion)
+        threshold_pct: Percentage difference to flag as significant (default 5%)
+        verbose: Include all comparisons, not just significant ones
+
+    Returns:
+        List of formatted comparison lines
+    """
+    lines = []
+    all_keys = set(results_a.keys()) | set(results_b.keys())
+
+    for key in sorted(all_keys):
+        current_path = f"{path}.{key}" if path else key
+
+        if key not in results_a:
+            lines.append(f"  + {current_path}: only in B")
+            continue
+        if key not in results_b:
+            lines.append(f"  - {current_path}: only in A")
+            continue
+
+        val_a = results_a[key]
+        val_b = results_b[key]
+
+        if isinstance(val_a, dict) and isinstance(val_b, dict):
+            lines.extend(nested_compare(val_a, val_b, path=current_path, threshold_pct=threshold_pct, verbose=verbose))
+        else:
+            comp_result = _compare_values(val_a, val_b, current_path, threshold_pct, verbose)
+            if comp_result:
+                lines.append(comp_result)
+
+    return lines
+
+
+def _compare_values(
+    val_a: Any,
+    val_b: Any,
+    path: str,
+    threshold_pct: float,
+    verbose: bool,
+) -> str | None:
+    """Compare two values, returning a formatted line if significant difference found."""
+    if val_a is None or val_b is None:
+        return None
+
+    if isinstance(val_a, (int, float)) and isinstance(val_b, (int, float)):
+        if val_a == 0 and val_b == 0:
+            return None
+
+        if val_a != 0:
+            pct_diff = ((val_b - val_a) / abs(val_a)) * 100
+        else:
+            pct_diff = float("inf") if val_b > 0 else float("-inf")
+
+        abs_diff = val_b - val_a
+        is_significant = abs(pct_diff) >= threshold_pct
+
+        if is_significant or verbose:
+            direction = "↓" if pct_diff < 0 else "↑"
+            return f"  {path}: {val_a:.4f} → {val_b:.4f} ({pct_diff:+.1f}% {direction})"
+
+    return None
+
+
+def compare_nested_results(
+    file_a: str,
+    file_b: str,
+    *,
+    threshold_pct: float = 5.0,
+    verbose: bool = False,
+) -> list[str]:
+    """Compare two nested benchmark JSON files and report significant differences.
+
+    Args:
+        file_a: Path to first JSON file (baseline/before)
+        file_b: Path to second JSON file (current/after)
+        threshold_pct: Report differences >= this percentage (default 5%)
+        verbose: Include all comparisons, not just significant ones
+
+    Returns:
+        Formatted comparison lines
+    """
+    a, meta_a = load_results_payload(file_a)
+    b, meta_b = load_results_payload(file_b)
+
+    label_a = _meta_label(meta_a, "A")
+    label_b = _meta_label(meta_b, "B")
+
+    header = f"Nested Benchmark Comparison: {label_a} vs {label_b}"
+    lines = [
+        "=" * 60,
+        header,
+        f"Files: {file_a} vs {file_b}",
+        f"Threshold: {threshold_pct}% difference",
+        "=" * 60,
+    ]
+
+    if meta_a and meta_b:
+        lines.append(f"A: {meta_a.get('label', 'N/A')} @ {meta_a.get('timestamp_utc', 'N/A')}")
+        lines.append(f"B: {meta_b.get('label', 'N/A')} @ {meta_b.get('timestamp_utc', 'N/A')}")
+        lines.append("")
+
+    comp_lines = nested_compare(a, b, threshold_pct=threshold_pct, verbose=verbose)
+
+    if comp_lines:
+        lines.extend(comp_lines)
+    else:
+        lines.append("  (no significant differences found)")
+
+    lines.append("=" * 60)
+    return lines

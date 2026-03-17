@@ -1,0 +1,178 @@
+name: Benchmark Regression
+
+on:
+  push:
+    branches:
+      - main
+      - develop
+  pull_request:
+    branches:
+      - main
+      - develop
+  workflow_dispatch:
+    inputs:
+      baseline_ref:
+        description: 'Git ref for baseline (e.g., main, or commit SHA)'
+        required: false
+        default: ''
+      threshold_pct:
+        description: 'Regression threshold percentage'
+        required: false
+        default: '5'
+
+permissions:
+  contents: read
+
+jobs:
+  benchmark:
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: ubuntu-latest
+            device: cpu
+          - os: ubuntu-latest
+            device: cuda
+            cuda: "12.1"
+          - os: macos-latest
+            device: mps
+    
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 1
+
+      - name: Set up Python 3.11
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install system deps
+        run: |
+          if [ "$RUNNER_OS" == "Linux" ]; then
+            sudo apt-get update
+            sudo apt-get install -y g++ libomp-dev
+          fi
+
+      - name: Set up CUDA
+        if: matrix.device == 'cuda'
+        uses: awalsh128/cache-apt-pkgs-action@latest
+        with:
+          packages: cuda-toolkit-12-1
+          version: 1.0
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v5
+
+      - name: Install Python dependencies
+        run: uv sync --extra dev --extra torch
+
+      - name: Build native artifacts
+        run: bash install.sh
+
+      - name: Get baseline ref
+        id: baseline
+        run: |
+          if [ -n "${{ github.event.inputs.baseline_ref }}" ]; then
+            echo "ref=${{ github.event.inputs.baseline_ref }}" >> $GITHUB_OUTPUT
+          elif [ "${{ github.event_name }}" == "pull_request" ]; then
+            echo "ref=${{ github.base_ref }}" >> $GITHUB_OUTPUT
+          else
+            echo "ref=main" >> $GITHUB_OUTPUT
+          fi
+
+      - name: Checkout baseline
+        if: steps.baseline.outputs.ref != github.ref_name
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ steps.baseline.outputs.ref }}
+          path: baseline
+          fetch-depth: 1
+
+      - name: Build baseline artifacts
+        if: steps.baseline.outputs.ref != github.ref_name
+        run: |
+          cd baseline
+          bash install.sh
+
+      - name: Run baseline benchmarks
+        if: steps.baseline.outputs.ref != github.ref_name
+        run: |
+          cd baseline
+          uv run python -m benchmarks.run_benchmark --runs 5 --warmup 2 --output ../baseline_results.json
+
+      - name: Run current benchmarks
+        run: |
+          uv run python -m benchmarks.run_benchmark --runs 5 --warmup 2 --output current_results.json
+
+      - name: Compare results
+        id: compare
+        run: |
+          THRESHOLD=${{ github.event.inputs.threshold_pct || '5' }}
+          
+          if [ -f baseline_results.json ]; then
+            uv run python -c "
+              import json
+              from benchmarks.result_utils import compare_nested_results
+              
+              with open('baseline_results.json') as f:
+                baseline = json.load(f)
+              with open('current_results.json') as f:
+                current = json.load(f)
+              
+              lines = compare_nested_results(
+                'baseline_results.json', 
+                'current_results.json',
+                threshold_pct=float('$THRESHOLD'),
+                verbose=False
+              )
+              
+              for line in lines:
+                print(line)
+              
+              # Check for regressions
+              regressions = [l for l in lines if '↑' in l and '+' in l]
+              if regressions:
+                print('::warning::Benchmark regressions detected!')
+                exit(1)
+            "
+          else
+            echo "No baseline found, uploading current results"
+            echo "results_url=$GITHUB_STEP_SUMMARY" >> $GITHUB_OUTPUT
+          fi
+
+      - name: Upload artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: benchmark-results-${{ matrix.device }}
+          path: |
+            current_results.json
+            baseline_results.json
+          retention-days: 30
+
+  summarize:
+    needs: benchmark
+    runs-on: ubuntu-latest
+    if: always()
+    steps:
+      - name: Download all artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: artifacts
+
+      - name: Generate summary
+        run: |
+          echo "## Benchmark Results Summary" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          
+          for dir in artifacts/benchmark-results-*; do
+            device=$(basename "$dir" | sed 's/benchmark-results-//')
+            echo "### $device" >> $GITHUB_STEP_SUMMARY
+            echo "" >> $GITHUB_STEP_SUMMARY
+            
+            if [ -f "$dir/current_results.json" ]; then
+              echo "Results available for $device" >> $GITHUB_STEP_SUMMARY
+            fi
+            echo "" >> $GITHUB_STEP_SUMMARY
+          done
