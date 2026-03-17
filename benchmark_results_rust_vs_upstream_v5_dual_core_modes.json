@@ -1,0 +1,403 @@
+{
+  "runs": 4,
+  "warmup": 1,
+  "mode_notes": {
+    "rust_native": "uses core.so (OpenMP build)",
+    "rust_tch_mps": "uses core_noomp.so to avoid OpenMP runtime collision",
+    "rust_tch_mps_bf16": "env OCMESHER_TCH_MPS_BF16=1 + core_noomp.so",
+    "rust_tch_mps_fp8": "env OCMESHER_TCH_EXPERIMENTAL_FP8=1 + core_noomp.so",
+    "int4_mps": "unsupported in this stack"
+  },
+  "cases": {
+    "medium_1cam": {
+      "plane": {
+        "upstream": {
+          "ok": true,
+          "result": {
+            "mean": 0.04029240625095554,
+            "steady_mean": 0.03955175000010058,
+            "times": [
+              0.0425143750035204,
+              0.037808417007909156,
+              0.0405343750026077,
+              0.04031245798978489
+            ]
+          }
+        },
+        "rust_native": {
+          "ok": false,
+          "rc": -11,
+          "stderr_tail": ""
+        },
+        "rust_tch_mps": {
+          "ok": true,
+          "result": {
+            "mean": 0.04422133350453805,
+            "steady_mean": 0.04397368067293428,
+            "times": [
+              0.04496429199934937,
+              0.044717000011587515,
+              0.04406179199577309,
+              0.04314225001144223
+            ]
+          }
+        },
+        "rust_tch_mps_bf16": {
+          "ok": true,
+          "result": {
+            "mean": 0.048627781248796964,
+            "steady_mean": 0.04794901399873197,
+            "times": [
+              0.050664082998991944,
+              0.05023533399798907,
+              0.04695862499647774,
+              0.0466530830017291
+            ]
+          }
+        },
+        "rust_tch_mps_fp8": {
+          "ok": true,
+          "result": {
+            "mean": 0.04491363549459493,
+            "steady_mean": 0.043400166658102535,
+            "times": [
+              0.04945404200407211,
+              0.044215332993189804,
+              0.0450736669881735,
+              0.0409114999929443
+            ]
+          }
+        },
+        "ratio_upstream_over_rust_tch_mps": 0.9111531258282991,
+        "ratio_upstream_over_rust_tch_mps_bf16": 0.8285882106116523,
+        "ratio_upstream_over_rust_tch_mps_fp8": 0.8971085463746188,
+        "ratio_rust_tch_mps_over_bf16": 0.9093841497370821,
+        "ratio_rust_tch_mps_over_fp8": 0.9845859284728756
+      },
+      "sphere": {
+        "upstream": {
+          "ok": true,
+          "result": {
+            "mean": 0.0839651979986229,
+            "steady_mean": 0.0920354586657292,
+            "times": [
+              0.05975441599730402,
+              0.04758033399411943,
+              0.16450520799844526,
+              0.06402083400462288
+            ]
+          }
+        },
+        "rust_native": {
+          "ok": false,
+          "rc": -11,
+          "stderr_tail": ""
+        },
+        "rust_tch_mps": {
+          "ok": true,
+          "result": {
+            "mean": 0.04953310400014743,
+            "steady_mean": 0.05122773600063132,
+            "times": [
+              0.04444920799869578,
+              0.043929457999183796,
+              0.060282959006144665,
+              0.049470790996565484
+            ]
+          }
+        },
+        "rust_tch_mps_bf16": {
+          "ok": true,
+          "result": {
+            "mean": 0.04273946899411385,
+            "steady_mean": 0.04217141699336935,
+            "times": [
+              0.04444362499634735,
+              0.041158249994623475,
+              0.04105795899522491,
+              0.04429804199025966
+            ]
+          }
+        },
+        "rust_tch_mps_fp8": {
+          "ok": true,
+          "result": {
+            "mean": 0.04517933324314072,
+            "steady_mean": 0.04494569432669474,
+            "times": [
+              0.04588024999247864,
+              0.044438333992729895,
+              0.043588957996689714,
+              0.046809790990664624
+            ]
+          }
+        },
+        "ratio_upstream_over_rust_tch_mps": 1.6951329760875269,
+        "ratio_upstream_over_rust_tch_mps_bf16": 1.9645821526277438,
+        "ratio_upstream_over_rust_tch_mps_fp8": 1.8584868782093145,
+        "ratio_rust_tch_mps_over_bf16": 1.158954595504432,
+        "ratio_rust_tch_mps_over_fp8": 1.0963664234170105
+      }
+    },
+    "large_1cam": {
+      "plane": {
+        "upstream": {
+          "ok": true,
+          "result": {
+            "mean": 0.027798812494438607,
+            "steady_mean": 0.027775458326990094,
+            "times": [
+              0.027868874996784143,
+              0.028425082986359484,
+              0.029009499994572252,
+              0.02589179200003855
+            ]
+          }
+        },
+        "rust_native": {
+          "ok": false,
+          "rc": -11,
+          "stderr_tail": ""
+        },
+        "rust_tch_mps": {
+          "ok": true,
+          "result": {
+            "mean": 0.027791020747827133,
+            "steady_mean": 0.02792925000054917,
+            "times": [
+              0.027376332989661023,
+              0.02800020799622871,
+              0.028080667005269788,
+              0.02770687500014901
+            ]
+          }
+        },
+        "rust_tch_mps_bf16": {
+          "ok": true,
+          "result": {
+            "mean": 0.034558625004137866,
+            "steady_mean": 0.032689250001567416,
+            "times": [
+              0.04016675001184922,
+              0.03624554199632257,
+              0.03157291600655299,
+              0.03024929200182669
+            ]
+          }
+        },
+        "rust_tch_mps_fp8": {
+          "ok": true,
+          "result": {
+            "mean": 0.02851442724931985,
+            "steady_mean": 0.02824065299743476,
+            "times": [
+              0.029335750004975125,
+              0.027035833001718856,
+              0.029683959000976756,
+              0.028002166989608668
+            ]
+          }
+        },
+        "ratio_upstream_over_rust_tch_mps": 1.000280369212854,
+        "ratio_upstream_over_rust_tch_mps_bf16": 0.804395790952624,
+        "ratio_upstream_over_rust_tch_mps_fp8": 0.9749034147302288,
+        "ratio_rust_tch_mps_over_bf16": 0.8041703263512244,
+        "ratio_rust_tch_mps_over_fp8": 0.9746301584398833
+      },
+      "sphere": {
+        "upstream": {
+          "ok": true,
+          "result": {
+            "mean": 0.03611192725293222,
+            "steady_mean": 0.03568813900346868,
+            "times": [
+              0.03738329200132284,
+              0.036032208998221904,
+              0.033994083001744,
+              0.037038125010440126
+            ]
+          }
+        },
+        "rust_native": {
+          "ok": false,
+          "rc": -11,
+          "stderr_tail": ""
+        },
+        "rust_tch_mps": {
+          "ok": true,
+          "result": {
+            "mean": 0.031429749749804614,
+            "steady_mean": 0.03090973566577304,
+            "times": [
+              0.03298979200189933,
+              0.03293124999618158,
+              0.03245629099546932,
+              0.02734166600566823
+            ]
+          }
+        },
+        "rust_tch_mps_bf16": {
+          "ok": true,
+          "result": {
+            "mean": 0.02857698950174381,
+            "steady_mean": 0.02776847200099534,
+            "times": [
+              0.03100254200398922,
+              0.027961957996012643,
+              0.028035499999532476,
+              0.027307958007440902
+            ]
+          }
+        },
+        "rust_tch_mps_fp8": {
+          "ok": true,
+          "result": {
+            "mean": 0.02804083350201836,
+            "steady_mean": 0.02770987533343335,
+            "times": [
+              0.029033708007773384,
+              0.02629437499854248,
+              0.029648209005245008,
+              0.027187041996512562
+            ]
+          }
+        },
+        "ratio_upstream_over_rust_tch_mps": 1.148972789805834,
+        "ratio_upstream_over_rust_tch_mps_bf16": 1.2636715022318434,
+        "ratio_upstream_over_rust_tch_mps_fp8": 1.2878335891953037,
+        "ratio_rust_tch_mps_over_bf16": 1.0998271790626064,
+        "ratio_rust_tch_mps_over_fp8": 1.1208564733834436
+      }
+    },
+    "large_2cam": {
+      "plane": {
+        "upstream": {
+          "ok": true,
+          "result": {
+            "mean": 0.29263803149660816,
+            "steady_mean": 0.297969861329572,
+            "times": [
+              0.27664254199771676,
+              0.23732841700257268,
+              0.25898299999244045,
+              0.39759816699370276
+            ]
+          }
+        },
+        "rust_native": {
+          "ok": false,
+          "rc": -11,
+          "stderr_tail": ""
+        },
+        "rust_tch_mps": {
+          "ok": true,
+          "result": {
+            "mean": 0.337755708496843,
+            "steady_mean": 0.34530723632875987,
+            "times": [
+              0.31510112500109244,
+              0.31748195899126586,
+              0.3137903750030091,
+              0.4046493749920046
+            ]
+          }
+        },
+        "rust_tch_mps_bf16": {
+          "ok": true,
+          "result": {
+            "mean": 0.3097662917498383,
+            "steady_mean": 0.31065737499739043,
+            "times": [
+              0.3070930420071818,
+              0.3229636659962125,
+              0.3063313750026282,
+              0.3026770839933306
+            ]
+          }
+        },
+        "rust_tch_mps_fp8": {
+          "ok": true,
+          "result": {
+            "mean": 0.32581375000154367,
+            "steady_mean": 0.3302893473349589,
+            "times": [
+              0.3123869580012979,
+              0.31188687500252854,
+              0.3292760000040289,
+              0.34970516699831933
+            ]
+          }
+        },
+        "ratio_upstream_over_rust_tch_mps": 0.8664192022067436,
+        "ratio_upstream_over_rust_tch_mps_bf16": 0.9447058614529221,
+        "ratio_upstream_over_rust_tch_mps_fp8": 0.8981758182250493,
+        "ratio_rust_tch_mps_over_bf16": 1.0903565607119334,
+        "ratio_rust_tch_mps_over_fp8": 1.0366527149183935
+      },
+      "sphere": {
+        "upstream": {
+          "ok": true,
+          "result": {
+            "mean": 0.10616420849692076,
+            "steady_mean": 0.10644813899610502,
+            "times": [
+              0.105312416999368,
+              0.10369708298821934,
+              0.1051338340039365,
+              0.11051349999615923
+            ]
+          }
+        },
+        "rust_native": {
+          "ok": false,
+          "rc": -11,
+          "stderr_tail": ""
+        },
+        "rust_tch_mps": {
+          "ok": true,
+          "result": {
+            "mean": 0.12279937499988591,
+            "steady_mean": 0.12278822200217594,
+            "times": [
+              0.12283283399301581,
+              0.11748937499942258,
+              0.1299594580050325,
+              0.12091583300207276
+            ]
+          }
+        },
+        "rust_tch_mps_bf16": {
+          "ok": true,
+          "result": {
+            "mean": 0.11139206225561793,
+            "steady_mean": 0.1104302496726935,
+            "times": [
+              0.11427750000439119,
+              0.11421195800357964,
+              0.1066963330085855,
+              0.1103824580059154
+            ]
+          }
+        },
+        "rust_tch_mps_fp8": {
+          "ok": true,
+          "result": {
+            "mean": 0.11408954174839891,
+            "steady_mean": 0.1110211249955076,
+            "times": [
+              0.12329479200707283,
+              0.11579562499537133,
+              0.10875316699093673,
+              0.10851458300021477
+            ]
+          }
+        },
+        "ratio_upstream_over_rust_tch_mps": 0.8645337852657589,
+        "ratio_upstream_over_rust_tch_mps_bf16": 0.9530679865976401,
+        "ratio_upstream_over_rust_tch_mps_fp8": 0.930534095149967,
+        "ratio_rust_tch_mps_over_bf16": 1.102406872745483,
+        "ratio_rust_tch_mps_over_fp8": 1.076342082876402
+      }
+    }
+  }
+}
