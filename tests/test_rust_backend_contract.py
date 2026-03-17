@@ -145,6 +145,34 @@ def test_rust_ocmesher_prefers_native_scene_on_cpu(sample_cameras, sample_bounds
     assert backend.last_calls[-1][0] == "native_sphere"
 
 
+def test_rust_ocmesher_caches_inferred_specs(sample_cameras, sample_bounds):
+    backend = DummyRustBackendWithScenes()
+    mesher = RustOcMesher(sample_cameras, sample_bounds, backend=backend, device="cpu")
+
+    class SphereKernelWithBatch:
+        def __init__(self):
+            self.calls = 0
+
+        def evaluate_batch(self, xyz):
+            self.calls += 1
+            return np.linalg.norm(xyz, axis=1) - 1.0
+
+        def __call__(self, _xyz):
+            msg = "inference should prefer evaluate_batch"
+            raise AssertionError(msg)
+
+    kernel = SphereKernelWithBatch()
+    meshes1, tags1 = mesher([kernel])
+    meshes2, tags2 = mesher([kernel])
+
+    assert meshes1 == ["mesh"]
+    assert meshes2 == ["mesh"]
+    assert len(tags1) == 1
+    assert len(tags2) == 1
+    assert backend.extract_native_sphere_calls == 2
+    assert kernel.calls == 1
+
+
 def test_capabilities_exposes_contract_fields(sample_cameras, sample_bounds):
     backend = DummyRustBackend()
     mesher = RustOcMesher(sample_cameras, sample_bounds, backend=backend, max_batch=32)

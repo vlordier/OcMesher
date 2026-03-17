@@ -189,7 +189,11 @@ def _infer_native_primitive_specs(kernels: Sequence[Any]) -> list[dict[str, Any]
             ],
             dtype=np.float64,
         )
-        values = np.asarray(kernel(probe), dtype=np.float64).reshape(-1)
+        eval_batch = getattr(kernel, "evaluate_batch", None)
+        if callable(eval_batch):
+            values = np.asarray(_extract_sdf(eval_batch(probe)), dtype=np.float64).reshape(-1)
+        else:
+            values = np.asarray(kernel(probe), dtype=np.float64).reshape(-1)
         if values.shape[0] != probe.shape[0]:
             return None
 
@@ -320,6 +324,7 @@ class RustOcMesher:
 
         self._device_caps = caps
         self._backend = backend
+        self._inferred_specs_cache: dict[tuple[int, ...], list[dict[str, Any]] | None] = {}
 
     def capabilities(self) -> dict[str, Any]:
         """Return runtime capability flags used by Infinigen integration."""
@@ -360,7 +365,13 @@ class RustOcMesher:
             raise RuntimeError(msg)
 
         kernels_list = list(kernels)
-        specs = _infer_native_primitive_specs(kernels_list)
+        cache_key = tuple(id(kernel) for kernel in kernels_list)
+        specs = self._inferred_specs_cache.get(cache_key)
+        if specs is None and cache_key not in self._inferred_specs_cache:
+            specs = _infer_native_primitive_specs(kernels_list)
+            if len(self._inferred_specs_cache) > 128:
+                self._inferred_specs_cache.clear()
+            self._inferred_specs_cache[cache_key] = specs
 
         if specs is not None:
             # On accelerator devices, prefer tch scene extraction when supported.
