@@ -1,0 +1,33 @@
+{
+  "case": {
+    "primitive": {
+      "type": "sphere",
+      "radius": 5.0,
+      "center": [0.0, 0.0, 0.0]
+    },
+    "pixels_per_cube": 32,
+    "coarse_count": 100000,
+    "device": "mps"
+  },
+  "native": {
+    "verts": 9005,
+    "faces": 17990,
+    "verts_sum": 49640.90751688918,
+    "faces_sum": 234929499,
+    "tag_true": 6804
+  },
+  "tch_mps": {
+    "verts": 8833,
+    "faces": 17639,
+    "verts_sum": 48516.18088025949,
+    "faces_sum": 228110285,
+    "tag_true": 6608
+  },
+  "delta_tch_minus_native": {
+    "verts_delta": -172,
+    "faces_delta": -351,
+    "verts_sum_delta": -1124.72663662969,
+    "faces_sum_delta": -6819214,
+    "tag_true_delta": -196
+  }
+}

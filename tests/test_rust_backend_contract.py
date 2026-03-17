@@ -13,6 +13,16 @@ import pytest
 from ocmesher.rust_backend import RustOcMesher, build_batched_sdf_kernels, make_rust_ocmesher
 
 
+def _mesh_signature(mesh: Any, tag: np.ndarray[Any, Any]) -> dict[str, float | int]:
+    return {
+        "verts": int(mesh.vertices.shape[0]),
+        "faces": int(mesh.faces.shape[0]),
+        "verts_sum": float(mesh.vertices.sum()),
+        "faces_sum": int(mesh.faces.sum()),
+        "tag_true": int(np.count_nonzero(tag)),
+    }
+
+
 class DummyRustBackend:
     __version__ = "0.0.1"
 
@@ -576,6 +586,71 @@ def test_compiled_extension_extract_tch_scene(sample_cameras, sample_bounds):
     assert all(mesh.faces.shape[0] > 0 for mesh in meshes)
     assert all(tag.dtype == np.bool_ for tag in tags)
     assert all(tag.shape == (mesh.vertices.shape[0],) for mesh, tag in zip(meshes, tags, strict=True))
+
+
+@pytest.mark.integration
+def test_compiled_extension_native_vs_tch_mps_signature_regression(sample_cameras, sample_bounds):
+    ocmesher_rust = pytest.importorskip("ocmesher_rust", reason="compiled Rust extension not installed")
+    torch = pytest.importorskip("torch", reason="torch not installed")
+
+    if not hasattr(ocmesher_rust.Backend, "extract_native_scene"):
+        pytest.skip("compiled Rust extension was not built with scene-spec support")
+    if not hasattr(ocmesher_rust.Backend, "extract_tch_scene"):
+        pytest.skip("compiled Rust extension was not built with tch-kernels")
+    if not (hasattr(torch.backends, "mps") and torch.backends.mps.is_available()):
+        pytest.skip("MPS backend not available")
+
+    core_so = Path(__file__).resolve().parents[1] / "ocmesher" / "lib" / "core.so"
+    if not core_so.exists():
+        pytest.skip("compiled core.so not available")
+
+    cam_poses, ks, hs, ws = sample_cameras
+    backend = ocmesher_rust.Backend(
+        lib_path=str(core_so),
+        cameras=(
+            [np.asarray(p, dtype=np.float64).ravel().tolist() for p in cam_poses],
+            [np.asarray(k, dtype=np.float64).ravel().tolist() for k in ks],
+            [float(h) for h in hs],
+            [float(w) for w in ws],
+        ),
+        bounds=np.asarray(sample_bounds, dtype=np.float64).tolist(),
+        pixels_per_cube=32,
+        coarse_count=100_000,
+    )
+
+    primitives = [{"type": "sphere", "radius": 5.0, "center": [0.0, 0.0, 0.0]}]
+    native_meshes, native_tags = backend.extract_native_scene(primitives)
+    tch_meshes, tch_tags = backend.extract_tch_scene(primitives, device="mps")
+
+    native_sig = _mesh_signature(native_meshes[0], native_tags[0])
+    tch_sig = _mesh_signature(tch_meshes[0], tch_tags[0])
+
+    expected_native = {
+        "verts": 9005,
+        "faces": 17990,
+        "verts_sum": 49640.90751688918,
+        "faces_sum": 234929499,
+        "tag_true": 6804,
+    }
+    expected_tch_mps = {
+        "verts": 8833,
+        "faces": 17639,
+        "verts_sum": 48516.18088025949,
+        "faces_sum": 228110285,
+        "tag_true": 6608,
+    }
+
+    assert native_sig["verts"] == expected_native["verts"]
+    assert native_sig["faces"] == expected_native["faces"]
+    assert native_sig["faces_sum"] == expected_native["faces_sum"]
+    assert native_sig["tag_true"] == expected_native["tag_true"]
+    assert np.isclose(native_sig["verts_sum"], expected_native["verts_sum"], atol=1e-6)
+
+    assert tch_sig["verts"] == expected_tch_mps["verts"]
+    assert tch_sig["faces"] == expected_tch_mps["faces"]
+    assert tch_sig["faces_sum"] == expected_tch_mps["faces_sum"]
+    assert tch_sig["tag_true"] == expected_tch_mps["tag_true"]
+    assert np.isclose(tch_sig["verts_sum"], expected_tch_mps["verts_sum"], atol=1e-6)
 
 
 @pytest.mark.integration
