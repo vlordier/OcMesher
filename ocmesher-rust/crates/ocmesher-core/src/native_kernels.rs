@@ -1,4 +1,7 @@
 use crate::CoreError;
+use rayon::prelude::*;
+
+const PARALLEL_EVAL_THRESHOLD: usize = 32768;
 
 pub trait SdfEvaluator: Send + Sync {
     fn evaluate_batch_into(&self, xyz: &[f64], n_pts: usize, out: &mut Vec<f32>) -> Result<(), CoreError>;
@@ -102,12 +105,21 @@ impl SdfEvaluator for PlaneKernel {
         }
 
         out.clear();
-        out.reserve(n_pts);
-        for point in xyz.chunks_exact(3) {
-            out.push(
-                (point[0] * self.normal[0] + point[1] * self.normal[1] + point[2] * self.normal[2] - self.offset)
-                    as f32,
-            );
+        out.resize(n_pts, 0.0);
+        if n_pts >= PARALLEL_EVAL_THRESHOLD {
+            out.par_iter_mut().enumerate().for_each(|(i, slot)| {
+                let base = i * 3;
+                *slot = (xyz[base] * self.normal[0]
+                    + xyz[base + 1] * self.normal[1]
+                    + xyz[base + 2] * self.normal[2]
+                    - self.offset) as f32;
+            });
+        } else {
+            for (i, point) in xyz.chunks_exact(3).enumerate() {
+                out[i] =
+                    (point[0] * self.normal[0] + point[1] * self.normal[1] + point[2] * self.normal[2] - self.offset)
+                        as f32;
+            }
         }
         Ok(())
     }
@@ -142,12 +154,22 @@ impl SdfEvaluator for SphereKernel {
         }
 
         out.clear();
-        out.reserve(n_pts);
-        for point in xyz.chunks_exact(3) {
-            let dx = point[0] - self.center[0];
-            let dy = point[1] - self.center[1];
-            let dz = point[2] - self.center[2];
-            out.push(((dx * dx + dy * dy + dz * dz).sqrt() - self.radius) as f32);
+        out.resize(n_pts, 0.0);
+        if n_pts >= PARALLEL_EVAL_THRESHOLD {
+            out.par_iter_mut().enumerate().for_each(|(i, slot)| {
+                let base = i * 3;
+                let dx = xyz[base] - self.center[0];
+                let dy = xyz[base + 1] - self.center[1];
+                let dz = xyz[base + 2] - self.center[2];
+                *slot = ((dx * dx + dy * dy + dz * dz).sqrt() - self.radius) as f32;
+            });
+        } else {
+            for (i, point) in xyz.chunks_exact(3).enumerate() {
+                let dx = point[0] - self.center[0];
+                let dy = point[1] - self.center[1];
+                let dz = point[2] - self.center[2];
+                out[i] = ((dx * dx + dy * dy + dz * dz).sqrt() - self.radius) as f32;
+            }
         }
         Ok(())
     }
@@ -285,16 +307,38 @@ pub(crate) fn eval_sdf_min_native_into(
         return Ok(());
     }
 
-    let mut full = Vec::with_capacity(n_pts * n_kernels);
-    eval_sdf_full_native_into(kernels, xyz, n_pts, n_kernels, b_min, b_max, enclosed, &mut full)?;
-
     out.clear();
     out.resize(n_pts, f32::INFINITY);
-    for i in 0..n_pts {
-        for k in 0..n_kernels {
-            let value = full[i * n_kernels + k];
-            if value < out[i] {
-                out[i] = value;
+    let mut kernel_out = Vec::with_capacity(n_pts);
+
+    for (k_idx, kernel) in kernels.iter().enumerate() {
+        kernel.evaluate_batch_into(xyz, n_pts, &mut kernel_out)?;
+        if kernel_out.len() != n_pts {
+            return Err(CoreError::Sdf(format!(
+                "native kernel {k_idx} returned {} values for {n_pts} query points",
+                kernel_out.len()
+            )));
+        }
+        for (dst, value) in out.iter_mut().zip(kernel_out.iter()) {
+            if *value < *dst {
+                *dst = *value;
+            }
+        }
+    }
+
+    if enclosed {
+        for i in 0..n_pts {
+            let x = xyz[i * 3];
+            let y = xyz[i * 3 + 1];
+            let z = xyz[i * 3 + 2];
+            if x <= b_min[0]
+                || x >= b_max[0]
+                || y <= b_min[1]
+                || y >= b_max[1]
+                || z <= b_min[2]
+                || z >= b_max[2]
+            {
+                out[i] = 1.0;
             }
         }
     }
