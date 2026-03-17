@@ -230,6 +230,78 @@ def test_stream_policy_auto_guarded_on_cpu(sample_cameras, sample_bounds):
     assert mesher.stream_policy == "sync"
 
 
+def test_rust_ocmesher_default_device_prefers_cuda(sample_cameras, sample_bounds):
+    class _Cuda:
+        @staticmethod
+        def is_available() -> bool:
+            return True
+
+    class _Mps:
+        @staticmethod
+        def is_available() -> bool:
+            return True
+
+    class _Backends:
+        mps = _Mps()
+
+    class _Torch:
+        cuda = _Cuda()
+        backends = _Backends()
+
+    with patch.dict(sys.modules, {"torch": _Torch()}):
+        mesher = RustOcMesher(sample_cameras, sample_bounds, backend=DummyRustBackend())
+
+    assert mesher.device == "cuda"
+
+
+def test_rust_ocmesher_default_device_prefers_mps_when_cuda_unavailable(sample_cameras, sample_bounds):
+    class _Cuda:
+        @staticmethod
+        def is_available() -> bool:
+            return False
+
+    class _Mps:
+        @staticmethod
+        def is_available() -> bool:
+            return True
+
+    class _Backends:
+        mps = _Mps()
+
+    class _Torch:
+        cuda = _Cuda()
+        backends = _Backends()
+
+    with patch.dict(sys.modules, {"torch": _Torch()}):
+        mesher = RustOcMesher(sample_cameras, sample_bounds, backend=DummyRustBackend())
+
+    assert mesher.device == "mps"
+
+
+def test_rust_ocmesher_default_device_falls_back_to_cpu(sample_cameras, sample_bounds):
+    class _Cuda:
+        @staticmethod
+        def is_available() -> bool:
+            return False
+
+    class _Mps:
+        @staticmethod
+        def is_available() -> bool:
+            return False
+
+    class _Backends:
+        mps = _Mps()
+
+    class _Torch:
+        cuda = _Cuda()
+        backends = _Backends()
+
+    with patch.dict(sys.modules, {"torch": _Torch()}):
+        mesher = RustOcMesher(sample_cameras, sample_bounds, backend=DummyRustBackend())
+
+    assert mesher.device == "cpu"
+
+
 def test_make_rust_ocmesher_raises_import_error_without_extension(sample_cameras, sample_bounds):
     """Without ocmesher_rust installed, make_rust_ocmesher raises ImportError."""
     with patch.dict(sys.modules, {"ocmesher_rust": None}), pytest.raises(
