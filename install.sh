@@ -49,7 +49,7 @@ case "${OS}" in
 esac
 
 if [ -n "${MARCH_FLAGS}" ]; then
-	if ! "${compiler}" ${MARCH_FLAGS} -x c++ - -o /dev/null < /dev/null 2>/dev/null; then
+	if ! "${compiler}" ${MARCH_FLAGS} -x c++ -c - -o /dev/null < /dev/null 2>/dev/null; then
 		echo "Warning: ${compiler} does not support ${MARCH_FLAGS}, falling back to portable build."
 		MARCH_FLAGS=""
 	fi
@@ -59,14 +59,14 @@ gx1() {
 	local out_obj="$1"
 	local defines="$2"
 	local omp_flags="$3"
-	"${compiler}" "${CXXFLAGS_ARRAY[@]}" -O3 -std=c++17 ${MARCH_FLAGS} ${defines} -c -fpic ${omp_flags} -o "${out_obj}" ocmesher/source/core.cpp
+	"${compiler}" "${CXXFLAGS_ARRAY[@]}" -O3 -DNDEBUG -flto -std=c++17 ${MARCH_FLAGS} ${defines} -c -fpic ${omp_flags} -o "${out_obj}" ocmesher/source/core.cpp
 }
 
 gx2() {
 	local out_so="$1"
 	local in_obj="$2"
 	local omp_flags="$3"
-	"${compiler}" "${LDFLAGS_ARRAY[@]}" -O3 -shared ${omp_flags} -o "${out_so}" "${in_obj}"
+	"${compiler}" "${LDFLAGS_ARRAY[@]}" -O3 -DNDEBUG -flto -shared ${omp_flags} -o "${out_so}" "${in_obj}"
 }
 
 patch_core_omp_runtime_macos() {

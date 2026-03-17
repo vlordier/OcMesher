@@ -17,6 +17,7 @@
 
 use std::ffi::c_int;
 use std::sync::{Mutex, OnceLock};
+use std::time::Instant;
 
 use libloading::{Library, Symbol};
 // Removed all PyO3 dependencies for Rust-native pipeline
@@ -56,6 +57,29 @@ static CORE_LOCK: OnceLock<Mutex<()>> = OnceLock::new();
 
 fn core_lock() -> &'static Mutex<()> {
     CORE_LOCK.get_or_init(|| Mutex::new(()))
+}
+
+fn profile_enabled() -> bool {
+    static ENABLED: OnceLock<bool> = OnceLock::new();
+    *ENABLED.get_or_init(|| {
+        std::env::var("OCMESHER_PROFILE")
+            .ok()
+            .as_deref()
+            .map(|v| v == "1" || v.eq_ignore_ascii_case("true"))
+            .unwrap_or(false)
+    })
+}
+
+macro_rules! profile_start {
+    () => { Instant::now() };
+}
+
+macro_rules! profile_print {
+    ($start:expr, $label:expr) => {
+        if profile_enabled() {
+            eprintln!("[profile] {:>30}: {:>8.2}ms", $label, $start.elapsed().as_secs_f64() * 1000.0);
+        }
+    };
 }
 
 // ---------------------------------------------------------------------------
@@ -356,6 +380,7 @@ pub fn run_meshing_pipeline_native(
     params: &MesherParams,
     kernels: &[BoxedSdfEvaluator],
 ) -> Result<Vec<MeshData>, CoreError> {
+    let t_total = profile_start!();
     let n_elements = kernels.len() as i32;
     let n_kerns = kernels.len();
 
@@ -366,6 +391,7 @@ pub fn run_meshing_pipeline_native(
     let mut center_arr = params.center;
     let mut cams_arr = params.cameras_data.clone();
 
+    let t = profile_start!();
     let _n_blocks = unsafe {
         (lib.run_coarse)(
             center_arr.as_mut_ptr(),
@@ -380,22 +406,34 @@ pub fn run_meshing_pipeline_native(
             n_elements,
         )
     };
+    profile_print!(t, "run_coarse");
 
     let mut fine_xyz = Vec::<f64>::new();
     let mut fine_sdf = Vec::<f32>::new();
 
+    let t = profile_start!();
+    let mut fine_iters = 0u32;
+    let mut fine_pts_total = 0usize;
+    let mut fine_cpp_us = 0u64;
+    let mut fine_sdf_us = 0u64;
     loop {
+        let tc = profile_start!();
         let inc = unsafe { (lib.fine_group)() };
         if inc == 0 {
+            fine_cpp_us += tc.elapsed().as_micros() as u64;
             break;
         }
 
         let mut n = unsafe { (lib.fine_iteration)(std::ptr::null_mut()) };
         while n > 0 {
             let n_pts = n as usize;
+            fine_iters += 1;
+            fine_pts_total += n_pts;
             fine_xyz.resize(n_pts * 3, 0.0);
             unsafe { (lib.fine_iteration_output)(fine_xyz.as_mut_ptr()) };
+            fine_cpp_us += tc.elapsed().as_micros() as u64;
 
+            let ts = profile_start!();
             native_kernels::eval_sdf_min_native_into(
                 kernels,
                 &fine_xyz,
@@ -405,25 +443,46 @@ pub fn run_meshing_pipeline_native(
                 params.enclosed,
                 &mut fine_sdf,
             )?;
+            fine_sdf_us += ts.elapsed().as_micros() as u64;
 
+            let tc2 = profile_start!();
             n = unsafe { (lib.fine_iteration)(fine_sdf.as_mut_ptr()) };
+            fine_cpp_us += tc2.elapsed().as_micros() as u64;
         }
     }
+    if profile_enabled() {
+        eprintln!("[profile] {:>30}: {:>8.2}ms  ({} iters, {} pts, cpp={:.2}ms, sdf={:.2}ms)",
+            "fine_loop", t.elapsed().as_secs_f64() * 1000.0, fine_iters, fine_pts_total,
+            fine_cpp_us as f64 / 1000.0, fine_sdf_us as f64 / 1000.0);
+    }
 
+    let t = profile_start!();
     let _n_vis = unsafe { (lib.vis_filter)(params.simplify_occluded, params.visible_relax_iter) };
+    profile_print!(t, "vis_filter");
 
     let mut nv = vec![0i32; n_kerns];
     let mut final_xyz = Vec::<f64>::new();
     let mut final_sdf = Vec::<f32>::new();
+    let t = profile_start!();
+    let mut final_iters = 0u32;
+    let mut final_pts_total = 0usize;
+    let mut final_cpp_us = 0u64;
+    let mut final_sdf_us = 0u64;
     loop {
+        let tc = profile_start!();
         let n = unsafe { (lib.final_iteration)() };
         if n == 0 {
+            final_cpp_us += tc.elapsed().as_micros() as u64;
             break;
         }
         let n_pts = n as usize;
+        final_iters += 1;
+        final_pts_total += n_pts;
         final_xyz.resize(n_pts * 3, 0.0);
         unsafe { (lib.final_iteration2)(final_xyz.as_mut_ptr()) };
+        final_cpp_us += tc.elapsed().as_micros() as u64;
 
+        let ts = profile_start!();
         native_kernels::eval_sdf_full_native_into(
             kernels,
             &final_xyz,
@@ -434,16 +493,24 @@ pub fn run_meshing_pipeline_native(
             params.enclosed,
             &mut final_sdf,
         )?;
+        final_sdf_us += ts.elapsed().as_micros() as u64;
 
+        let tc2 = profile_start!();
         unsafe { (lib.final_iteration3)(final_sdf.as_mut_ptr()) };
+        final_cpp_us += tc2.elapsed().as_micros() as u64;
     }
 
+    let tc = profile_start!();
     let n = unsafe { (lib.final_iteration_occluded)() };
     if n > 0 {
         let n_pts = n as usize;
+        final_iters += 1;
+        final_pts_total += n_pts;
         final_xyz.resize(n_pts * 3, 0.0);
         unsafe { (lib.final_iteration2)(final_xyz.as_mut_ptr()) };
+        final_cpp_us += tc.elapsed().as_micros() as u64;
 
+        let ts = profile_start!();
         native_kernels::eval_sdf_full_native_into(
             kernels,
             &final_xyz,
@@ -454,12 +521,23 @@ pub fn run_meshing_pipeline_native(
             params.enclosed,
             &mut final_sdf,
         )?;
+        final_sdf_us += ts.elapsed().as_micros() as u64;
 
+        let tc2 = profile_start!();
         unsafe { (lib.final_iteration3_occluded)(final_sdf.as_mut_ptr()) };
+        final_cpp_us += tc2.elapsed().as_micros() as u64;
+    } else {
+        final_cpp_us += tc.elapsed().as_micros() as u64;
+    }
+    if profile_enabled() {
+        eprintln!("[profile] {:>30}: {:>8.2}ms  ({} iters, {} pts, cpp={:.2}ms, sdf={:.2}ms)",
+            "final_loop", t.elapsed().as_secs_f64() * 1000.0, final_iters, final_pts_total,
+            final_cpp_us as f64 / 1000.0, final_sdf_us as f64 / 1000.0);
     }
 
     unsafe { (lib.final_remaining)(nv.as_mut_ptr()) };
 
+    let t = profile_start!();
     let mut results = Vec::with_capacity(n_kerns);
     for (element, kernel) in kernels.iter().enumerate() {
         let mesh = construct_element_mesh_native(
@@ -475,6 +553,11 @@ pub fn run_meshing_pipeline_native(
         )?;
         results.push(mesh);
     }
+    if profile_enabled() {
+        eprintln!("[profile] {:>30}: {:>8.2}ms  ({} elements, nv={:?})",
+            "construct_meshes", t.elapsed().as_secs_f64() * 1000.0, n_kerns, &nv);
+    }
+    profile_print!(t_total, "TOTAL pipeline");
 
     Ok(results)
 }
@@ -490,6 +573,7 @@ fn construct_element_mesh_native(
     b_max: &[f64; 3],
     enclosed: bool,
 ) -> Result<MeshData, CoreError> {
+    let t_elem = profile_start!();
     let nv = num_verts as usize;
 
     let mut centers = vec![0.0f64; nv * 3];
@@ -518,8 +602,13 @@ fn construct_element_mesh_native(
     let mut sdf_buf = Vec::with_capacity(n_cubes);
     let check_tol = bisection_tol > 0.0;
 
+    let t_bisect = profile_start!();
+    let mut t_sdf_us = 0u64;
+    let mut t_cpp_us = 0u64;
     for _ in 0..bisection_iters {
+        let ts = profile_start!();
         kernel.evaluate_batch_into(&cubes, n_cubes, &mut sdf_buf)?;
+        t_sdf_us += ts.elapsed().as_micros() as u64;
         if sdf_buf.len() != n_cubes {
             return Err(CoreError::Sdf(format!(
                 "native cube SDF length mismatch: got {}, expected {n_cubes}",
@@ -527,6 +616,7 @@ fn construct_element_mesh_native(
             )));
         }
 
+        let tc = profile_start!();
         unsafe {
             (lib.update_verts)(
                 element,
@@ -535,6 +625,7 @@ fn construct_element_mesh_native(
                 cubes.as_mut_ptr(),
             )
         };
+        t_cpp_us += tc.elapsed().as_micros() as u64;
 
         if check_tol {
             let max_abs = sdf_buf.iter().fold(0.0f32, |acc, &value| acc.max(value.abs()));
@@ -543,21 +634,32 @@ fn construct_element_mesh_native(
             }
         }
     }
+    if profile_enabled() {
+        eprintln!("[profile] {:>30}: {:>8.2}ms  (sdf={:.2}ms, cpp={:.2}ms, n_cubes={})",
+            "bisection_loop", t_bisect.elapsed().as_secs_f64() * 1000.0,
+            t_sdf_us as f64 / 1000.0, t_cpp_us as f64 / 1000.0, n_cubes);
+    }
 
+    let t_lr = profile_start!();
     let mut cubes_r = vec![0.0f64; n_cubes * 3];
     unsafe { (lib.get_lr_verts)(element, cubes.as_mut_ptr(), cubes_r.as_mut_ptr()) };
 
-    let mut sdf_l = Vec::with_capacity(n_cubes);
-    kernel.evaluate_batch_into(&cubes, n_cubes, &mut sdf_l)?;
-    let mut sdf_r = Vec::with_capacity(n_cubes);
-    kernel.evaluate_batch_into(&cubes_r, n_cubes, &mut sdf_r)?;
-    if sdf_l.len() != n_cubes || sdf_r.len() != n_cubes {
+    // Combine L and R coordinates into one contiguous buffer for a single SDF batch eval.
+    let n_lr = n_cubes * 2;
+    let mut lr_xyz = vec![0.0f64; n_lr * 3];
+    lr_xyz[..n_cubes * 3].copy_from_slice(&cubes[..n_cubes * 3]);
+    lr_xyz[n_cubes * 3..].copy_from_slice(&cubes_r[..n_cubes * 3]);
+
+    let mut lr_sdf = Vec::with_capacity(n_lr);
+    kernel.evaluate_batch_into(&lr_xyz, n_lr, &mut lr_sdf)?;
+    if lr_sdf.len() != n_lr {
         return Err(CoreError::Sdf(format!(
-            "native LR SDF length mismatch: left={}, right={}, expected {n_cubes}",
-            sdf_l.len(),
-            sdf_r.len()
+            "native LR SDF length mismatch: got {}, expected {n_lr}",
+            lr_sdf.len()
         )));
     }
+
+    let (sdf_l, sdf_r) = lr_sdf.split_at(n_cubes);
 
     let mut vertices = vec![0.0f64; nv * 3];
     unsafe {
@@ -568,6 +670,9 @@ fn construct_element_mesh_native(
             vertices.as_mut_ptr(),
         )
     };
+    profile_print!(t_lr, "lr_finalize_verts");
+
+    let t_faces = profile_start!();
 
     let mut cnts = [0i32; 3];
     unsafe { (lib.construct_faces)(element, vertices.as_mut_ptr(), cnts.as_mut_ptr()) };
@@ -597,6 +702,12 @@ fn construct_element_mesh_native(
     let n_final_verts = final_vertices.len() / 3;
     let mut in_view_tag = vec![false; n_final_verts];
     unsafe { (lib.get_in_view_tag)(element, in_view_tag.as_mut_ptr()) };
+
+    if profile_enabled() {
+        eprintln!("[profile] {:>30}: {:>8.2}ms", "construct_faces+extra", t_faces.elapsed().as_secs_f64() * 1000.0);
+        eprintln!("[profile] {:>30}: {:>8.2}ms  (nv={}, nf={}, nve={}, nvf={})",
+            "element_total", t_elem.elapsed().as_secs_f64() * 1000.0, nv, nf, nve, nvf);
+    }
 
     Ok(MeshData {
         vertices: final_vertices,
