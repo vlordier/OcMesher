@@ -416,22 +416,34 @@ pub fn run_meshing_pipeline_native(
     let mut fine_pts_total = 0usize;
     let mut fine_cpp_us = 0u64;
     let mut fine_sdf_us = 0u64;
+    let mut fine_group_us = 0u64;
+    let mut fine_iter_us = 0u64;
+    let mut fine_output_us = 0u64;
     loop {
         let tc = profile_start!();
         let inc = unsafe { (lib.fine_group)() };
+        let dt_group = tc.elapsed().as_micros() as u64;
+        fine_group_us += dt_group;
         if inc == 0 {
-            fine_cpp_us += tc.elapsed().as_micros() as u64;
+            fine_cpp_us += dt_group;
             break;
         }
 
+        let tc_iter0 = profile_start!();
         let mut n = unsafe { (lib.fine_iteration)(std::ptr::null_mut()) };
+        let dt_iter0 = tc_iter0.elapsed().as_micros() as u64;
+        fine_iter_us += dt_iter0;
+        fine_cpp_us += dt_iter0;
         while n > 0 {
             let n_pts = n as usize;
             fine_iters += 1;
             fine_pts_total += n_pts;
             fine_xyz.resize(n_pts * 3, 0.0);
+            let tc_out = profile_start!();
             unsafe { (lib.fine_iteration_output)(fine_xyz.as_mut_ptr()) };
-            fine_cpp_us += tc.elapsed().as_micros() as u64;
+            let dt_out = tc_out.elapsed().as_micros() as u64;
+            fine_output_us += dt_out;
+            fine_cpp_us += dt_out;
 
             let ts = profile_start!();
             native_kernels::eval_sdf_min_native_into(
@@ -447,13 +459,16 @@ pub fn run_meshing_pipeline_native(
 
             let tc2 = profile_start!();
             n = unsafe { (lib.fine_iteration)(fine_sdf.as_mut_ptr()) };
-            fine_cpp_us += tc2.elapsed().as_micros() as u64;
+            let dt_iter = tc2.elapsed().as_micros() as u64;
+            fine_iter_us += dt_iter;
+            fine_cpp_us += dt_iter;
         }
     }
     if profile_enabled() {
-        eprintln!("[profile] {:>30}: {:>8.2}ms  ({} iters, {} pts, cpp={:.2}ms, sdf={:.2}ms)",
+        eprintln!("[profile] {:>30}: {:>8.2}ms  ({} iters, {} pts, cpp={:.2}ms, sdf={:.2}ms, fine_group={:.2}ms, fine_iter={:.2}ms, fine_output={:.2}ms)",
             "fine_loop", t.elapsed().as_secs_f64() * 1000.0, fine_iters, fine_pts_total,
-            fine_cpp_us as f64 / 1000.0, fine_sdf_us as f64 / 1000.0);
+            fine_cpp_us as f64 / 1000.0, fine_sdf_us as f64 / 1000.0,
+            fine_group_us as f64 / 1000.0, fine_iter_us as f64 / 1000.0, fine_output_us as f64 / 1000.0);
     }
 
     let t = profile_start!();
@@ -468,19 +483,28 @@ pub fn run_meshing_pipeline_native(
     let mut final_pts_total = 0usize;
     let mut final_cpp_us = 0u64;
     let mut final_sdf_us = 0u64;
+    let mut final_iter_us = 0u64;
+    let mut final_output_us = 0u64;
+    let mut final_push_us = 0u64;
+    let mut final_occluded_check_us = 0u64;
     loop {
         let tc = profile_start!();
         let n = unsafe { (lib.final_iteration)() };
+        let dt_iter = tc.elapsed().as_micros() as u64;
+        final_iter_us += dt_iter;
         if n == 0 {
-            final_cpp_us += tc.elapsed().as_micros() as u64;
+            final_cpp_us += dt_iter;
             break;
         }
         let n_pts = n as usize;
         final_iters += 1;
         final_pts_total += n_pts;
         final_xyz.resize(n_pts * 3, 0.0);
+        let tc_out = profile_start!();
         unsafe { (lib.final_iteration2)(final_xyz.as_mut_ptr()) };
-        final_cpp_us += tc.elapsed().as_micros() as u64;
+        let dt_out = tc_out.elapsed().as_micros() as u64;
+        final_output_us += dt_out;
+        final_cpp_us += dt_iter + dt_out;
 
         let ts = profile_start!();
         native_kernels::eval_sdf_full_native_into(
@@ -497,18 +521,26 @@ pub fn run_meshing_pipeline_native(
 
         let tc2 = profile_start!();
         unsafe { (lib.final_iteration3)(final_sdf.as_mut_ptr()) };
-        final_cpp_us += tc2.elapsed().as_micros() as u64;
+        let dt_push = tc2.elapsed().as_micros() as u64;
+        final_push_us += dt_push;
+        final_cpp_us += dt_push;
     }
 
     let tc = profile_start!();
     let n = unsafe { (lib.final_iteration_occluded)() };
+    let dt_occ = tc.elapsed().as_micros() as u64;
+    final_occluded_check_us += dt_occ;
+    final_cpp_us += dt_occ;
     if n > 0 {
         let n_pts = n as usize;
         final_iters += 1;
         final_pts_total += n_pts;
         final_xyz.resize(n_pts * 3, 0.0);
+        let tc_out = profile_start!();
         unsafe { (lib.final_iteration2)(final_xyz.as_mut_ptr()) };
-        final_cpp_us += tc.elapsed().as_micros() as u64;
+        let dt_out = tc_out.elapsed().as_micros() as u64;
+        final_output_us += dt_out;
+        final_cpp_us += dt_out;
 
         let ts = profile_start!();
         native_kernels::eval_sdf_full_native_into(
@@ -525,14 +557,16 @@ pub fn run_meshing_pipeline_native(
 
         let tc2 = profile_start!();
         unsafe { (lib.final_iteration3_occluded)(final_sdf.as_mut_ptr()) };
-        final_cpp_us += tc2.elapsed().as_micros() as u64;
-    } else {
-        final_cpp_us += tc.elapsed().as_micros() as u64;
+        let dt_push = tc2.elapsed().as_micros() as u64;
+        final_push_us += dt_push;
+        final_cpp_us += dt_push;
     }
     if profile_enabled() {
-        eprintln!("[profile] {:>30}: {:>8.2}ms  ({} iters, {} pts, cpp={:.2}ms, sdf={:.2}ms)",
+        eprintln!("[profile] {:>30}: {:>8.2}ms  ({} iters, {} pts, cpp={:.2}ms, sdf={:.2}ms, final_iter={:.2}ms, final_output={:.2}ms, final_push={:.2}ms, final_occluded={:.2}ms)",
             "final_loop", t.elapsed().as_secs_f64() * 1000.0, final_iters, final_pts_total,
-            final_cpp_us as f64 / 1000.0, final_sdf_us as f64 / 1000.0);
+            final_cpp_us as f64 / 1000.0, final_sdf_us as f64 / 1000.0,
+            final_iter_us as f64 / 1000.0, final_output_us as f64 / 1000.0,
+            final_push_us as f64 / 1000.0, final_occluded_check_us as f64 / 1000.0);
     }
 
     unsafe { (lib.final_remaining)(nv.as_mut_ptr()) };
