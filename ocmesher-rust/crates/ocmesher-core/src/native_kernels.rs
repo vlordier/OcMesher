@@ -324,6 +324,8 @@ pub mod tch_kernels {
 
     const CUDA_BATCH_THRESHOLD: usize = 8192;
     const MPS_BATCH_THRESHOLD: usize = 32768;
+    const CUDA_FP16_THRESHOLD: usize = 65536;
+    const MPS_FP16_THRESHOLD: usize = 131072;
 
     fn should_use_gpu(device: Device, n_pts: usize) -> bool {
         match device {
@@ -333,11 +335,21 @@ pub mod tch_kernels {
         }
     }
 
+    fn gpu_compute_kind(device: Device, n_pts: usize) -> Kind {
+        match device {
+            Device::Cuda(_) if n_pts >= CUDA_FP16_THRESHOLD => Kind::Half,
+            Device::Mps if n_pts >= MPS_FP16_THRESHOLD => Kind::Half,
+            _ => Kind::Float,
+        }
+    }
+
     #[derive(Default)]
     struct TchIoScratch {
         xyz_f32: Vec<f32>,
         device_xyz: Option<Tensor>,
         device_rows: usize,
+        device_xyz_half: Option<Tensor>,
+        device_half_rows: usize,
         cpu_out: Option<Tensor>,
         cpu_rows: usize,
     }
@@ -345,11 +357,13 @@ pub mod tch_kernels {
     struct TchSphereScratch {
         io: TchIoScratch,
         center_row: Tensor,
+        center_row_half: Option<Tensor>,
     }
 
     struct TchPlaneScratch {
         io: TchIoScratch,
         normal_row: Tensor,
+        normal_row_half: Option<Tensor>,
     }
 
     fn fill_xyz_f32_buffer(xyz: &[f64], out: &mut Vec<f32>) {
@@ -391,20 +405,33 @@ pub mod tch_kernels {
         xyz: &[f64],
         n_pts: usize,
         device: Device,
+        kind: Kind,
     ) -> Tensor {
         fill_xyz_f32_buffer(xyz, &mut scratch.xyz_f32);
         let xyz_cpu = Tensor::from_slice(&scratch.xyz_f32).view([n_pts as i64, 3]);
 
-        if scratch.device_rows < n_pts {
-            scratch.device_xyz = Some(Tensor::zeros([n_pts as i64, 3], (Kind::Float, device)));
-            scratch.device_rows = n_pts;
-        }
+        let xyz_device = if kind == Kind::Half {
+            if scratch.device_half_rows < n_pts {
+                scratch.device_xyz_half = Some(Tensor::zeros([n_pts as i64, 3], (Kind::Half, device)));
+                scratch.device_half_rows = n_pts;
+            }
+            scratch
+                .device_xyz_half
+                .as_ref()
+                .expect("half device tensor should be initialized")
+                .narrow(0, 0, n_pts as i64)
+        } else {
+            if scratch.device_rows < n_pts {
+                scratch.device_xyz = Some(Tensor::zeros([n_pts as i64, 3], (Kind::Float, device)));
+                scratch.device_rows = n_pts;
+            }
+            scratch
+                .device_xyz
+                .as_ref()
+                .expect("device tensor should be initialized")
+                .narrow(0, 0, n_pts as i64)
+        };
 
-        let xyz_device = scratch
-            .device_xyz
-            .as_ref()
-            .expect("device tensor should be initialized")
-            .narrow(0, 0, n_pts as i64);
         let mut xyz_device_view = xyz_device.shallow_clone();
         xyz_device_view.copy_(&xyz_cpu);
         xyz_device
@@ -465,6 +492,7 @@ pub mod tch_kernels {
                 scratch: Mutex::new(TchPlaneScratch {
                     io: TchIoScratch::default(),
                     normal_row: normal_row_tensor,
+                    normal_row_half: None,
                 }),
             })
         }
@@ -489,6 +517,7 @@ pub mod tch_kernels {
                 scratch: Mutex::new(TchSphereScratch {
                     io: TchIoScratch::default(),
                     center_row: center_tensor,
+                    center_row_half: None,
                 }),
             }
         }
@@ -520,11 +549,23 @@ pub mod tch_kernels {
                 .scratch
                 .lock()
                 .map_err(|_| CoreError::Sdf("TchSphereKernel scratch lock poisoned".to_string()))?;
-            let xyz_tensor = load_xyz_to_device(&mut scratch.io, xyz, n_pts, self.device);
-            let diff = xyz_tensor - &scratch.center_row;
+            let compute_kind = gpu_compute_kind(self.device, n_pts);
+            let xyz_tensor = load_xyz_to_device(&mut scratch.io, xyz, n_pts, self.device, compute_kind);
+            let center_tensor = if compute_kind == Kind::Half {
+                if scratch.center_row_half.is_none() {
+                    scratch.center_row_half = Some(scratch.center_row.to_kind(Kind::Half));
+                }
+                scratch
+                    .center_row_half
+                    .as_ref()
+                    .expect("half center tensor should be initialized")
+            } else {
+                &scratch.center_row
+            };
+            let diff = xyz_tensor - center_tensor;
             let dims = [1i64];
             let dist = (&diff * &diff)
-                .sum_dim_intlist(&dims[..], false, Kind::Float)
+                .sum_dim_intlist(&dims[..], false, compute_kind)
                 .sqrt()
                 - (self.radius as f64);
             copy_from_device_into_vec(&mut scratch.io, &dist, n_pts, out);
@@ -560,10 +601,22 @@ pub mod tch_kernels {
                 .scratch
                 .lock()
                 .map_err(|_| CoreError::Sdf("TchPlaneKernel scratch lock poisoned".to_string()))?;
-            let xyz_tensor = load_xyz_to_device(&mut scratch.io, xyz, n_pts, self.device);
+            let compute_kind = gpu_compute_kind(self.device, n_pts);
+            let xyz_tensor = load_xyz_to_device(&mut scratch.io, xyz, n_pts, self.device, compute_kind);
+            let normal_tensor = if compute_kind == Kind::Half {
+                if scratch.normal_row_half.is_none() {
+                    scratch.normal_row_half = Some(scratch.normal_row.to_kind(Kind::Half));
+                }
+                scratch
+                    .normal_row_half
+                    .as_ref()
+                    .expect("half normal tensor should be initialized")
+            } else {
+                &scratch.normal_row
+            };
             let dims = [1i64];
-            let dist = (&xyz_tensor * &scratch.normal_row)
-                .sum_dim_intlist(&dims[..], false, Kind::Float)
+            let dist = (&xyz_tensor * normal_tensor)
+                .sum_dim_intlist(&dims[..], false, compute_kind)
                 - (self.offset as f64);
             copy_from_device_into_vec(&mut scratch.io, &dist, n_pts, out);
             Ok(())
