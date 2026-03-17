@@ -24,10 +24,10 @@ use libloading::{Library, Symbol};
 
 mod native_kernels;
 
-pub use native_kernels::{BoxedSdfEvaluator, PlaneKernel, SdfEvaluator, SphereKernel};
-pub use native_kernels::{PlaneSpec, PrimitiveSpec, SphereSpec, build_native_kernels};
 #[cfg(feature = "tch-kernels")]
 pub use native_kernels::tch_kernels;
+pub use native_kernels::{build_native_kernels, PlaneSpec, PrimitiveSpec, SphereSpec};
+pub use native_kernels::{BoxedSdfEvaluator, PlaneKernel, SdfEvaluator, SphereKernel};
 
 // ---------------------------------------------------------------------------
 // Error type
@@ -71,13 +71,19 @@ fn profile_enabled() -> bool {
 }
 
 macro_rules! profile_start {
-    () => { Instant::now() };
+    () => {
+        Instant::now()
+    };
 }
 
 macro_rules! profile_print {
     ($start:expr, $label:expr) => {
         if profile_enabled() {
-            eprintln!("[profile] {:>30}: {:>8.2}ms", $label, $start.elapsed().as_secs_f64() * 1000.0);
+            eprintln!(
+                "[profile] {:>30}: {:>8.2}ms",
+                $label,
+                $start.elapsed().as_secs_f64() * 1000.0
+            );
         }
     };
 }
@@ -180,7 +186,11 @@ impl CoreLib {
                 run_coarse: load_sym!(lib, "run_coarse", FnRunCoarse),
                 fine_group: load_sym!(lib, "fine_group", FnFineGroup),
                 fine_iteration: load_sym!(lib, "fine_iteration", FnFineIteration),
-                fine_iteration_output: load_sym!(lib, "fine_iteration_output", FnFineIterationOutput),
+                fine_iteration_output: load_sym!(
+                    lib,
+                    "fine_iteration_output",
+                    FnFineIterationOutput
+                ),
                 vis_filter: load_sym!(lib, "vis_filter", FnVisFilter),
                 final_iteration: load_sym!(lib, "final_iteration", FnFinalIteration),
                 final_iteration_occluded: load_sym!(
@@ -372,6 +382,7 @@ pub struct MesherParams {
     pub simplify_occluded: bool,
     pub visible_relax_iter: i32,
     pub coarse_count: i32,
+    pub fine_batch_size: i32,
 }
 
 /// Run the full OcMesher pipeline using Rust-native SDFs only.
@@ -419,6 +430,7 @@ pub fn run_meshing_pipeline_native(
     let mut fine_group_us = 0u64;
     let mut fine_iter_us = 0u64;
     let mut fine_output_us = 0u64;
+    let fine_batch_size = params.fine_batch_size.max(1) as usize;
     loop {
         let tc = profile_start!();
         let inc = unsafe { (lib.fine_group)() };
@@ -465,10 +477,11 @@ pub fn run_meshing_pipeline_native(
         }
     }
     if profile_enabled() {
-        eprintln!("[profile] {:>30}: {:>8.2}ms  ({} iters, {} pts, cpp={:.2}ms, sdf={:.2}ms, fine_group={:.2}ms, fine_iter={:.2}ms, fine_output={:.2}ms)",
+        eprintln!("[profile] {:>30}: {:>8.2}ms  ({} iters, {} pts, cpp={:.2}ms, sdf={:.2}ms, fine_group={:.2}ms, fine_iter={:.2}ms, fine_output={:.2}ms, batch_size={})",
             "fine_loop", t.elapsed().as_secs_f64() * 1000.0, fine_iters, fine_pts_total,
             fine_cpp_us as f64 / 1000.0, fine_sdf_us as f64 / 1000.0,
-            fine_group_us as f64 / 1000.0, fine_iter_us as f64 / 1000.0, fine_output_us as f64 / 1000.0);
+            fine_group_us as f64 / 1000.0, fine_iter_us as f64 / 1000.0, fine_output_us as f64 / 1000.0,
+            fine_batch_size);
     }
 
     let t = profile_start!();
@@ -588,8 +601,13 @@ pub fn run_meshing_pipeline_native(
         results.push(mesh);
     }
     if profile_enabled() {
-        eprintln!("[profile] {:>30}: {:>8.2}ms  ({} elements, nv={:?})",
-            "construct_meshes", t.elapsed().as_secs_f64() * 1000.0, n_kerns, &nv);
+        eprintln!(
+            "[profile] {:>30}: {:>8.2}ms  ({} elements, nv={:?})",
+            "construct_meshes",
+            t.elapsed().as_secs_f64() * 1000.0,
+            n_kerns,
+            &nv
+        );
     }
     profile_print!(t_total, "TOTAL pipeline");
 
@@ -662,16 +680,23 @@ fn construct_element_mesh_native(
         t_cpp_us += tc.elapsed().as_micros() as u64;
 
         if check_tol {
-            let max_abs = sdf_buf.iter().fold(0.0f32, |acc, &value| acc.max(value.abs()));
+            let max_abs = sdf_buf
+                .iter()
+                .fold(0.0f32, |acc, &value| acc.max(value.abs()));
             if (max_abs as f64) < bisection_tol {
                 break;
             }
         }
     }
     if profile_enabled() {
-        eprintln!("[profile] {:>30}: {:>8.2}ms  (sdf={:.2}ms, cpp={:.2}ms, n_cubes={})",
-            "bisection_loop", t_bisect.elapsed().as_secs_f64() * 1000.0,
-            t_sdf_us as f64 / 1000.0, t_cpp_us as f64 / 1000.0, n_cubes);
+        eprintln!(
+            "[profile] {:>30}: {:>8.2}ms  (sdf={:.2}ms, cpp={:.2}ms, n_cubes={})",
+            "bisection_loop",
+            t_bisect.elapsed().as_secs_f64() * 1000.0,
+            t_sdf_us as f64 / 1000.0,
+            t_cpp_us as f64 / 1000.0,
+            n_cubes
+        );
     }
 
     let t_lr = profile_start!();
@@ -738,9 +763,20 @@ fn construct_element_mesh_native(
     unsafe { (lib.get_in_view_tag)(element, in_view_tag.as_mut_ptr()) };
 
     if profile_enabled() {
-        eprintln!("[profile] {:>30}: {:>8.2}ms", "construct_faces+extra", t_faces.elapsed().as_secs_f64() * 1000.0);
-        eprintln!("[profile] {:>30}: {:>8.2}ms  (nv={}, nf={}, nve={}, nvf={})",
-            "element_total", t_elem.elapsed().as_secs_f64() * 1000.0, nv, nf, nve, nvf);
+        eprintln!(
+            "[profile] {:>30}: {:>8.2}ms",
+            "construct_faces+extra",
+            t_faces.elapsed().as_secs_f64() * 1000.0
+        );
+        eprintln!(
+            "[profile] {:>30}: {:>8.2}ms  (nv={}, nf={}, nve={}, nvf={})",
+            "element_total",
+            t_elem.elapsed().as_secs_f64() * 1000.0,
+            nv,
+            nf,
+            nve,
+            nvf
+        );
     }
 
     Ok(MeshData {
@@ -833,7 +869,9 @@ fn refine_extra_vertices_native(
         };
 
         if check_tol {
-            let max_abs = sdf_buf.iter().fold(0.0f32, |acc, &value| acc.max(value.abs()));
+            let max_abs = sdf_buf
+                .iter()
+                .fold(0.0f32, |acc, &value| acc.max(value.abs()));
             if (max_abs as f64) < bisection_tol {
                 break;
             }

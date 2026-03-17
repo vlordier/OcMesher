@@ -548,6 +548,7 @@ int vis_filter( // NOLINT(readability-identifier-naming, modernize-use-trailing-
     final_ns::bipolar_edges.clear();
     final_ns::bipolar_edges_s.clear();
     final_ns::bipolar_edges_vertices.clear();
+    final_ns::bipolar_edges_vertices.reserve(static_cast<std::size_t>(visible_set.size()) * 4);
     final_ns::in_view_tag.clear();
     final_ns::bipolar_edges_vindices.clear();
     for (int i = 0; i < params::n_elements; i++) {
@@ -739,10 +740,11 @@ int final_iteration3( // NOLINT(readability-identifier-naming, modernize-use-tra
                     searched[static_cast<std::size_t>(j - s) * 4 + static_cast<std::size_t>(k)];
                 int vid;
                 KeyCube key = cubeToKey(cx);
-                if (bipolar_edges_vertices.count(std::make_pair(i, key)))
-                    vid = bipolar_edges_vertices[std::make_pair(i, key)];
-                else {
-                    vid = bipolar_edges_vertices[std::make_pair(i, key)] = vertices_cnt[i]++;
+                auto it = bipolar_edges_vertices.find(std::make_pair(i, key));
+                if (it != bipolar_edges_vertices.end()) {
+                    vid = it->second;
+                } else {
+                    vid = bipolar_edges_vertices.emplace(std::make_pair(i, key), vertices_cnt[i]++).first->second;
                     ivt.push_back(occluded_set.count(key) == 0);
                 }
                 bipolar_edges_vindices[i].push_back(vid);
@@ -926,10 +928,11 @@ void final_remaining( // NOLINT(readability-identifier-naming, modernize-use-tra
                     searched[static_cast<std::size_t>(j - s) * 4 + static_cast<std::size_t>(k)];
                 int vid;
                 KeyCube key = cubeToKey(cx);
-                if (bipolar_edges_vertices.count(std::make_pair(i, key)))
-                    vid = bipolar_edges_vertices[std::make_pair(i, key)];
-                else {
-                    vid = bipolar_edges_vertices[std::make_pair(i, key)] = vertices_cnt[i]++;
+                auto it = bipolar_edges_vertices.find(std::make_pair(i, key));
+                if (it != bipolar_edges_vertices.end()) {
+                    vid = it->second;
+                } else {
+                    vid = bipolar_edges_vertices.emplace(std::make_pair(i, key), vertices_cnt[i]++).first->second;
                     ivt.push_back(
                         tags[static_cast<std::size_t>(j - s) * 4 + static_cast<std::size_t>(k)]);
                 }

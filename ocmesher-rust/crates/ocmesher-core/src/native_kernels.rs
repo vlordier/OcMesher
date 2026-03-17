@@ -4,7 +4,12 @@ use rayon::prelude::*;
 const PARALLEL_EVAL_THRESHOLD: usize = 32768;
 
 pub trait SdfEvaluator: Send + Sync {
-    fn evaluate_batch_into(&self, xyz: &[f64], n_pts: usize, out: &mut Vec<f32>) -> Result<(), CoreError>;
+    fn evaluate_batch_into(
+        &self,
+        xyz: &[f64],
+        n_pts: usize,
+        out: &mut Vec<f32>,
+    ) -> Result<(), CoreError>;
 
     fn evaluate_batch(&self, xyz: &[f64], n_pts: usize) -> Result<Vec<f32>, CoreError> {
         let mut out = Vec::with_capacity(n_pts);
@@ -52,7 +57,9 @@ pub enum PrimitiveSpec {
 fn normalize_normal(normal: [f64; 3]) -> Result<[f64; 3], CoreError> {
     let norm = (normal[0] * normal[0] + normal[1] * normal[1] + normal[2] * normal[2]).sqrt();
     if norm <= f64::EPSILON {
-        return Err(CoreError::Sdf("PlaneKernel normal must be non-zero".to_string()));
+        return Err(CoreError::Sdf(
+            "PlaneKernel normal must be non-zero".to_string(),
+        ));
     }
     Ok([normal[0] / norm, normal[1] / norm, normal[2] / norm])
 }
@@ -62,10 +69,14 @@ pub fn build_native_kernels(specs: &[PrimitiveSpec]) -> Result<Vec<BoxedSdfEvalu
     for spec in specs {
         match spec {
             PrimitiveSpec::Sphere(sphere) => {
-                kernels.push(Box::new(SphereKernel::new(sphere.center, sphere.radius)) as BoxedSdfEvaluator);
+                kernels
+                    .push(Box::new(SphereKernel::new(sphere.center, sphere.radius))
+                        as BoxedSdfEvaluator);
             }
             PrimitiveSpec::Plane(plane) => {
-                kernels.push(Box::new(PlaneKernel::new(plane.normal, plane.offset)?) as BoxedSdfEvaluator);
+                kernels
+                    .push(Box::new(PlaneKernel::new(plane.normal, plane.offset)?)
+                        as BoxedSdfEvaluator);
             }
         }
     }
@@ -81,10 +92,7 @@ pub struct PlaneKernel {
 impl PlaneKernel {
     pub fn new(normal: [f64; 3], offset: f64) -> Result<Self, CoreError> {
         let normal = normalize_normal(normal)?;
-        Ok(Self {
-            normal,
-            offset,
-        })
+        Ok(Self { normal, offset })
     }
 }
 
@@ -95,7 +103,12 @@ impl Default for PlaneKernel {
 }
 
 impl SdfEvaluator for PlaneKernel {
-    fn evaluate_batch_into(&self, xyz: &[f64], n_pts: usize, out: &mut Vec<f32>) -> Result<(), CoreError> {
+    fn evaluate_batch_into(
+        &self,
+        xyz: &[f64],
+        n_pts: usize,
+        out: &mut Vec<f32>,
+    ) -> Result<(), CoreError> {
         if xyz.len() != n_pts * 3 {
             return Err(CoreError::Sdf(format!(
                 "PlaneKernel expected {} coordinates, got {}",
@@ -116,9 +129,10 @@ impl SdfEvaluator for PlaneKernel {
             });
         } else {
             for (i, point) in xyz.chunks_exact(3).enumerate() {
-                out[i] =
-                    (point[0] * self.normal[0] + point[1] * self.normal[1] + point[2] * self.normal[2] - self.offset)
-                        as f32;
+                out[i] = (point[0] * self.normal[0]
+                    + point[1] * self.normal[1]
+                    + point[2] * self.normal[2]
+                    - self.offset) as f32;
             }
         }
         Ok(())
@@ -144,7 +158,12 @@ impl Default for SphereKernel {
 }
 
 impl SdfEvaluator for SphereKernel {
-    fn evaluate_batch_into(&self, xyz: &[f64], n_pts: usize, out: &mut Vec<f32>) -> Result<(), CoreError> {
+    fn evaluate_batch_into(
+        &self,
+        xyz: &[f64],
+        n_pts: usize,
+        out: &mut Vec<f32>,
+    ) -> Result<(), CoreError> {
         if xyz.len() != n_pts * 3 {
             return Err(CoreError::Sdf(format!(
                 "SphereKernel expected {} coordinates, got {}",
@@ -264,7 +283,9 @@ pub(crate) fn eval_sdf_full_native(
     enclosed: bool,
 ) -> Result<Vec<f32>, CoreError> {
     let mut out = Vec::with_capacity(n_pts.max(n_pts * n_kernels));
-    eval_sdf_full_native_into(kernels, xyz, n_pts, n_kernels, b_min, b_max, enclosed, &mut out)?;
+    eval_sdf_full_native_into(
+        kernels, xyz, n_pts, n_kernels, b_min, b_max, enclosed, &mut out,
+    )?;
     Ok(out)
 }
 
@@ -390,12 +411,22 @@ pub mod tch_kernels {
 
     fn cuda_batch_threshold() -> usize {
         static THRESHOLD: OnceLock<usize> = OnceLock::new();
-        *THRESHOLD.get_or_init(|| parse_threshold_env("OCMESHER_TCH_CUDA_BATCH_THRESHOLD", CUDA_BATCH_THRESHOLD_DEFAULT))
+        *THRESHOLD.get_or_init(|| {
+            parse_threshold_env(
+                "OCMESHER_TCH_CUDA_BATCH_THRESHOLD",
+                CUDA_BATCH_THRESHOLD_DEFAULT,
+            )
+        })
     }
 
     fn mps_batch_threshold() -> usize {
         static THRESHOLD: OnceLock<usize> = OnceLock::new();
-        *THRESHOLD.get_or_init(|| parse_threshold_env("OCMESHER_TCH_MPS_BATCH_THRESHOLD", MPS_BATCH_THRESHOLD_DEFAULT))
+        *THRESHOLD.get_or_init(|| {
+            parse_threshold_env(
+                "OCMESHER_TCH_MPS_BATCH_THRESHOLD",
+                MPS_BATCH_THRESHOLD_DEFAULT,
+            )
+        })
     }
 
     fn experimental_fp8_enabled() -> bool {
@@ -404,7 +435,9 @@ pub mod tch_kernels {
             std::env::var("OCMESHER_TCH_EXPERIMENTAL_FP8")
                 .ok()
                 .as_deref()
-                .map(|v| v == "1" || v.eq_ignore_ascii_case("true") || v.eq_ignore_ascii_case("yes"))
+                .map(|v| {
+                    v == "1" || v.eq_ignore_ascii_case("true") || v.eq_ignore_ascii_case("yes")
+                })
                 .unwrap_or(false)
         })
     }
@@ -415,7 +448,9 @@ pub mod tch_kernels {
             std::env::var("OCMESHER_TCH_MPS_BF16")
                 .ok()
                 .as_deref()
-                .map(|v| v == "1" || v.eq_ignore_ascii_case("true") || v.eq_ignore_ascii_case("yes"))
+                .map(|v| {
+                    v == "1" || v.eq_ignore_ascii_case("true") || v.eq_ignore_ascii_case("yes")
+                })
                 .unwrap_or(false)
         })
     }
@@ -426,7 +461,9 @@ pub mod tch_kernels {
             std::env::var("OCMESHER_TCH_MPS_ADAPTIVE")
                 .ok()
                 .as_deref()
-                .map(|v| v == "1" || v.eq_ignore_ascii_case("true") || v.eq_ignore_ascii_case("yes"))
+                .map(|v| {
+                    v == "1" || v.eq_ignore_ascii_case("true") || v.eq_ignore_ascii_case("yes")
+                })
                 .unwrap_or(false)
         })
     }
@@ -437,7 +474,9 @@ pub mod tch_kernels {
             std::env::var("OCMESHER_TCH_CUDA_ADAPTIVE")
                 .ok()
                 .as_deref()
-                .map(|v| v == "1" || v.eq_ignore_ascii_case("true") || v.eq_ignore_ascii_case("yes"))
+                .map(|v| {
+                    v == "1" || v.eq_ignore_ascii_case("true") || v.eq_ignore_ascii_case("yes")
+                })
                 .unwrap_or(false)
         })
     }
@@ -456,7 +495,9 @@ pub mod tch_kernels {
             std::env::var("OCMESHER_TCH_ADAPTIVE_DEBUG")
                 .ok()
                 .as_deref()
-                .map(|v| v == "1" || v.eq_ignore_ascii_case("true") || v.eq_ignore_ascii_case("yes"))
+                .map(|v| {
+                    v == "1" || v.eq_ignore_ascii_case("true") || v.eq_ignore_ascii_case("yes")
+                })
                 .unwrap_or(false)
         })
     }
@@ -534,9 +575,7 @@ pub mod tch_kernels {
 
     fn gpu_compute_kind(device: Device, n_pts: usize) -> Kind {
         match device {
-            Device::Cuda(_)
-                if experimental_fp8_enabled() && n_pts >= CUDA_FP8_THRESHOLD =>
-            {
+            Device::Cuda(_) if experimental_fp8_enabled() && n_pts >= CUDA_FP8_THRESHOLD => {
                 Kind::Float8e4m3fn
             }
             Device::Cuda(_) if n_pts >= CUDA_FP16_THRESHOLD => Kind::Half,
@@ -623,7 +662,8 @@ pub mod tch_kernels {
 
         let xyz_device = if kind == Kind::Half {
             if scratch.device_half_rows < n_pts {
-                scratch.device_xyz_half = Some(Tensor::zeros([n_pts as i64, 3], (Kind::Half, device)));
+                scratch.device_xyz_half =
+                    Some(Tensor::zeros([n_pts as i64, 3], (Kind::Half, device)));
                 scratch.device_half_rows = n_pts;
             }
             scratch
@@ -633,7 +673,8 @@ pub mod tch_kernels {
                 .narrow(0, 0, n_pts as i64)
         } else if kind == Kind::BFloat16 {
             if scratch.device_bf16_rows < n_pts {
-                scratch.device_xyz_bf16 = Some(Tensor::zeros([n_pts as i64, 3], (Kind::BFloat16, device)));
+                scratch.device_xyz_bf16 =
+                    Some(Tensor::zeros([n_pts as i64, 3], (Kind::BFloat16, device)));
                 scratch.device_bf16_rows = n_pts;
             }
             scratch
@@ -643,7 +684,10 @@ pub mod tch_kernels {
                 .narrow(0, 0, n_pts as i64)
         } else if kind == Kind::Float8e4m3fn {
             if scratch.device_fp8_rows < n_pts {
-                scratch.device_xyz_fp8 = Some(Tensor::zeros([n_pts as i64, 3], (Kind::Float8e4m3fn, device)));
+                scratch.device_xyz_fp8 = Some(Tensor::zeros(
+                    [n_pts as i64, 3],
+                    (Kind::Float8e4m3fn, device),
+                ));
                 scratch.device_fp8_rows = n_pts;
             }
             scratch
@@ -671,7 +715,9 @@ pub mod tch_kernels {
     fn normalize_normal_f32(normal: [f32; 3]) -> Result<[f32; 3], CoreError> {
         let norm = (normal[0] * normal[0] + normal[1] * normal[1] + normal[2] * normal[2]).sqrt();
         if norm <= f32::EPSILON {
-            return Err(CoreError::Sdf("TchPlaneKernel normal must be non-zero".to_string()));
+            return Err(CoreError::Sdf(
+                "TchPlaneKernel normal must be non-zero".to_string(),
+            ));
         }
         Ok([normal[0] / norm, normal[1] / norm, normal[2] / norm])
     }
@@ -788,33 +834,39 @@ pub mod tch_kernels {
             &scratch.normal_row
         };
         let dims = [1i64];
-        let dist = (&xyz_tensor * normal_tensor)
-            .sum_dim_intlist(&dims[..], false, compute_kind)
+        let dist = (&xyz_tensor * normal_tensor).sum_dim_intlist(&dims[..], false, compute_kind)
             - (offset as f64);
         copy_from_device_into_vec(&mut scratch.io, &dist, n_pts, out);
     }
 
-    pub fn build_tch_kernels(specs: &[PrimitiveSpec], device: Device) -> Result<Vec<BoxedSdfEvaluator>, CoreError> {
+    pub fn build_tch_kernels(
+        specs: &[PrimitiveSpec],
+        device: Device,
+    ) -> Result<Vec<BoxedSdfEvaluator>, CoreError> {
         let mut kernels = Vec::with_capacity(specs.len());
         for spec in specs {
             match spec {
                 PrimitiveSpec::Sphere(sphere) => {
-                    kernels.push(
-                        Box::new(TchSphereKernel::new(
-                            [sphere.center[0] as f32, sphere.center[1] as f32, sphere.center[2] as f32],
-                            sphere.radius as f32,
-                            device,
-                        )) as BoxedSdfEvaluator,
-                    );
+                    kernels.push(Box::new(TchSphereKernel::new(
+                        [
+                            sphere.center[0] as f32,
+                            sphere.center[1] as f32,
+                            sphere.center[2] as f32,
+                        ],
+                        sphere.radius as f32,
+                        device,
+                    )) as BoxedSdfEvaluator);
                 }
                 PrimitiveSpec::Plane(plane) => {
-                    kernels.push(
-                        Box::new(TchPlaneKernel::new(
-                            [plane.normal[0] as f32, plane.normal[1] as f32, plane.normal[2] as f32],
-                            plane.offset as f32,
-                            device,
-                        )?) as BoxedSdfEvaluator,
-                    );
+                    kernels.push(Box::new(TchPlaneKernel::new(
+                        [
+                            plane.normal[0] as f32,
+                            plane.normal[1] as f32,
+                            plane.normal[2] as f32,
+                        ],
+                        plane.offset as f32,
+                        device,
+                    )?) as BoxedSdfEvaluator);
                 }
             }
         }
@@ -831,9 +883,7 @@ pub mod tch_kernels {
     impl TchPlaneKernel {
         pub fn new(normal: [f32; 3], offset: f32, device: Device) -> Result<Self, CoreError> {
             let normal = normalize_normal_f32(normal)?;
-            let normal_row_tensor = Tensor::from_slice(&normal)
-                .view([1, 3])
-                .to_device(device);
+            let normal_row_tensor = Tensor::from_slice(&normal).view([1, 3]).to_device(device);
             Ok(Self {
                 normal,
                 offset,
@@ -858,9 +908,7 @@ pub mod tch_kernels {
 
     impl TchSphereKernel {
         pub fn new(center: [f32; 3], radius: f32, device: Device) -> Self {
-            let center_tensor = Tensor::from_slice(&center)
-                .view([1, 3])
-                .to_device(device);
+            let center_tensor = Tensor::from_slice(&center).view([1, 3]).to_device(device);
             Self {
                 center,
                 radius,
@@ -877,7 +925,12 @@ pub mod tch_kernels {
     }
 
     impl SdfEvaluator for TchSphereKernel {
-        fn evaluate_batch_into(&self, xyz: &[f64], n_pts: usize, out: &mut Vec<f32>) -> Result<(), CoreError> {
+        fn evaluate_batch_into(
+            &self,
+            xyz: &[f64],
+            n_pts: usize,
+            out: &mut Vec<f32>,
+        ) -> Result<(), CoreError> {
             if xyz.len() != n_pts * 3 {
                 return Err(CoreError::Sdf(format!(
                     "TchSphereKernel expected {} coordinates, got {}",
@@ -887,17 +940,25 @@ pub mod tch_kernels {
             }
 
             if let Some(device_kind) = adaptive_device_kind(self.device) {
-                if let Some(use_gpu) = adaptive_cached_route(KERNEL_KIND_SPHERE, device_kind, n_pts) {
+                if let Some(use_gpu) = adaptive_cached_route(KERNEL_KIND_SPHERE, device_kind, n_pts)
+                {
                     if !use_gpu {
                         eval_sphere_cpu(self.center, self.radius, xyz, out);
                         return Ok(());
                     }
 
-                    let mut scratch = self
-                        .scratch
-                        .lock()
-                        .map_err(|_| CoreError::Sdf("TchSphereKernel scratch lock poisoned".to_string()))?;
-                    eval_sphere_gpu(&mut scratch, self.center, self.radius, self.device, xyz, n_pts, out);
+                    let mut scratch = self.scratch.lock().map_err(|_| {
+                        CoreError::Sdf("TchSphereKernel scratch lock poisoned".to_string())
+                    })?;
+                    eval_sphere_gpu(
+                        &mut scratch,
+                        self.center,
+                        self.radius,
+                        self.device,
+                        xyz,
+                        n_pts,
+                        out,
+                    );
                     return Ok(());
                 }
 
@@ -909,15 +970,23 @@ pub mod tch_kernels {
                 let mut gpu_out = Vec::with_capacity(n_pts);
                 let gpu_start = Instant::now();
                 {
-                    let mut scratch = self
-                        .scratch
-                        .lock()
-                        .map_err(|_| CoreError::Sdf("TchSphereKernel scratch lock poisoned".to_string()))?;
-                    eval_sphere_gpu(&mut scratch, self.center, self.radius, self.device, xyz, n_pts, &mut gpu_out);
+                    let mut scratch = self.scratch.lock().map_err(|_| {
+                        CoreError::Sdf("TchSphereKernel scratch lock poisoned".to_string())
+                    })?;
+                    eval_sphere_gpu(
+                        &mut scratch,
+                        self.center,
+                        self.radius,
+                        self.device,
+                        xyz,
+                        n_pts,
+                        &mut gpu_out,
+                    );
                 }
                 let gpu_us = gpu_start.elapsed().as_micros();
 
-                let use_gpu = gpu_us.saturating_mul(100) <= cpu_us.saturating_mul(ADAPTIVE_GPU_MARGIN_PCT);
+                let use_gpu =
+                    gpu_us.saturating_mul(100) <= cpu_us.saturating_mul(ADAPTIVE_GPU_MARGIN_PCT);
                 if adaptive_debug_enabled() {
                     eprintln!(
                         "[adaptive] benchmark device={} kernel={} n_pts={} cpu_us={} gpu_us={} margin={}%%",
@@ -947,13 +1016,26 @@ pub mod tch_kernels {
                 .scratch
                 .lock()
                 .map_err(|_| CoreError::Sdf("TchSphereKernel scratch lock poisoned".to_string()))?;
-            eval_sphere_gpu(&mut scratch, self.center, self.radius, self.device, xyz, n_pts, out);
+            eval_sphere_gpu(
+                &mut scratch,
+                self.center,
+                self.radius,
+                self.device,
+                xyz,
+                n_pts,
+                out,
+            );
             Ok(())
         }
     }
 
     impl SdfEvaluator for TchPlaneKernel {
-        fn evaluate_batch_into(&self, xyz: &[f64], n_pts: usize, out: &mut Vec<f32>) -> Result<(), CoreError> {
+        fn evaluate_batch_into(
+            &self,
+            xyz: &[f64],
+            n_pts: usize,
+            out: &mut Vec<f32>,
+        ) -> Result<(), CoreError> {
             if xyz.len() != n_pts * 3 {
                 return Err(CoreError::Sdf(format!(
                     "TchPlaneKernel expected {} coordinates, got {}",
@@ -963,16 +1045,16 @@ pub mod tch_kernels {
             }
 
             if let Some(device_kind) = adaptive_device_kind(self.device) {
-                if let Some(use_gpu) = adaptive_cached_route(KERNEL_KIND_PLANE, device_kind, n_pts) {
+                if let Some(use_gpu) = adaptive_cached_route(KERNEL_KIND_PLANE, device_kind, n_pts)
+                {
                     if !use_gpu {
                         eval_plane_cpu(self.normal, self.offset, xyz, out);
                         return Ok(());
                     }
 
-                    let mut scratch = self
-                        .scratch
-                        .lock()
-                        .map_err(|_| CoreError::Sdf("TchPlaneKernel scratch lock poisoned".to_string()))?;
+                    let mut scratch = self.scratch.lock().map_err(|_| {
+                        CoreError::Sdf("TchPlaneKernel scratch lock poisoned".to_string())
+                    })?;
                     eval_plane_gpu(&mut scratch, self.device, xyz, n_pts, self.offset, out);
                     return Ok(());
                 }
@@ -985,15 +1067,22 @@ pub mod tch_kernels {
                 let mut gpu_out = Vec::with_capacity(n_pts);
                 let gpu_start = Instant::now();
                 {
-                    let mut scratch = self
-                        .scratch
-                        .lock()
-                        .map_err(|_| CoreError::Sdf("TchPlaneKernel scratch lock poisoned".to_string()))?;
-                    eval_plane_gpu(&mut scratch, self.device, xyz, n_pts, self.offset, &mut gpu_out);
+                    let mut scratch = self.scratch.lock().map_err(|_| {
+                        CoreError::Sdf("TchPlaneKernel scratch lock poisoned".to_string())
+                    })?;
+                    eval_plane_gpu(
+                        &mut scratch,
+                        self.device,
+                        xyz,
+                        n_pts,
+                        self.offset,
+                        &mut gpu_out,
+                    );
                 }
                 let gpu_us = gpu_start.elapsed().as_micros();
 
-                let use_gpu = gpu_us.saturating_mul(100) <= cpu_us.saturating_mul(ADAPTIVE_GPU_MARGIN_PCT);
+                let use_gpu =
+                    gpu_us.saturating_mul(100) <= cpu_us.saturating_mul(ADAPTIVE_GPU_MARGIN_PCT);
                 if adaptive_debug_enabled() {
                     eprintln!(
                         "[adaptive] benchmark device={} kernel={} n_pts={} cpu_us={} gpu_us={} margin={}%%",
@@ -1032,8 +1121,8 @@ pub mod tch_kernels {
 #[cfg(test)]
 mod tests {
     use super::{
-        BoxedSdfEvaluator, PlaneKernel, PlaneSpec, PrimitiveSpec, SphereKernel, SphereSpec,
-        build_native_kernels, eval_sdf_full_native, eval_sdf_min_native,
+        build_native_kernels, eval_sdf_full_native, eval_sdf_min_native, BoxedSdfEvaluator,
+        PlaneKernel, PlaneSpec, PrimitiveSpec, SphereKernel, SphereSpec,
     };
 
     #[test]
@@ -1049,7 +1138,10 @@ mod tests {
     #[test]
     fn sphere_spec_rejects_non_positive_radius() {
         let err = SphereSpec::new([0.0, 0.0, 0.0], 0.0).unwrap_err();
-        assert_eq!(err.to_string(), "SDF kernel call failed: radius must be positive");
+        assert_eq!(
+            err.to_string(),
+            "SDF kernel call failed: radius must be positive"
+        );
     }
 
     #[test]
@@ -1076,11 +1168,27 @@ mod tests {
     fn native_eval_applies_bounds_mask() {
         let kernels: Vec<BoxedSdfEvaluator> = vec![Box::new(SphereKernel::default())];
         let xyz = [0.0, 0.0, 0.0, 2.0, 0.0, 0.0];
-        let full = eval_sdf_full_native(&kernels, &xyz, 2, 1, &[-1.0, -1.0, -1.0], &[1.0, 1.0, 1.0], true)
-            .unwrap();
+        let full = eval_sdf_full_native(
+            &kernels,
+            &xyz,
+            2,
+            1,
+            &[-1.0, -1.0, -1.0],
+            &[1.0, 1.0, 1.0],
+            true,
+        )
+        .unwrap();
         assert_eq!(full[1], 1.0);
 
-        let min = eval_sdf_min_native(&kernels, &xyz, 2, &[-1.0, -1.0, -1.0], &[1.0, 1.0, 1.0], true).unwrap();
+        let min = eval_sdf_min_native(
+            &kernels,
+            &xyz,
+            2,
+            &[-1.0, -1.0, -1.0],
+            &[1.0, 1.0, 1.0],
+            true,
+        )
+        .unwrap();
         assert_eq!(min[1], 1.0);
     }
 
@@ -1091,7 +1199,15 @@ mod tests {
             Box::new(PlaneKernel::new([0.0, 0.0, 1.0], 0.0).unwrap()),
         ];
         let xyz = [0.0, 0.0, 2.0, 0.0, 0.0, -2.0];
-        let min = eval_sdf_min_native(&kernels, &xyz, 2, &[-5.0, -5.0, -5.0], &[5.0, 5.0, 5.0], false).unwrap();
+        let min = eval_sdf_min_native(
+            &kernels,
+            &xyz,
+            2,
+            &[-5.0, -5.0, -5.0],
+            &[5.0, 5.0, 5.0],
+            false,
+        )
+        .unwrap();
         assert_eq!(min.len(), 2);
         assert!((min[0] - 1.0).abs() <= 1e-6);
         assert!((min[1] + 2.0).abs() <= 1e-6);
@@ -1136,7 +1252,15 @@ mod tests {
             Box::new(TchPlaneKernel::new([0.0, 0.0, 1.0], 0.0, Device::Cpu).unwrap()),
         ];
         let xyz = [0.0, 0.0, 2.0, 0.0, 0.0, -2.0];
-        let min = eval_sdf_min_native(&kernels, &xyz, 2, &[-5.0, -5.0, -5.0], &[5.0, 5.0, 5.0], false).unwrap();
+        let min = eval_sdf_min_native(
+            &kernels,
+            &xyz,
+            2,
+            &[-5.0, -5.0, -5.0],
+            &[5.0, 5.0, 5.0],
+            false,
+        )
+        .unwrap();
         assert_eq!(min.len(), 2);
         assert!((min[0] - 1.0).abs() <= 1e-5);
         assert!((min[1] + 2.0).abs() <= 1e-5);

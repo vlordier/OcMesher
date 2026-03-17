@@ -571,15 +571,17 @@ inline auto det(const std::array<std::array<T, 3>, 3>& matrix) -> T {
 }
 
 auto triSegIntersect(T* t1, T* t2, T* t3, T* s1, T* s2)
-    -> bool { // NOLINT(modernize-use-trailing-return-type, bugprone-easily-swappable-parameters)
+    -> bool { // NOLINT(readability-identifier-length, bugprone-easily-swappable-parameters)
     // note (t1,t3) of the tri is allowed to intersect
     std::array<std::array<T, 3>, 3> m{};
+    #pragma omp simd
     for (int i = 0; i < 3; i++) {
         m[0][i] = t1[i] - s1[i];
         m[1][i] = t2[i] - s1[i];
         m[2][i] = t3[i] - s1[i];
     }
     T det1 = det(m);
+    #pragma omp simd
     for (int i = 0; i < 3; i++) {
         m[0][i] = t1[i] - s2[i];
         m[1][i] = t2[i] - s2[i];
@@ -589,12 +591,14 @@ auto triSegIntersect(T* t1, T* t2, T* t3, T* s1, T* s2)
     if (!((det1 > 0 && det2 < 0) || (det1 < 0 && det2 > 0)))
         return false;
 
+    #pragma omp simd
     for (int i = 0; i < 3; i++) {
         m[0][i] = t1[i] - s1[i];
         m[1][i] = t2[i] - s1[i];
         m[2][i] = s2[i] - s1[i];
     }
     det1 = det(m);
+    #pragma omp simd
     for (int i = 0; i < 3; i++) {
         m[0][i] = t2[i] - s1[i];
         m[1][i] = t3[i] - s1[i];
@@ -602,6 +606,7 @@ auto triSegIntersect(T* t1, T* t2, T* t3, T* s1, T* s2)
     det2 = det(m);
     if (!((det1 > 0 && det2 > 0) || (det1 < 0 && det2 < 0)))
         return false;
+    #pragma omp simd
     for (int i = 0; i < 3; i++) {
         m[0][i] = t3[i] - s1[i];
         m[1][i] = t1[i] - s1[i];
