@@ -1,0 +1,186 @@
+{
+  "runs": 4,
+  "warmup": 1,
+  "cases": {
+    "medium_1cam": {
+      "plane": {
+        "upstream_python_cpp": {
+          "ok": true,
+          "result": {
+            "times": [
+              0.03717250000045169,
+              0.03533179200894665,
+              0.03545362499426119,
+              0.0351720420003403
+            ],
+            "mean": 0.03578248975099996,
+            "steady_mean": 0.03531915300118271,
+            "min": 0.0351720420003403,
+            "max": 0.03717250000045169
+          }
+        },
+        "current_rust_native": {
+          "ok": false,
+          "returncode": -6,
+          "stdout_tail": "",
+          "stderr_tail": "Assertion failed: (w != 0), function finalize_extra_verts, file core.cpp, line 1111."
+        },
+        "current_rust_tch_mps": {
+          "ok": false,
+          "returncode": -6,
+          "stdout_tail": "",
+          "stderr_tail": "Assertion failed: (w != 0), function finalize_extra_verts, file core.cpp, line 1111."
+        }
+      },
+      "sphere": {
+        "upstream_python_cpp": {
+          "ok": true,
+          "result": {
+            "times": [
+              0.04619937499228399,
+              0.04317262500990182,
+              0.04353391699260101,
+              0.0437235829886049
+            ],
+            "mean": 0.04415737499584793,
+            "steady_mean": 0.04347670833036924,
+            "min": 0.04317262500990182,
+            "max": 0.04619937499228399
+          }
+        },
+        "current_rust_native": {
+          "ok": false,
+          "returncode": -6,
+          "stdout_tail": "",
+          "stderr_tail": "Assertion failed: (w != 0), function finalize_extra_verts, file core.cpp, line 1111."
+        },
+        "current_rust_tch_mps": {
+          "ok": false,
+          "returncode": -6,
+          "stdout_tail": "",
+          "stderr_tail": "Assertion failed: (w != 0), function finalize_extra_verts, file core.cpp, line 1111."
+        }
+      }
+    },
+    "large_1cam": {
+      "plane": {
+        "upstream_python_cpp": {
+          "ok": true,
+          "result": {
+            "times": [
+              0.02466525000636466,
+              0.02247620800335426,
+              0.02154083299683407,
+              0.022117667002021335
+            ],
+            "mean": 0.02269998950214358,
+            "steady_mean": 0.02204490266740322,
+            "min": 0.02154083299683407,
+            "max": 0.02466525000636466
+          }
+        },
+        "current_rust_native": {
+          "ok": false,
+          "returncode": -6,
+          "stdout_tail": "",
+          "stderr_tail": "Assertion failed: (w != 0), function finalize_extra_verts, file core.cpp, line 1111."
+        },
+        "current_rust_tch_mps": {
+          "ok": false,
+          "returncode": -6,
+          "stdout_tail": "",
+          "stderr_tail": "Assertion failed: (w != 0), function finalize_extra_verts, file core.cpp, line 1111."
+        }
+      },
+      "sphere": {
+        "upstream_python_cpp": {
+          "ok": true,
+          "result": {
+            "times": [
+              0.03167866601143032,
+              0.029074125006445684,
+              0.028278249999857508,
+              0.029643542002304457
+            ],
+            "mean": 0.029668645755009493,
+            "steady_mean": 0.028998639002869215,
+            "min": 0.028278249999857508,
+            "max": 0.03167866601143032
+          }
+        },
+        "current_rust_native": {
+          "ok": false,
+          "returncode": -6,
+          "stdout_tail": "",
+          "stderr_tail": "Assertion failed: (w != 0), function finalize_extra_verts, file core.cpp, line 1111."
+        },
+        "current_rust_tch_mps": {
+          "ok": false,
+          "returncode": -6,
+          "stdout_tail": "",
+          "stderr_tail": "Assertion failed: (w != 0), function finalize_extra_verts, file core.cpp, line 1111."
+        }
+      }
+    },
+    "large_2cam": {
+      "plane": {
+        "upstream_python_cpp": {
+          "ok": true,
+          "result": {
+            "times": [
+              0.2767020409955876,
+              0.2000623329950031,
+              0.23474554099084344,
+              0.22764495899900794
+            ],
+            "mean": 0.23478871849511052,
+            "steady_mean": 0.22081761099495148,
+            "min": 0.2000623329950031,
+            "max": 0.2767020409955876
+          }
+        },
+        "current_rust_native": {
+          "ok": false,
+          "returncode": -6,
+          "stdout_tail": "",
+          "stderr_tail": "Assertion failed: (w != 0), function finalize_extra_verts, file core.cpp, line 1111."
+        },
+        "current_rust_tch_mps": {
+          "ok": false,
+          "returncode": -6,
+          "stdout_tail": "",
+          "stderr_tail": "Assertion failed: (w != 0), function finalize_extra_verts, file core.cpp, line 1111."
+        }
+      },
+      "sphere": {
+        "upstream_python_cpp": {
+          "ok": true,
+          "result": {
+            "times": [
+              0.09283054100524168,
+              0.08936650000396185,
+              0.08966499999223743,
+              0.08732166599656921
+            ],
+            "mean": 0.08979592674950254,
+            "steady_mean": 0.08878438866425616,
+            "min": 0.08732166599656921,
+            "max": 0.09283054100524168
+          }
+        },
+        "current_rust_native": {
+          "ok": false,
+          "returncode": -6,
+          "stdout_tail": "",
+          "stderr_tail": "Assertion failed: (w != 0), function finalize_extra_verts, file core.cpp, line 1111."
+        },
+        "current_rust_tch_mps": {
+          "ok": false,
+          "returncode": -6,
+          "stdout_tail": "",
+          "stderr_tail": "Assertion failed: (w != 0), function finalize_extra_verts, file core.cpp, line 1111."
+        }
+      }
+    }
+  }
+}
