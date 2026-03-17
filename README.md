@@ -79,46 +79,24 @@ uv sync --extra benchmark
 
 ### Development Checks
 
-The repo uses Ruff for linting/formatting and Pytest for tests.
+The repo uses `cargo fmt` for formatting and `cargo clippy` for linting.
 
-To mirror local and CI policy checks, install and run pre-commit hooks:
-
-```bash
-uv run pre-commit install
-uv run pre-commit run --all-files
-```
-
-Quality policy notes:
-- Naming consistency and general style are enforced by Ruff.
-- Function complexity and branch depth are linted via Ruff/Pylint rule families (for example `C901`, `PLR0912`, `PLR0915`) in files that are not explicitly waived in `pyproject.toml`.
-- Line length is configured at 120 columns; per-file suppressions are documented in `pyproject.toml`.
-- File-size guardrails for high-churn scripts are enforced by `tests/file_length_guard.py` in pre-commit and CI.
+To check formatting and linting:
 
 ```bash
-uv run ruff check .
-uv run ruff format .
-uv run pytest
-uv run python tests/file_length_guard.py
+cargo fmt --all -- --check
+cargo clippy --all-targets --all-features -- -D warnings
 ```
 
 ### Benchmark Validation Workflow
 
-For local performance and regression validation, use the same sequence as CI/maintenance work:
+For local performance and regression validation, use the Rust-native benchmark suite:
 
 ```bash
-uv run ruff check .
-uv run pytest
-uv run python benchmark.py --configs small --runs 1
+cargo bench
 ```
 
-To persist benchmark results with run metadata for later branch-to-branch
-comparison, write snapshot JSON artifacts instead of plain results:
-
-```bash
-uv run python benchmark.py --configs small --runs 1 --snapshot-json benchmark_artifacts/benchmark_tiers_snapshot.json
-uv run python benchmarks/bench_python_overhead.py --sizes 100 1000 --snapshot-json benchmark_artifacts/bench_python_overhead_snapshot.json
-uv run python benchmarks/bench_e2e.py --sizes 1000 10000 --snapshot-json benchmark_artifacts/bench_e2e_snapshot.json
-uv run python benchmarks/bench_mlx_sdf.py --sizes 1000 10000 --snapshot-json benchmark_artifacts/bench_mlx_sdf_snapshot.json
+To persist benchmark results with run metadata for later branch-to-branch comparison, use the output from `cargo bench` or custom Rust-native benchmarking tools.
 uv run python benchmarks/bench_rust_scene.py --runs 3 --snapshot-json benchmark_artifacts/bench_rust_scene_snapshot.json
 ```
 

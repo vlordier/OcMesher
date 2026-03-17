@@ -19,15 +19,12 @@ use std::ffi::c_int;
 use std::sync::{Mutex, OnceLock};
 
 use libloading::{Library, Symbol};
-use pyo3::prelude::*;
-use pyo3::types::PyDict;
+// Removed all PyO3 dependencies for Rust-native pipeline
 
 mod native_kernels;
 
 pub use native_kernels::{BoxedSdfEvaluator, PlaneKernel, SdfEvaluator, SphereKernel};
 pub use native_kernels::{PlaneSpec, PrimitiveSpec, SphereSpec, build_native_kernels};
-#[cfg(feature = "tch-kernels")]
-pub use native_kernels::tch_kernels;
 
 // ---------------------------------------------------------------------------
 // Error type
@@ -47,11 +44,7 @@ pub enum CoreError {
     Shape(String),
 }
 
-impl From<CoreError> for PyErr {
-    fn from(e: CoreError) -> Self {
-        pyo3::exceptions::PyRuntimeError::new_err(e.to_string())
-    }
-}
+// Removed PyErr conversion, not needed for Rust-native pipeline
 
 // ---------------------------------------------------------------------------
 // Process-wide serialisation lock (C++ global state)
@@ -277,7 +270,7 @@ pub fn pack_cameras(
     Ok(packed)
 }
 
-/// Validate and extract scalar bounds from a 6-element Python sequence.
+/// Validate and extract scalar bounds from a 6-element array.
 pub fn validate_bounds(bounds: &[f64]) -> Result<([f64; 3], [f64; 3], [f64; 3], f64), CoreError> {
     if bounds.len() != 6 {
         return Err(CoreError::Bounds(format!(
@@ -312,162 +305,11 @@ pub fn validate_bounds(bounds: &[f64]) -> Result<([f64; 3], [f64; 3], [f64; 3], 
     Ok((b_min, b_max, center, size))
 }
 
-// ---------------------------------------------------------------------------
-// SDF evaluation helpers
-// ---------------------------------------------------------------------------
+// SDF evaluation helpers for Rust-native pipeline are in native_kernels.rs
 
-/// Call a single Python SDF kernel with `xyz` (n_pts × 3 f64) and return f32 values.
-///
-/// Accepts numpy float32, numpy float64, or any Python object that has `.numpy()`.
-fn eval_kernel_py(
-    py: Python<'_>,
-    kernel: &Py<PyAny>,
-    xyz: &[f64],
-    n_pts: usize,
-) -> PyResult<Vec<f32>> {
-    use numpy::{IntoPyArray, PyReadonlyArray1};
-    use ndarray::Array2;
+// SDF evaluation helpers for Rust-native pipeline are in native_kernels.rs
 
-    let xyz_arr = Array2::from_shape_vec((n_pts, 3), xyz.to_vec())
-        .map_err(|e| pyo3::exceptions::PyValueError::new_err(e.to_string()))?;
-    let xyz_np = xyz_arr.into_pyarray_bound(py);
-
-    let raw = kernel.call1(py, (xyz_np,))?;
-
-    // Try numpy f32 directly
-    if let Ok(arr) = raw.extract::<PyReadonlyArray1<f32>>(py) {
-        return arr
-            .as_slice()
-            .map(|s| s.to_vec())
-            .map_err(|_| pyo3::exceptions::PyValueError::new_err("SDF array not contiguous"));
-    }
-
-    // Try numpy f64 → cast to f32
-    if let Ok(arr) = raw.extract::<PyReadonlyArray1<f64>>(py) {
-        return arr
-            .as_slice()
-            .map(|s| s.iter().map(|&v| v as f32).collect())
-            .map_err(|_| pyo3::exceptions::PyValueError::new_err("SDF array not contiguous"));
-    }
-
-    // Try `.numpy()` for torch tensors (CPU) or DLPack-capable objects
-    if let Ok(numpy_obj) = raw.bind(py).call_method0("numpy") {
-        if let Ok(arr) = numpy_obj.extract::<PyReadonlyArray1<f32>>() {
-            return arr
-                .as_slice()
-                .map(|s| s.to_vec())
-                .map_err(|_| pyo3::exceptions::PyValueError::new_err("SDF array not contiguous"));
-        }
-        if let Ok(arr) = numpy_obj.extract::<PyReadonlyArray1<f64>>() {
-            return arr
-                .as_slice()
-                .map(|s| s.iter().map(|&v| v as f32).collect())
-                .map_err(|_| pyo3::exceptions::PyValueError::new_err("SDF array not contiguous"));
-        }
-    }
-
-    // Last resort: try __dlpack__ → capsule → numpy (zero-copy path for CPU DLPack)
-    if let Ok(cap) = raw.bind(py).call_method0("__dlpack__") {
-        // Import numpy and call np.from_dlpack
-        let np = py.import_bound("numpy")?;
-        let from_dlpack = np.getattr("from_dlpack")?;
-        let arr_obj = from_dlpack.call1((cap,))?;
-        if let Ok(arr) = arr_obj.extract::<PyReadonlyArray1<f32>>() {
-            return arr
-                .as_slice()
-                .map(|s| s.to_vec())
-                .map_err(|_| pyo3::exceptions::PyValueError::new_err("SDF array not contiguous"));
-        }
-    }
-
-    Err(pyo3::exceptions::PyTypeError::new_err(
-        "SDF kernel return value must be a float32/float64 numpy array, \
-         a CPU torch.Tensor, or a DLPack-capable object",
-    ))
-}
-
-/// Evaluate all `kernels` at `xyz` (n_pts × 3 f64) and return a flat f32 array of shape
-/// `(n_pts × n_kernels)` in row-major order: `result[i * n_kernels + k]` = kernel k value at
-/// point i.
-///
-/// If `enclosed`, points outside `[b_min, b_max]` are clamped to `+1.0` (exterior).
-fn eval_sdf_full(
-    py: Python<'_>,
-    kernels: &[Py<PyAny>],
-    xyz: &[f64],
-    n_pts: usize,
-    n_kernels: usize,
-    b_min: &[f64; 3],
-    b_max: &[f64; 3],
-    enclosed: bool,
-) -> PyResult<Vec<f32>> {
-    let mut result = vec![0.0f32; n_pts * n_kernels];
-
-    for (k_idx, kernel) in kernels.iter().enumerate() {
-        let sdf = eval_kernel_py(py, kernel, xyz, n_pts)?;
-        if sdf.len() != n_pts {
-            return Err(pyo3::exceptions::PyValueError::new_err(format!(
-                "kernels[{k_idx}] returned {} values for {n_pts} query points",
-                sdf.len()
-            )));
-        }
-        for (i, v) in sdf.iter().enumerate() {
-            result[i * n_kernels + k_idx] = *v;
-        }
-    }
-
-    // Apply bounds masking in-place
-    if enclosed {
-        for i in 0..n_pts {
-            let x = xyz[i * 3];
-            let y = xyz[i * 3 + 1];
-            let z = xyz[i * 3 + 2];
-            if x <= b_min[0]
-                || x >= b_max[0]
-                || y <= b_min[1]
-                || y >= b_max[1]
-                || z <= b_min[2]
-                || z >= b_max[2]
-            {
-                for k in 0..n_kernels {
-                    result[i * n_kernels + k] = 1.0;
-                }
-            }
-        }
-    }
-
-    Ok(result)
-}
-
-/// Like [`eval_sdf_full`] but returns a single f32 per point: the minimum across all kernels.
-/// Used during the coarse pass where `fine_iteration` only cares about the sign.
-fn eval_sdf_min(
-    py: Python<'_>,
-    kernels: &[Py<PyAny>],
-    xyz: &[f64],
-    n_pts: usize,
-    b_min: &[f64; 3],
-    b_max: &[f64; 3],
-    enclosed: bool,
-) -> PyResult<Vec<f32>> {
-    let n_kernels = kernels.len();
-    let full = eval_sdf_full(py, kernels, xyz, n_pts, n_kernels, b_min, b_max, enclosed)?;
-
-    if n_kernels == 1 {
-        return Ok(full);
-    }
-
-    let mut min_sdf = vec![f32::INFINITY; n_pts];
-    for i in 0..n_pts {
-        for k in 0..n_kernels {
-            let v = full[i * n_kernels + k];
-            if v < min_sdf[i] {
-                min_sdf[i] = v;
-            }
-        }
-    }
-    Ok(min_sdf)
-}
+// SDF evaluation helpers for Rust-native pipeline are in native_kernels.rs
 
 // ---------------------------------------------------------------------------
 // Mesh result
@@ -753,26 +595,19 @@ pub struct MesherParams {
     pub coarse_count: i32,
 }
 
-/// Run the full OcMesher pipeline.
-///
-/// Acquires [`CORE_LOCK`] for the duration of the call, then mirrors
-/// `OcMesher.__call__` step by step.  Returns one [`MeshData`] per kernel.
-pub fn run_meshing_pipeline(
-    py: Python<'_>,
+/// Run the full OcMesher pipeline using Rust-native SDFs only.
+pub fn run_meshing_pipeline_native(
     lib: &CoreLib,
     params: &MesherParams,
-    kernels: &[Py<PyAny>],
-) -> PyResult<Vec<MeshData>> {
+    kernels: &[BoxedSdfEvaluator],
+) -> Result<Vec<MeshData>, CoreError> {
     let n_elements = kernels.len() as i32;
     let n_kerns = kernels.len();
 
     let _guard = core_lock()
         .lock()
-        .map_err(|_| pyo3::exceptions::PyRuntimeError::new_err("core lock poisoned"))?;
+        .map_err(|_| CoreError::Sdf("core lock poisoned".to_string()))?;
 
-    // ------------------------------------------------------------------
-    // Step 1: Coarse octree (visibility only, no SDF)
-    // ------------------------------------------------------------------
     let mut center_arr = params.center;
     let mut cams_arr = params.cameras_data.clone();
 
@@ -791,25 +626,19 @@ pub fn run_meshing_pipeline(
         )
     };
 
-    // ------------------------------------------------------------------
-    // Step 2: Coarse SDF evaluation (mark solid/empty)
-    // ------------------------------------------------------------------
     loop {
         let inc = unsafe { (lib.fine_group)() };
         if inc == 0 {
             break;
         }
 
-        // First call with null: fill output_vertices list, return count.
         let mut n = unsafe { (lib.fine_iteration)(std::ptr::null_mut()) };
-
         while n > 0 {
             let n_pts = n as usize;
             let mut xyz = vec![0.0f64; n_pts * 3];
             unsafe { (lib.fine_iteration_output)(xyz.as_mut_ptr()) };
 
-            let mut sdf_min = eval_sdf_min(
-                py,
+            let mut sdf_min = native_kernels::eval_sdf_min_native(
                 kernels,
                 &xyz,
                 n_pts,
@@ -822,16 +651,9 @@ pub fn run_meshing_pipeline(
         }
     }
 
-    // ------------------------------------------------------------------
-    // Step 3: Visibility filter
-    // ------------------------------------------------------------------
     let _n_vis = unsafe { (lib.vis_filter)(params.simplify_occluded, params.visible_relax_iter) };
 
-    // ------------------------------------------------------------------
-    // Step 4: Fine octree subdivision near the surface
-    // ------------------------------------------------------------------
     let mut nv = vec![0i32; n_kerns];
-
     loop {
         let n = unsafe { (lib.final_iteration)() };
         if n == 0 {
@@ -841,8 +663,7 @@ pub fn run_meshing_pipeline(
         let mut xyz = vec![0.0f64; n_pts * 3];
         unsafe { (lib.final_iteration2)(xyz.as_mut_ptr()) };
 
-        let mut sdf_full = eval_sdf_full(
-            py,
+        let mut sdf_full = native_kernels::eval_sdf_full_native(
             kernels,
             &xyz,
             n_pts,
@@ -855,15 +676,13 @@ pub fn run_meshing_pipeline(
         unsafe { (lib.final_iteration3)(sdf_full.as_mut_ptr()) };
     }
 
-    // Occluded cells
     let n = unsafe { (lib.final_iteration_occluded)() };
     if n > 0 {
         let n_pts = n as usize;
         let mut xyz = vec![0.0f64; n_pts * 3];
         unsafe { (lib.final_iteration2)(xyz.as_mut_ptr()) };
 
-        let mut sdf_full = eval_sdf_full(
-            py,
+        let mut sdf_full = native_kernels::eval_sdf_full_native(
             kernels,
             &xyz,
             n_pts,
@@ -878,17 +697,13 @@ pub fn run_meshing_pipeline(
 
     unsafe { (lib.final_remaining)(nv.as_mut_ptr()) };
 
-    // ------------------------------------------------------------------
-    // Step 5: Per-element mesh construction
-    // ------------------------------------------------------------------
     let mut results = Vec::with_capacity(n_kerns);
-    for (e, kernel) in kernels.iter().enumerate() {
-        let mesh = construct_element_mesh(
-            py,
+    for (element, kernel) in kernels.iter().enumerate() {
+        let mesh = construct_element_mesh_native(
             lib,
-            e as i32,
-            kernel,
-            nv[e],
+            element as i32,
+            kernel.as_ref(),
+            nv[element],
             params.bisection_iters,
             params.bisection_tol,
             &params.bounds_min,
@@ -1288,31 +1103,4 @@ fn refine_extra_vertices_native(
     Ok((final_vertices, faces))
 }
 
-/// Convert a [`MeshData`] into a Python `trimesh.Trimesh` object and a numpy bool array.
-pub fn mesh_data_to_python<'py>(
-    py: Python<'py>,
-    mesh: MeshData,
-) -> PyResult<(Bound<'py, PyAny>, Bound<'py, PyAny>)> {
-    use ndarray::{Array1, Array2};
-    use numpy::IntoPyArray;
-
-    let verts_arr = Array2::from_shape_vec((mesh.n_verts, 3), mesh.vertices)
-        .map_err(|e| pyo3::exceptions::PyValueError::new_err(e.to_string()))?;
-    let faces_arr = Array2::from_shape_vec((mesh.n_faces, 3), mesh.faces)
-        .map_err(|e| pyo3::exceptions::PyValueError::new_err(e.to_string()))?;
-    let tag_arr = Array1::from_vec(mesh.in_view_tag);
-
-    let verts_np = verts_arr.into_pyarray_bound(py);
-    let faces_np = faces_arr.into_pyarray_bound(py);
-    let tag_np = tag_arr.into_pyarray_bound(py);
-
-    let trimesh_mod = py.import_bound("trimesh")?;
-    let trimesh_cls = trimesh_mod.getattr("Trimesh")?;
-    let kwargs = PyDict::new_bound(py);
-    kwargs.set_item("vertices", verts_np)?;
-    kwargs.set_item("faces", faces_np)?;
-    kwargs.set_item("process", false.into_py(py))?;
-    let mesh_obj = trimesh_cls.call(pyo3::types::PyTuple::empty_bound(py), Some(&kwargs))?;
-
-    Ok((mesh_obj, tag_np.into_any()))
-}
+// mesh_data_to_python removed: all output is now Rust-native

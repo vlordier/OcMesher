@@ -34,21 +34,7 @@ use ocmesher_core::tch_kernels::{TchPlaneKernel, TchSphereKernel, build_tch_kern
 #[cfg(feature = "tch-kernels")]
 use tch::Device;
 
-fn mesh_data_list_to_python<'py>(
-    py: Python<'py>,
-    mesh_data_list: Vec<ocmesher_core::MeshData>,
-) -> PyResult<Bound<'py, PyTuple>> {
-    let meshes_list = PyList::empty_bound(py);
-    let tags_list = PyList::empty_bound(py);
-
-    for mesh_data in mesh_data_list {
-        let (mesh_obj, tag_np) = ocmesher_core::mesh_data_to_python(py, mesh_data)?;
-        meshes_list.append(mesh_obj)?;
-        tags_list.append(tag_np)?;
-    }
-
-    Ok(PyTuple::new_bound(py, [meshes_list.into_any(), tags_list.into_any()]))
-}
+// mesh_data_list_to_python removed: Rust-native only
 
 fn parse_center_f64(center: Option<Vec<f64>>) -> PyResult<[f64; 3]> {
     match center {

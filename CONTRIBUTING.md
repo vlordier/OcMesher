@@ -24,39 +24,31 @@ uv run pre-commit install
 ## Development Guidelines
 
 - Follow the project style enforced by **ruff** (see `pyproject.toml` for rules).
-- Add type hints to new Python code.
-- Keep C++ changes compatible with both GCC and Clang.
+<!-- Python and C++ guidelines removed: now Rust-native only -->
 - Run linting and tests before submitting (see commands below).
 
 ## Common Development Commands
 
 ```bash
-# Run all Python tests
-uv run python -m pytest tests/ -v
+## Common Development Commands
 
-# Lint Python code
-uv run ruff check .
+```bash
+# Build the Rust project
+cargo build --release
 
-# Auto-fix lint issues (where safe)
-uv run ruff check . --fix
+# Run all Rust tests
+cargo test
 
-# Check formatting
-uv run ruff format --check .
-
-# Apply formatting
-uv run ruff format .
-
-# Build the C++ shared library
-bash install.sh
+# Lint and format
+cargo fmt --all -- --check
+cargo clippy --all-targets --all-features -- -D warnings
+```
 ```
 
 You can also use the provided `Makefile` shortcuts:
 
 ```bash
-make install   # build C++ library and sync Python deps
-make test      # run Python test suite
-make lint      # ruff lint check
-make format    # ruff format check
+<!-- Makefile shortcuts for Python/C++ removed -->
 ```
 
 ## Submitting Changes
@@ -73,7 +65,7 @@ If you find a bug or have a feature request, please open an issue on GitHub with
 
 - A clear description of the problem or suggestion
 - Steps to reproduce (for bugs)
-- Your OS and Python version
+- Your OS and Rust version
 
 ## License
 

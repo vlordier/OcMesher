@@ -264,27 +264,39 @@ int fine_iteration( // NOLINT(readability-identifier-naming, modernize-use-trail
     output_vertices.clear();
     output_vertices_index.clear();
     int cqs = static_cast<int>(cubes_queue.size());
+    // Preallocate to upper bound (8 per cube in cubes_queue)
+    output_vertices.reserve(static_cast<size_t>(cqs) * 8);
+    output_vertices_index.reserve(static_cast<size_t>(cqs) * 8);
     for (int j = 0; j < cqs; j++) { // NOLINT(readability-identifier-length)
         int i = cubes_queue[j].first;
         int s = gridNodeLevel(nodes[nodes_vector[start_node + i]]), ss = 1 << s;
         Int3 cqj = cubes_queue[j].second;
-        for (int dx = 0; dx < 2; dx++)
-            for (int dy = 0; dy < 2; dy++)
+        // Use pointer arithmetic for inner loop
+        int base_x = cqj.first, base_y = cqj.second.first, base_z = cqj.second.second;
+        int base_idx = vertices_index[i];
+        for (int dx = 0; dx < 2; dx++) {
+            int x = base_x + dx;
+            for (int dy = 0; dy < 2; dy++) {
+                int y = base_y + dy;
                 for (int dz = 0; dz < 2; dz++) {
-                    int coords[3] = {cqj.first + dx, cqj.second.first + dy, cqj.second.second + dz};
-                    int ci = cubeIndex(coords[0], coords[1], coords[2], ss + 1),
-                        ici = vertices_index[i] + ci;
+                    int z = base_z + dz;
+                    int ci = cubeIndex(x, y, z, ss + 1);
+                    int ici = base_idx + ci;
                     if (vertices[ici] == -1) {
                         Vertex vx;
                         Cube c = nodes[nodes_vector[start_node + i]].m_c;
-                        for (int p = 0; p < 3; p++)
-                            assign(vx.m_coords[p], c.m_coords[p], 1 << s, coords[p]);
+                        // Unroll assign for 3 coords
+                        assign(vx.m_coords[0], c.m_coords[0], 1 << s, x);
+                        assign(vx.m_coords[1], c.m_coords[1], 1 << s, y);
+                        assign(vx.m_coords[2], c.m_coords[2], 1 << s, z);
                         vx.m_l = c.m_l + s;
                         vertices[ici] = 0;
                         output_vertices.push_back(vx);
                         output_vertices_index.push_back(ici);
                     }
                 }
+            }
+        }
     }
     return static_cast<int>(output_vertices.size());
 }
@@ -374,19 +386,21 @@ int vis_filter( // NOLINT(readability-identifier-naming, modernize-use-trailing-
                     y < height + relax_iters) {
                     if (simplify_occluded) {
                         bool is_visible = false;
-                        for (int dx = -relax_iters; dx <= relax_iters && !is_visible; dx++)
-                            for (int dy = -relax_iters; dy <= relax_iters; dy++) {
-                                int nx = x + dx, ny = y + dy;
-                                if (nx >= 0 && ny >= 0 && nx < width && ny < height) {
-                                    std::size_t cell_idx = static_cast<std::size_t>(nx) * height_sz +
-                                                           static_cast<std::size_t>(ny);
-                                    if (z <= canvas[cell_idx]) {
-                                        is_visible = true;
-                                        visible[i] = true;
-                                        break;
-                                    }
+                        int min_nx = std::max(0, x - relax_iters);
+                        int max_nx = std::min(width - 1, x + relax_iters);
+                        int min_ny = std::max(0, y - relax_iters);
+                        int max_ny = std::min(height - 1, y + relax_iters);
+                        for (int nx = min_nx; nx <= max_nx && !is_visible; nx++) {
+                            for (int ny = min_ny; ny <= max_ny; ny++) {
+                                std::size_t cell_idx = static_cast<std::size_t>(nx) * height_sz +
+                                                       static_cast<std::size_t>(ny);
+                                if (z <= canvas[cell_idx]) {
+                                    is_visible = true;
+                                    visible[i] = true;
+                                    break;
                                 }
                             }
+                        }
                     } else {
                         visible[i] = true;
                     }
@@ -1074,17 +1088,20 @@ void finalize_extra_verts( // NOLINT(readability-identifier-naming,
                            // modernize-use-trailing-return-type)
     sdfT* esdf_l, sdfT* esdf_r, T* everts, sdfT* fsdf_l, sdfT* fsdf_r, T* fverts) {
     using namespace computing;
-    for (int i = 0; i < static_cast<int>(edge_vertices.size()); i++) {
+    int n_edges = static_cast<int>(edge_vertices.size());
+    int n_faces = static_cast<int>(face_vertices.size());
+#pragma omp parallel for
+    for (int i = 0; i < n_edges; i++) {
         T vx[3] = {0};
         int w = 0;
-        for (int j = 0; j < 2; j++) { // NOLINT(readability-identifier-length)
+        for (int j = 0; j < 2; j++) {
             T sl = static_cast<T>(esdf_l[i * 2 + j]);
             T sr = static_cast<T>(esdf_r[i * 2 + j]);
             if ((sl >= 0) != (sr >= 0)) {
                 w++;
                 T dist = edge_vertices[i].second.m_l +
                          (sl / (sl - sr)) * (edge_vertices[i].second.m_r - edge_vertices[i].second.m_l);
-                for (int k = 0; k < 3; k++) { // NOLINT(readability-identifier-length)
+                for (int k = 0; k < 3; k++) {
                     vx[k] += edge_vertices[i].second.m_c[k];
                     if (k == edge_vertices[i].first)
                         vx[k] += (j * 2 - 1) * dist;
@@ -1093,20 +1110,21 @@ void finalize_extra_verts( // NOLINT(readability-identifier-naming,
         }
         assert(w != 0);
         for (int k = 0; k < 3; k++)
-            everts[i * 3 + k] = vx[k] / w; // NOLINT(readability-identifier-length)
+            everts[i * 3 + k] = vx[k] / w;
     }
     edge_vertices.clear();
-    for (int i = 0; i < static_cast<int>(face_vertices.size()); i++) {
+#pragma omp parallel for
+    for (int i = 0; i < n_faces; i++) {
         T vx[3] = {0};
         int w = 0;
-        for (int j = 0; j < 4; j++) { // NOLINT(readability-identifier-length)
+        for (int j = 0; j < 4; j++) {
             T sl = static_cast<T>(fsdf_l[i * 4 + j]);
             T sr = static_cast<T>(fsdf_r[i * 4 + j]);
             if ((sl >= 0) != (sr >= 0)) {
                 w++;
                 T dist = face_vertices[i].second.m_l +
                          (sl / (sl - sr)) * (face_vertices[i].second.m_r - face_vertices[i].second.m_l);
-                for (int k = 0; k < 3; k++) { // NOLINT(readability-identifier-length)
+                for (int k = 0; k < 3; k++) {
                     vx[k] += face_vertices[i].second.m_c[k];
                     if (k == (face_vertices[i].first + 1) % 3)
                         vx[k] += (firstDigit(j) * 2 - 1) * dist;
@@ -1117,11 +1135,10 @@ void finalize_extra_verts( // NOLINT(readability-identifier-naming,
         }
         if (w == 0) {
             for (int k = 0; k < 3; k++)
-                fverts[i * 3 + k] =
-                    face_vertices[i].second.m_c[k]; // NOLINT(readability-identifier-length)
+                fverts[i * 3 + k] = face_vertices[i].second.m_c[k];
         } else {
             for (int k = 0; k < 3; k++)
-                fverts[i * 3 + k] = vx[k] / w; // NOLINT(readability-identifier-length)
+                fverts[i * 3 + k] = vx[k] / w;
         }
     }
     face_vertices.clear();
