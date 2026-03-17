@@ -208,6 +208,7 @@ Notes:
 - The optional `tch-kernels` feature adds tensor-backed Rust paths, including `Backend.extract_tch_sphere(...)`, `Backend.extract_tch_plane(...)`, `Backend.extract_tch_sphere_plane(...)`, and `Backend.extract_tch_scene(...)`, and builds when `LIBTORCH` points at a valid libtorch root; on macOS the extension links with an rpath targeting the Python `torch/lib` bundle.
 - For Apple Silicon, set `OCMESHER_TCH_MPS_ADAPTIVE=1` to enable adaptive per-batch MPS routing (CPU vs GPU) in the Rust `tch` kernels; this is useful when medium-sized batches run faster on CPU due transfer/dispatch overhead.
 - On CUDA systems, set `OCMESHER_TCH_CUDA_ADAPTIVE=1` to enable the same adaptive CPU-vs-GPU routing policy for Rust `tch` kernels.
+- Set `OCMESHER_TCH_ADAPTIVE_DEBUG=1` to print adaptive calibration/cache decisions (device, kernel, bucket, chosen route) for profiling and tuning.
 
 Relevant files:
 - [ocmesher/rust_backend.py](ocmesher/rust_backend.py)

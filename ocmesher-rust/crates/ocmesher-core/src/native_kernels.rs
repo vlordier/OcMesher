@@ -450,6 +450,33 @@ pub mod tch_kernels {
         }
     }
 
+    fn adaptive_debug_enabled() -> bool {
+        static ENABLED: OnceLock<bool> = OnceLock::new();
+        *ENABLED.get_or_init(|| {
+            std::env::var("OCMESHER_TCH_ADAPTIVE_DEBUG")
+                .ok()
+                .as_deref()
+                .map(|v| v == "1" || v.eq_ignore_ascii_case("true") || v.eq_ignore_ascii_case("yes"))
+                .unwrap_or(false)
+        })
+    }
+
+    fn device_kind_name(device_kind: u8) -> &'static str {
+        match device_kind {
+            DEVICE_KIND_MPS => "mps",
+            DEVICE_KIND_CUDA => "cuda",
+            _ => "unknown",
+        }
+    }
+
+    fn kernel_kind_name(kernel_kind: u8) -> &'static str {
+        match kernel_kind {
+            KERNEL_KIND_SPHERE => "sphere",
+            KERNEL_KIND_PLANE => "plane",
+            _ => "unknown",
+        }
+    }
+
     fn bucket_for_points(n_pts: usize) -> usize {
         n_pts.max(1).next_power_of_two()
     }
@@ -461,16 +488,39 @@ pub mod tch_kernels {
 
     fn adaptive_cached_route(kernel_kind: u8, device_kind: u8, n_pts: usize) -> Option<bool> {
         let bucket = bucket_for_points(n_pts);
-        adaptive_route_cache()
+        let route = adaptive_route_cache()
             .lock()
             .ok()
-            .and_then(|cache| cache.get(&(kernel_kind, device_kind, bucket)).copied())
+            .and_then(|cache| cache.get(&(kernel_kind, device_kind, bucket)).copied());
+        if adaptive_debug_enabled() {
+            if let Some(use_gpu) = route {
+                eprintln!(
+                    "[adaptive] cache_hit device={} kernel={} n_pts={} bucket={} route={}",
+                    device_kind_name(device_kind),
+                    kernel_kind_name(kernel_kind),
+                    n_pts,
+                    bucket,
+                    if use_gpu { "gpu" } else { "cpu" }
+                );
+            }
+        }
+        route
     }
 
     fn adaptive_store_route(kernel_kind: u8, device_kind: u8, n_pts: usize, use_gpu: bool) {
         let bucket = bucket_for_points(n_pts);
         if let Ok(mut cache) = adaptive_route_cache().lock() {
             cache.insert((kernel_kind, device_kind, bucket), use_gpu);
+        }
+        if adaptive_debug_enabled() {
+            eprintln!(
+                "[adaptive] calibrated device={} kernel={} n_pts={} bucket={} route={}",
+                device_kind_name(device_kind),
+                kernel_kind_name(kernel_kind),
+                n_pts,
+                bucket,
+                if use_gpu { "gpu" } else { "cpu" }
+            );
         }
     }
 
@@ -868,6 +918,17 @@ pub mod tch_kernels {
                 let gpu_us = gpu_start.elapsed().as_micros();
 
                 let use_gpu = gpu_us.saturating_mul(100) <= cpu_us.saturating_mul(ADAPTIVE_GPU_MARGIN_PCT);
+                if adaptive_debug_enabled() {
+                    eprintln!(
+                        "[adaptive] benchmark device={} kernel={} n_pts={} cpu_us={} gpu_us={} margin={}%%",
+                        device_kind_name(device_kind),
+                        kernel_kind_name(KERNEL_KIND_SPHERE),
+                        n_pts,
+                        cpu_us,
+                        gpu_us,
+                        ADAPTIVE_GPU_MARGIN_PCT
+                    );
+                }
                 adaptive_store_route(KERNEL_KIND_SPHERE, device_kind, n_pts, use_gpu);
                 if use_gpu {
                     *out = gpu_out;
@@ -933,6 +994,17 @@ pub mod tch_kernels {
                 let gpu_us = gpu_start.elapsed().as_micros();
 
                 let use_gpu = gpu_us.saturating_mul(100) <= cpu_us.saturating_mul(ADAPTIVE_GPU_MARGIN_PCT);
+                if adaptive_debug_enabled() {
+                    eprintln!(
+                        "[adaptive] benchmark device={} kernel={} n_pts={} cpu_us={} gpu_us={} margin={}%%",
+                        device_kind_name(device_kind),
+                        kernel_kind_name(KERNEL_KIND_PLANE),
+                        n_pts,
+                        cpu_us,
+                        gpu_us,
+                        ADAPTIVE_GPU_MARGIN_PCT
+                    );
+                }
                 adaptive_store_route(KERNEL_KIND_PLANE, device_kind, n_pts, use_gpu);
                 if use_gpu {
                     *out = gpu_out;
