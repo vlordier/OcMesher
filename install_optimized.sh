@@ -11,6 +11,6 @@ if [ "$OS" != "Darwin" ] || [ "$ARCH" != "arm64" ]; then
 fi
 
 echo "Building OcMesher (Rust-native, optimized)"
-cargo build --release --manifest-path ocmesher-rust/Cargo.toml
+cargo build --release -p ocmesher-core --manifest-path ocmesher-rust/Cargo.toml
 
 echo "✓ Optimized Rust-native build complete."

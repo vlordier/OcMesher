@@ -3,5 +3,5 @@
 set -e
 
 echo "Building OcMesher (Rust-native)"
-cargo build --release --manifest-path ocmesher-rust/Cargo.toml
+cargo build --release -p ocmesher-core --manifest-path ocmesher-rust/Cargo.toml
 echo "Build complete."

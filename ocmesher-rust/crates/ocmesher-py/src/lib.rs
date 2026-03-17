@@ -26,7 +26,7 @@ use pyo3::prelude::*;
 use pyo3::types::{PyDict, PyList, PyTuple};
 
 use ocmesher_core::{
-    pack_cameras, run_meshing_pipeline, run_meshing_pipeline_native, validate_bounds, CoreError, CoreLib,
+    pack_cameras, run_meshing_pipeline_native, validate_bounds, CoreError, CoreLib,
     MesherParams, PlaneKernel, PlaneSpec, PrimitiveSpec, SphereKernel, SphereSpec, build_native_kernels,
 };
 #[cfg(feature = "tch-kernels")]
@@ -34,7 +34,41 @@ use ocmesher_core::tch_kernels::{TchPlaneKernel, TchSphereKernel, build_tch_kern
 #[cfg(feature = "tch-kernels")]
 use tch::Device;
 
-// mesh_data_list_to_python removed: Rust-native only
+fn mesh_data_list_to_python<'py>(
+    py: Python<'py>,
+    mesh_data_list: Vec<ocmesher_core::MeshData>,
+) -> PyResult<Bound<'py, PyTuple>> {
+    use ndarray::{Array1, Array2};
+    use numpy::IntoPyArray;
+
+    let meshes_list = PyList::empty_bound(py);
+    let tags_list = PyList::empty_bound(py);
+
+    for mesh_data in mesh_data_list {
+        let verts_arr = Array2::from_shape_vec((mesh_data.n_verts, 3), mesh_data.vertices)
+            .map_err(|e| pyo3::exceptions::PyValueError::new_err(e.to_string()))?;
+        let faces_arr = Array2::from_shape_vec((mesh_data.n_faces, 3), mesh_data.faces)
+            .map_err(|e| pyo3::exceptions::PyValueError::new_err(e.to_string()))?;
+        let tag_arr = Array1::from_vec(mesh_data.in_view_tag);
+
+        let verts_np = verts_arr.into_pyarray_bound(py);
+        let faces_np = faces_arr.into_pyarray_bound(py);
+        let tag_np = tag_arr.into_pyarray_bound(py);
+
+        let trimesh_mod = py.import_bound("trimesh")?;
+        let trimesh_cls = trimesh_mod.getattr("Trimesh")?;
+        let kwargs = PyDict::new_bound(py);
+        kwargs.set_item("vertices", verts_np)?;
+        kwargs.set_item("faces", faces_np)?;
+        kwargs.set_item("process", false)?;
+        let mesh_obj = trimesh_cls.call(PyTuple::empty_bound(py), Some(&kwargs))?;
+
+        meshes_list.append(mesh_obj)?;
+        tags_list.append(tag_np)?;
+    }
+
+    Ok(PyTuple::new_bound(py, [meshes_list.into_any(), tags_list.into_any()]))
+}
 
 fn parse_center_f64(center: Option<Vec<f64>>) -> PyResult<[f64; 3]> {
     match center {
@@ -105,7 +139,8 @@ fn map_scene_validation_error(error: CoreError) -> PyErr {
         CoreError::Sdf(message) | CoreError::Bounds(message) | CoreError::Camera(message) => {
             pyo3::exceptions::PyValueError::new_err(message)
         }
-        other => PyErr::from(other),
+        CoreError::Shape(message) => pyo3::exceptions::PyValueError::new_err(message),
+        CoreError::Load(message) => pyo3::exceptions::PyRuntimeError::new_err(message.to_string()),
     }
 }
 
@@ -272,7 +307,7 @@ impl Backend {
         coarse_count: i32,
     ) -> PyResult<Self> {
         // Load the shared library
-        let lib = CoreLib::load(lib_path).map_err(PyErr::from)?;
+        let lib = CoreLib::load(lib_path).map_err(map_scene_validation_error)?;
 
         // Parse cameras
         if cameras.len() != 4 {
@@ -325,13 +360,13 @@ impl Backend {
         }
 
         let cameras_data =
-            pack_cameras(&cam_poses_flat, &ks_flat, &hs_list, &ws_list).map_err(PyErr::from)?;
+            pack_cameras(&cam_poses_flat, &ks_flat, &hs_list, &ws_list).map_err(map_scene_validation_error)?;
 
         // Parse bounds
         let bounds_vec: Vec<f64> = bounds
             .extract()
             .map_err(|_| pyo3::exceptions::PyValueError::new_err("bounds must be list of 6 floats"))?;
-        let (b_min, b_max, center, size) = validate_bounds(&bounds_vec).map_err(PyErr::from)?;
+        let (b_min, b_max, center, size) = validate_bounds(&bounds_vec).map_err(map_scene_validation_error)?;
 
         // Detect hardware capabilities for get_capabilities()
         let (supports_cuda, supports_mps) = detect_torch_capabilities(py);
@@ -389,29 +424,12 @@ impl Backend {
     fn extract_meshes<'py>(
         &self,
         py: Python<'py>,
-        sdf_kernels: &Bound<'py, PyList>,
+        _sdf_kernels: &Bound<'py, PyList>,
     ) -> PyResult<Bound<'py, PyTuple>> {
-        let kernels: Vec<Py<PyAny>> = sdf_kernels
-            .iter()
-            .map(|k| k.unbind())
-            .collect();
-
-        if kernels.is_empty() {
-            return Err(pyo3::exceptions::PyValueError::new_err(
-                "sdf_kernels must be a non-empty list",
-            ));
-        }
-        for (i, k) in kernels.iter().enumerate() {
-            if !k.bind(py).is_callable() {
-                return Err(pyo3::exceptions::PyTypeError::new_err(format!(
-                    "sdf_kernels[{i}] is not callable"
-                )));
-            }
-        }
-
-        let mesh_data_list = run_meshing_pipeline(py, &self.lib, &self.params, &kernels)?;
-
-        mesh_data_list_to_python(py, mesh_data_list)
+        let _ = py;
+        Err(pyo3::exceptions::PyRuntimeError::new_err(
+            "extract_meshes(callable kernels) is no longer supported in rust-native mode; use extract_native_* or extract_tch_*",
+        ))
     }
 
     /// Run the meshing pipeline with a built-in Rust-native sphere SDF.
@@ -426,7 +444,7 @@ impl Backend {
         let center_arr = parse_center_f64(center)?;
         let kernels = vec![Box::new(SphereKernel::new(center_arr, radius)) as _];
         let mesh_data_list = run_meshing_pipeline_native(&self.lib, &self.params, &kernels)
-            .map_err(PyErr::from)?;
+            .map_err(map_scene_validation_error)?;
 
         mesh_data_list_to_python(py, mesh_data_list)
     }
@@ -440,9 +458,9 @@ impl Backend {
         normal: Option<Vec<f64>>,
     ) -> PyResult<Bound<'py, PyTuple>> {
         let normal_arr = parse_normal_f64(normal)?;
-        let kernels = vec![Box::new(PlaneKernel::new(normal_arr, offset).map_err(PyErr::from)?) as _];
+        let kernels = vec![Box::new(PlaneKernel::new(normal_arr, offset).map_err(map_scene_validation_error)?) as _];
         let mesh_data_list = run_meshing_pipeline_native(&self.lib, &self.params, &kernels)
-            .map_err(PyErr::from)?;
+            .map_err(map_scene_validation_error)?;
 
         mesh_data_list_to_python(py, mesh_data_list)
     }
@@ -462,10 +480,10 @@ impl Backend {
         let plane_normal = parse_normal_f64(plane_normal)?;
         let kernels = vec![
             Box::new(SphereKernel::new(sphere_center, sphere_radius)) as _,
-            Box::new(PlaneKernel::new(plane_normal, plane_offset).map_err(PyErr::from)?) as _,
+            Box::new(PlaneKernel::new(plane_normal, plane_offset).map_err(map_scene_validation_error)?) as _,
         ];
         let mesh_data_list = run_meshing_pipeline_native(&self.lib, &self.params, &kernels)
-            .map_err(PyErr::from)?;
+            .map_err(map_scene_validation_error)?;
 
         mesh_data_list_to_python(py, mesh_data_list)
     }
@@ -477,9 +495,9 @@ impl Backend {
         primitives: &Bound<'py, PyList>,
     ) -> PyResult<Bound<'py, PyTuple>> {
         let specs = parse_native_scene_primitives(primitives)?;
-        let kernels = build_native_kernels(&specs).map_err(PyErr::from)?;
+        let kernels = build_native_kernels(&specs).map_err(map_scene_validation_error)?;
         let mesh_data_list = run_meshing_pipeline_native(&self.lib, &self.params, &kernels)
-            .map_err(PyErr::from)?;
+            .map_err(map_scene_validation_error)?;
 
         mesh_data_list_to_python(py, mesh_data_list)
     }
@@ -499,7 +517,7 @@ impl Backend {
         let tch_device = parse_tch_device(device)?;
         let kernels = vec![Box::new(TchSphereKernel::new(center_arr, radius as f32, tch_device)) as _];
         let mesh_data_list = run_meshing_pipeline_native(&self.lib, &self.params, &kernels)
-            .map_err(PyErr::from)?;
+            .map_err(map_scene_validation_error)?;
 
         mesh_data_list_to_python(py, mesh_data_list)
     }
@@ -516,9 +534,9 @@ impl Backend {
     ) -> PyResult<Bound<'py, PyTuple>> {
         let normal_arr = parse_vector_f32(normal, "normal", [0.0, 0.0, 1.0])?;
         let tch_device = parse_tch_device(device)?;
-        let kernels = vec![Box::new(TchPlaneKernel::new(normal_arr, offset as f32, tch_device).map_err(PyErr::from)?) as _];
+        let kernels = vec![Box::new(TchPlaneKernel::new(normal_arr, offset as f32, tch_device).map_err(map_scene_validation_error)?) as _];
         let mesh_data_list = run_meshing_pipeline_native(&self.lib, &self.params, &kernels)
-            .map_err(PyErr::from)?;
+            .map_err(map_scene_validation_error)?;
 
         mesh_data_list_to_python(py, mesh_data_list)
     }
@@ -541,10 +559,10 @@ impl Backend {
         let tch_device = parse_tch_device(device)?;
         let kernels = vec![
             Box::new(TchSphereKernel::new(sphere_center, sphere_radius as f32, tch_device)) as _,
-            Box::new(TchPlaneKernel::new(plane_normal, plane_offset as f32, tch_device).map_err(PyErr::from)?) as _,
+            Box::new(TchPlaneKernel::new(plane_normal, plane_offset as f32, tch_device).map_err(map_scene_validation_error)?) as _,
         ];
         let mesh_data_list = run_meshing_pipeline_native(&self.lib, &self.params, &kernels)
-            .map_err(PyErr::from)?;
+            .map_err(map_scene_validation_error)?;
 
         mesh_data_list_to_python(py, mesh_data_list)
     }
@@ -560,9 +578,9 @@ impl Backend {
     ) -> PyResult<Bound<'py, PyTuple>> {
         let device = parse_tch_device(device)?;
         let specs = parse_tch_scene_primitives(primitives)?;
-        let kernels = build_tch_kernels(&specs, device).map_err(PyErr::from)?;
+        let kernels = build_tch_kernels(&specs, device).map_err(map_scene_validation_error)?;
         let mesh_data_list = run_meshing_pipeline_native(&self.lib, &self.params, &kernels)
-            .map_err(PyErr::from)?;
+            .map_err(map_scene_validation_error)?;
 
         mesh_data_list_to_python(py, mesh_data_list)
     }
