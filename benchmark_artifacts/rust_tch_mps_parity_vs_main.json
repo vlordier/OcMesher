@@ -1,0 +1,24 @@
+{
+  "atol": 1e-10,
+  "current_mode": "rust_tch_mps",
+  "upstream_mode": "python_cpp_main",
+  "current": {
+    "faces": 17639,
+    "faces_sum": 228110285,
+    "verts": 8833,
+    "verts_sum": 48516.18088025949
+  },
+  "upstream": {
+    "faces": 17990,
+    "faces_sum": 234929499,
+    "verts": 9005,
+    "verts_sum": 49640.90750520678
+  },
+  "delta": {
+    "verts_delta": -172,
+    "faces_delta": -351,
+    "verts_sum_delta": -1124.7266249472887,
+    "faces_sum_delta": -6819214,
+    "matches": false
+  }
+}
