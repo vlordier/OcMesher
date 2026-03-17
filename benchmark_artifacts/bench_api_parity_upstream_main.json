@@ -1,0 +1,372 @@
+{
+  "api_comparison": {
+    "exact_symbol_matches": 0,
+    "module___all___match": false,
+    "symbols": {
+      "OcMesher": {
+        "call_signature_match": false,
+        "current": {
+          "call_signature": null,
+          "error": "ModuleNotFoundError(\"No module named 'ocmesher.core'\")",
+          "init_signature": null,
+          "kind": null,
+          "present": false,
+          "public_methods": null,
+          "signature": null
+        },
+        "full_match": false,
+        "function_signature_match": true,
+        "init_signature_match": false,
+        "kind_match": false,
+        "present_match": false,
+        "public_methods_match": false,
+        "upstream": {
+          "call_signature": "(self, kernels)",
+          "error": null,
+          "init_signature": "(self, cameras, bounds, pixels_per_cube=8, inv_scale=10, min_dist=1, memory_limit_mb=1000, bisection_iters=15, bisection_tol=0.0, enclosed=True, simplify_occluded=True, visible_relax_iter=2, coarse_count=500000)",
+          "kind": "class",
+          "present": true,
+          "public_methods": [
+            "kernel_caller"
+          ],
+          "signature": null
+        }
+      },
+      "RustOcMesher": {
+        "call_signature_match": false,
+        "current": {
+          "call_signature": "(self, kernels: 'Sequence[Any]') -> 'tuple[Any, Any]'",
+          "error": null,
+          "init_signature": "(self, cameras: 'Sequence[Any]', bounds: 'Any', pixels_per_cube: 'int' = 8, inv_scale: 'int' = 10, min_dist: 'int' = 1, memory_limit_mb: 'int' = 1000, bisection_iters: 'int' = 15, bisection_tol: 'float' = 0.0, enclosed: 'bool' = True, simplify_occluded: 'bool' = True, visible_relax_iter: 'int' = 2, coarse_count: 'int' = 500000, *, device: 'str | None' = None, dtype: 'str | None' = None, max_batch: 'int | None' = None, batch_size: 'int | None' = None, sdf_batch_size: 'int | None' = None, stream_policy: 'str' = 'sync', use_primitive_inference: 'bool' = True, backend: 'RustBackendProtocol | None' = None)",
+          "kind": "class",
+          "present": true,
+          "public_methods": [
+            "capabilities",
+            "get_capabilities"
+          ],
+          "signature": null
+        },
+        "full_match": false,
+        "function_signature_match": true,
+        "init_signature_match": false,
+        "kind_match": false,
+        "present_match": false,
+        "public_methods_match": false,
+        "upstream": {
+          "call_signature": null,
+          "error": "AttributeError(\"module 'ocmesher' has no attribute 'RustOcMesher'\")",
+          "init_signature": null,
+          "kind": null,
+          "present": false,
+          "public_methods": null,
+          "signature": null
+        }
+      },
+      "TorchOcMesher": {
+        "call_signature_match": false,
+        "current": {
+          "call_signature": null,
+          "error": "ModuleNotFoundError(\"No module named 'ocmesher.torch_core'\")",
+          "init_signature": null,
+          "kind": null,
+          "present": false,
+          "public_methods": null,
+          "signature": null
+        },
+        "full_match": false,
+        "function_signature_match": true,
+        "init_signature_match": false,
+        "kind_match": false,
+        "present_match": false,
+        "public_methods_match": false,
+        "upstream": {
+          "call_signature": "(self, kernels)",
+          "error": null,
+          "init_signature": "(self, cameras, bounds, pixels_per_cube=8, inv_scale=10, min_dist=1, memory_limit_mb=1000, bisection_iters=15, enclosed=True, simplify_occluded=True, visible_relax_iter=2, coarse_count=500000, device=None, n_sdf_workers=4, use_compile=False)",
+          "kind": "class",
+          "present": true,
+          "public_methods": [],
+          "signature": null
+        }
+      },
+      "make_rust_ocmesher": {
+        "call_signature_match": true,
+        "current": {
+          "call_signature": null,
+          "error": null,
+          "init_signature": null,
+          "kind": "function",
+          "present": true,
+          "public_methods": null,
+          "signature": "(cameras: 'Sequence[Any]', bounds: 'Any', *, lib_path: 'str | None' = None, **kwargs: 'Any') -> 'RustOcMesher'"
+        },
+        "full_match": false,
+        "function_signature_match": false,
+        "init_signature_match": true,
+        "kind_match": false,
+        "present_match": false,
+        "public_methods_match": true,
+        "upstream": {
+          "call_signature": null,
+          "error": "AttributeError(\"module 'ocmesher' has no attribute 'make_rust_ocmesher'\")",
+          "init_signature": null,
+          "kind": null,
+          "present": false,
+          "public_methods": null,
+          "signature": null
+        }
+      }
+    },
+    "total_symbols": 4
+  },
+  "behavior_comparison": {
+    "current_behavior_errors": [
+      "OcMesher benchmark unavailable: ModuleNotFoundError(\"No module named 'ocmesher.core'\")"
+    ],
+    "scenes": {},
+    "upstream_behavior_errors": [
+      "Rust wrapper benchmark unavailable: ImportError(\"cannot import name 'make_rust_ocmesher' from 'ocmesher' (/private/var/folders/y3/3sdhft5n6fx_7vbxz9gffhqr0000gn/T/ocmesher-api-parity-zdv0vzri/ocmesher/__init__.py)\")"
+    ]
+  },
+  "current": {
+    "api": {
+      "errors": [],
+      "module": {
+        "__all__": [
+          "OcMesher",
+          "RustOcMesher",
+          "TorchOcMesher",
+          "make_rust_ocmesher"
+        ],
+        "public_names": [
+          "PackageNotFoundError",
+          "logging",
+          "version"
+        ]
+      },
+      "symbols": {
+        "OcMesher": {
+          "call_signature": null,
+          "error": "ModuleNotFoundError(\"No module named 'ocmesher.core'\")",
+          "init_signature": null,
+          "kind": null,
+          "present": false,
+          "public_methods": null,
+          "signature": null
+        },
+        "RustOcMesher": {
+          "call_signature": "(self, kernels: 'Sequence[Any]') -> 'tuple[Any, Any]'",
+          "error": null,
+          "init_signature": "(self, cameras: 'Sequence[Any]', bounds: 'Any', pixels_per_cube: 'int' = 8, inv_scale: 'int' = 10, min_dist: 'int' = 1, memory_limit_mb: 'int' = 1000, bisection_iters: 'int' = 15, bisection_tol: 'float' = 0.0, enclosed: 'bool' = True, simplify_occluded: 'bool' = True, visible_relax_iter: 'int' = 2, coarse_count: 'int' = 500000, *, device: 'str | None' = None, dtype: 'str | None' = None, max_batch: 'int | None' = None, batch_size: 'int | None' = None, sdf_batch_size: 'int | None' = None, stream_policy: 'str' = 'sync', use_primitive_inference: 'bool' = True, backend: 'RustBackendProtocol | None' = None)",
+          "kind": "class",
+          "present": true,
+          "public_methods": [
+            "capabilities",
+            "get_capabilities"
+          ],
+          "signature": null
+        },
+        "TorchOcMesher": {
+          "call_signature": null,
+          "error": "ModuleNotFoundError(\"No module named 'ocmesher.torch_core'\")",
+          "init_signature": null,
+          "kind": null,
+          "present": false,
+          "public_methods": null,
+          "signature": null
+        },
+        "make_rust_ocmesher": {
+          "call_signature": null,
+          "error": null,
+          "init_signature": null,
+          "kind": "function",
+          "present": true,
+          "public_methods": null,
+          "signature": "(cameras: 'Sequence[Any]', bounds: 'Any', *, lib_path: 'str | None' = None, **kwargs: 'Any') -> 'RustOcMesher'"
+        }
+      }
+    },
+    "behavior": {
+      "errors": [
+        "OcMesher benchmark unavailable: ModuleNotFoundError(\"No module named 'ocmesher.core'\")"
+      ],
+      "scenes": {
+        "rust_wrapper_plane": {
+          "mesh_count": 1,
+          "ok": true,
+          "signature": {
+            "faces": 2622,
+            "faces_sum": 4735701,
+            "tag_true": 0,
+            "verts": 1313,
+            "verts_sum": -1467.125
+          },
+          "timing": {
+            "avg_ms": 9.027951173872376,
+            "best_ms": 8.603499998571351,
+            "median_ms": 8.858895496814512
+          }
+        },
+        "rust_wrapper_sphere": {
+          "mesh_count": 1,
+          "ok": true,
+          "signature": {
+            "faces": 17990,
+            "faces_sum": 234929499,
+            "tag_true": 6804,
+            "verts": 9005,
+            "verts_sum": 49640.90751688918
+          },
+          "timing": {
+            "avg_ms": 44.07666666763058,
+            "best_ms": 42.48654199182056,
+            "median_ms": 44.05716649489477
+          }
+        },
+        "rust_wrapper_sphere_plane": {
+          "mesh_count": 2,
+          "ok": true,
+          "signature": {
+            "faces": 17208,
+            "faces_sum": 215083696,
+            "tag_true": 6804,
+            "verts": 8646,
+            "verts_sum": 50781.706116469926
+          },
+          "timing": {
+            "avg_ms": 66.03591649036389,
+            "best_ms": 47.95999999623746,
+            "median_ms": 52.54885398608167
+          }
+        }
+      }
+    }
+  },
+  "meta": {
+    "atol": 1e-06,
+    "dependency_bootstrap": {
+      "current": {
+        "returncode": 0,
+        "stderr": ""
+      },
+      "upstream": {
+        "returncode": 0,
+        "stderr": ""
+      }
+    },
+    "python": "/Users/vincent/Work/OcMesher/.venv/bin/python",
+    "upstream_ref": "main"
+  },
+  "upstream": {
+    "api": {
+      "errors": [],
+      "module": {
+        "__all__": [
+          "OcMesher",
+          "TorchOcMesher"
+        ],
+        "public_names": [
+          "OcMesher",
+          "core",
+          "logging",
+          "utils"
+        ]
+      },
+      "symbols": {
+        "OcMesher": {
+          "call_signature": "(self, kernels)",
+          "error": null,
+          "init_signature": "(self, cameras, bounds, pixels_per_cube=8, inv_scale=10, min_dist=1, memory_limit_mb=1000, bisection_iters=15, bisection_tol=0.0, enclosed=True, simplify_occluded=True, visible_relax_iter=2, coarse_count=500000)",
+          "kind": "class",
+          "present": true,
+          "public_methods": [
+            "kernel_caller"
+          ],
+          "signature": null
+        },
+        "RustOcMesher": {
+          "call_signature": null,
+          "error": "AttributeError(\"module 'ocmesher' has no attribute 'RustOcMesher'\")",
+          "init_signature": null,
+          "kind": null,
+          "present": false,
+          "public_methods": null,
+          "signature": null
+        },
+        "TorchOcMesher": {
+          "call_signature": "(self, kernels)",
+          "error": null,
+          "init_signature": "(self, cameras, bounds, pixels_per_cube=8, inv_scale=10, min_dist=1, memory_limit_mb=1000, bisection_iters=15, enclosed=True, simplify_occluded=True, visible_relax_iter=2, coarse_count=500000, device=None, n_sdf_workers=4, use_compile=False)",
+          "kind": "class",
+          "present": true,
+          "public_methods": [],
+          "signature": null
+        },
+        "make_rust_ocmesher": {
+          "call_signature": null,
+          "error": "AttributeError(\"module 'ocmesher' has no attribute 'make_rust_ocmesher'\")",
+          "init_signature": null,
+          "kind": null,
+          "present": false,
+          "public_methods": null,
+          "signature": null
+        }
+      }
+    },
+    "behavior": {
+      "errors": [
+        "Rust wrapper benchmark unavailable: ImportError(\"cannot import name 'make_rust_ocmesher' from 'ocmesher' (/private/var/folders/y3/3sdhft5n6fx_7vbxz9gffhqr0000gn/T/ocmesher-api-parity-zdv0vzri/ocmesher/__init__.py)\")"
+      ],
+      "scenes": {
+        "ocmesher_plane": {
+          "mesh_count": 1,
+          "ok": true,
+          "signature": {
+            "faces": 2732,
+            "faces_sum": 5003771,
+            "tag_true": 0,
+            "verts": 1368,
+            "verts_sum": -2005.4830064645776
+          },
+          "timing": {
+            "avg_ms": 9.744284994667396,
+            "best_ms": 9.272416995372623,
+            "median_ms": 9.76347949472256
+          }
+        },
+        "ocmesher_sphere": {
+          "mesh_count": 1,
+          "ok": true,
+          "signature": {
+            "faces": 17990,
+            "faces_sum": 234929499,
+            "tag_true": 6804,
+            "verts": 9005,
+            "verts_sum": 49640.90750520678
+          },
+          "timing": {
+            "avg_ms": 51.76277767168358,
+            "best_ms": 51.36687500635162,
+            "median_ms": 51.71745800180361
+          }
+        },
+        "ocmesher_sphere_plane": {
+          "mesh_count": 2,
+          "ok": true,
+          "signature": {
+            "faces": 17208,
+            "faces_sum": 215083696,
+            "tag_true": 6804,
+            "verts": 8646,
+            "verts_sum": 50781.70610478752
+          },
+          "timing": {
+            "avg_ms": 57.28356233642747,
+            "best_ms": 56.50799997965805,
+            "median_ms": 57.16583301546052
+          }
+        }
+      }
+    }
+  }
+}
