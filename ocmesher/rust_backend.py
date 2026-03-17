@@ -138,6 +138,49 @@ def build_batched_sdf_kernels(
     return batched_kernels
 
 
+def _infer_native_primitive_specs(kernels: Sequence[Any]) -> list[dict[str, Any]] | None:
+    """Infer native primitive specs from simple callable kernels.
+
+    This keeps the Python wrapper compatible with compiled backends that no
+    longer accept arbitrary callable kernels through ``extract_meshes``.
+    """
+    specs: list[dict[str, Any]] = []
+    for kernel in kernels:
+        probe = np.asarray(
+            [
+                [0.0, 0.0, 0.0],
+                [1.0, 0.0, 0.0],
+                [0.0, 1.0, 0.0],
+                [0.0, 0.0, 1.0],
+                [0.0, 0.0, -1.0],
+            ],
+            dtype=np.float64,
+        )
+        values = np.asarray(kernel(probe), dtype=np.float64).reshape(-1)
+        if values.shape[0] != probe.shape[0]:
+            return None
+
+        # Sphere centered at origin: f(x)=||x||-r (same value on unit axes).
+        if np.allclose(values[1:4], values[1], atol=1e-5) and np.isclose(values[1], values[4], atol=1e-5):
+            radius = max(0.0, -float(values[0]))
+            if np.isclose(values[1], 1.0 - radius, atol=1e-4):
+                specs.append({"type": "sphere", "center": [0.0, 0.0, 0.0], "radius": radius})
+                continue
+
+        # Z-plane: f(x)=z-offset.
+        if np.isclose(values[0], 0.0, atol=1e-5) and np.isclose(values[1], 0.0, atol=1e-5) and np.isclose(
+            values[2], 0.0, atol=1e-5
+        ):
+            offset = -float(values[0])
+            if np.isclose(values[3], 1.0 - offset, atol=1e-4) and np.isclose(values[4], -1.0 - offset, atol=1e-4):
+                specs.append({"type": "plane", "normal": [0.0, 0.0, 1.0], "offset": offset})
+                continue
+
+        return None
+
+    return specs
+
+
 class RustBackendProtocol(Protocol):
     """Protocol for Rust-backed mesh extractor bridge."""
 
@@ -270,12 +313,23 @@ class RustOcMesher:
             )
             raise RuntimeError(msg)
 
-        sdf_kernels = build_batched_sdf_kernels(
-            list(kernels),
-            batch_size=self._effective_batch_size,
-        )
-
-        result = self._backend.extract_meshes(sdf_kernels)
+        kernels_list = list(kernels)
+        if hasattr(self._backend, "extract_native_scene"):
+            specs = _infer_native_primitive_specs(kernels_list)
+            if specs is not None:
+                result = self._backend.extract_native_scene(specs)
+            else:
+                sdf_kernels = build_batched_sdf_kernels(
+                    kernels_list,
+                    batch_size=self._effective_batch_size,
+                )
+                result = self._backend.extract_meshes(sdf_kernels)
+        else:
+            sdf_kernels = build_batched_sdf_kernels(
+                kernels_list,
+                batch_size=self._effective_batch_size,
+            )
+            result = self._backend.extract_meshes(sdf_kernels)
         if len(result) != RESULT_ARITY:
             msg = "Rust backend must return (meshes, in_view_tags)"
             raise TypeError(msg)
