@@ -16,10 +16,10 @@
     ]
   },
   "current": {
-    "faces": 2692,
-    "faces_sum": 5361884,
-    "verts": 1349,
-    "verts_sum": 1385.8245021998882
+    "faces": 2660,
+    "faces_sum": 5263420,
+    "verts": 1332,
+    "verts_sum": 1389.3625153154135
   },
   "baseline": {
     "faces": 2668,
@@ -28,10 +28,10 @@
     "verts_sum": 1368.7496361732483
   },
   "delta_current_minus_baseline": {
-    "verts_delta": 13,
-    "faces_delta": 24,
-    "verts_sum_delta": 17.07486602663994,
-    "faces_sum_delta": 80569
+    "verts_delta": -4,
+    "faces_delta": -8,
+    "verts_sum_delta": 20.612879142165184,
+    "faces_sum_delta": -17895
   },
   "matches_strict": false
 }
