@@ -381,6 +381,9 @@ pub fn run_meshing_pipeline_native(
         )
     };
 
+    let mut fine_xyz = Vec::<f64>::new();
+    let mut fine_sdf = Vec::<f32>::new();
+
     loop {
         let inc = unsafe { (lib.fine_group)() };
         if inc == 0 {
@@ -390,64 +393,69 @@ pub fn run_meshing_pipeline_native(
         let mut n = unsafe { (lib.fine_iteration)(std::ptr::null_mut()) };
         while n > 0 {
             let n_pts = n as usize;
-            let mut xyz = vec![0.0f64; n_pts * 3];
-            unsafe { (lib.fine_iteration_output)(xyz.as_mut_ptr()) };
+            fine_xyz.resize(n_pts * 3, 0.0);
+            unsafe { (lib.fine_iteration_output)(fine_xyz.as_mut_ptr()) };
 
-            let mut sdf_min = native_kernels::eval_sdf_min_native(
+            native_kernels::eval_sdf_min_native_into(
                 kernels,
-                &xyz,
+                &fine_xyz,
                 n_pts,
                 &params.bounds_min,
                 &params.bounds_max,
                 params.enclosed,
+                &mut fine_sdf,
             )?;
 
-            n = unsafe { (lib.fine_iteration)(sdf_min.as_mut_ptr()) };
+            n = unsafe { (lib.fine_iteration)(fine_sdf.as_mut_ptr()) };
         }
     }
 
     let _n_vis = unsafe { (lib.vis_filter)(params.simplify_occluded, params.visible_relax_iter) };
 
     let mut nv = vec![0i32; n_kerns];
+    let mut final_xyz = Vec::<f64>::new();
+    let mut final_sdf = Vec::<f32>::new();
     loop {
         let n = unsafe { (lib.final_iteration)() };
         if n == 0 {
             break;
         }
         let n_pts = n as usize;
-        let mut xyz = vec![0.0f64; n_pts * 3];
-        unsafe { (lib.final_iteration2)(xyz.as_mut_ptr()) };
+        final_xyz.resize(n_pts * 3, 0.0);
+        unsafe { (lib.final_iteration2)(final_xyz.as_mut_ptr()) };
 
-        let mut sdf_full = native_kernels::eval_sdf_full_native(
+        native_kernels::eval_sdf_full_native_into(
             kernels,
-            &xyz,
+            &final_xyz,
             n_pts,
             n_kerns,
             &params.bounds_min,
             &params.bounds_max,
             params.enclosed,
+            &mut final_sdf,
         )?;
 
-        unsafe { (lib.final_iteration3)(sdf_full.as_mut_ptr()) };
+        unsafe { (lib.final_iteration3)(final_sdf.as_mut_ptr()) };
     }
 
     let n = unsafe { (lib.final_iteration_occluded)() };
     if n > 0 {
         let n_pts = n as usize;
-        let mut xyz = vec![0.0f64; n_pts * 3];
-        unsafe { (lib.final_iteration2)(xyz.as_mut_ptr()) };
+        final_xyz.resize(n_pts * 3, 0.0);
+        unsafe { (lib.final_iteration2)(final_xyz.as_mut_ptr()) };
 
-        let mut sdf_full = native_kernels::eval_sdf_full_native(
+        native_kernels::eval_sdf_full_native_into(
             kernels,
-            &xyz,
+            &final_xyz,
             n_pts,
             n_kerns,
             &params.bounds_min,
             &params.bounds_max,
             params.enclosed,
+            &mut final_sdf,
         )?;
 
-        unsafe { (lib.final_iteration3_occluded)(sdf_full.as_mut_ptr()) };
+        unsafe { (lib.final_iteration3_occluded)(final_sdf.as_mut_ptr()) };
     }
 
     unsafe { (lib.final_remaining)(nv.as_mut_ptr()) };

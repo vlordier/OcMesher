@@ -153,7 +153,7 @@ impl SdfEvaluator for SphereKernel {
     }
 }
 
-pub(crate) fn eval_sdf_full_native(
+pub(crate) fn eval_sdf_full_native_into(
     kernels: &[BoxedSdfEvaluator],
     xyz: &[f64],
     n_pts: usize,
@@ -161,14 +161,14 @@ pub(crate) fn eval_sdf_full_native(
     b_min: &[f64; 3],
     b_max: &[f64; 3],
     enclosed: bool,
-) -> Result<Vec<f32>, CoreError> {
+    out: &mut Vec<f32>,
+) -> Result<(), CoreError> {
     if n_kernels == 1 {
-        let mut sdf = Vec::with_capacity(n_pts);
-        kernels[0].evaluate_batch_into(xyz, n_pts, &mut sdf)?;
-        if sdf.len() != n_pts {
+        kernels[0].evaluate_batch_into(xyz, n_pts, out)?;
+        if out.len() != n_pts {
             return Err(CoreError::Sdf(format!(
                 "native kernel 0 returned {} values for {n_pts} query points",
-                sdf.len()
+                out.len()
             )));
         }
 
@@ -184,15 +184,16 @@ pub(crate) fn eval_sdf_full_native(
                     || z <= b_min[2]
                     || z >= b_max[2]
                 {
-                    sdf[i] = 1.0;
+                    out[i] = 1.0;
                 }
             }
         }
 
-        return Ok(sdf);
+        return Ok(());
     }
 
-    let mut result = vec![0.0f32; n_pts * n_kernels];
+    out.clear();
+    out.resize(n_pts * n_kernels, 0.0f32);
     let mut kernel_sdf = Vec::with_capacity(n_pts);
 
     for (k_idx, kernel) in kernels.iter().enumerate() {
@@ -204,7 +205,7 @@ pub(crate) fn eval_sdf_full_native(
             )));
         }
         for (i, value) in kernel_sdf.iter().enumerate() {
-            result[i * n_kernels + k_idx] = *value;
+            out[i * n_kernels + k_idx] = *value;
         }
     }
 
@@ -221,31 +222,46 @@ pub(crate) fn eval_sdf_full_native(
                 || z >= b_max[2]
             {
                 for k in 0..n_kernels {
-                    result[i * n_kernels + k] = 1.0;
+                    out[i * n_kernels + k] = 1.0;
                 }
             }
         }
     }
 
-    Ok(result)
+    Ok(())
 }
 
-pub(crate) fn eval_sdf_min_native(
+#[allow(dead_code)]
+pub(crate) fn eval_sdf_full_native(
+    kernels: &[BoxedSdfEvaluator],
+    xyz: &[f64],
+    n_pts: usize,
+    n_kernels: usize,
+    b_min: &[f64; 3],
+    b_max: &[f64; 3],
+    enclosed: bool,
+) -> Result<Vec<f32>, CoreError> {
+    let mut out = Vec::with_capacity(n_pts.max(n_pts * n_kernels));
+    eval_sdf_full_native_into(kernels, xyz, n_pts, n_kernels, b_min, b_max, enclosed, &mut out)?;
+    Ok(out)
+}
+
+pub(crate) fn eval_sdf_min_native_into(
     kernels: &[BoxedSdfEvaluator],
     xyz: &[f64],
     n_pts: usize,
     b_min: &[f64; 3],
     b_max: &[f64; 3],
     enclosed: bool,
-) -> Result<Vec<f32>, CoreError> {
+    out: &mut Vec<f32>,
+) -> Result<(), CoreError> {
     let n_kernels = kernels.len();
     if n_kernels == 1 {
-        let mut sdf = Vec::with_capacity(n_pts);
-        kernels[0].evaluate_batch_into(xyz, n_pts, &mut sdf)?;
-        if sdf.len() != n_pts {
+        kernels[0].evaluate_batch_into(xyz, n_pts, out)?;
+        if out.len() != n_pts {
             return Err(CoreError::Sdf(format!(
                 "native kernel 0 returned {} values for {n_pts} query points",
-                sdf.len()
+                out.len()
             )));
         }
 
@@ -261,26 +277,42 @@ pub(crate) fn eval_sdf_min_native(
                     || z <= b_min[2]
                     || z >= b_max[2]
                 {
-                    sdf[i] = 1.0;
+                    out[i] = 1.0;
                 }
             }
         }
 
-        return Ok(sdf);
+        return Ok(());
     }
 
-    let full = eval_sdf_full_native(kernels, xyz, n_pts, n_kernels, b_min, b_max, enclosed)?;
+    let mut full = Vec::with_capacity(n_pts * n_kernels);
+    eval_sdf_full_native_into(kernels, xyz, n_pts, n_kernels, b_min, b_max, enclosed, &mut full)?;
 
-    let mut min_sdf = vec![f32::INFINITY; n_pts];
+    out.clear();
+    out.resize(n_pts, f32::INFINITY);
     for i in 0..n_pts {
         for k in 0..n_kernels {
             let value = full[i * n_kernels + k];
-            if value < min_sdf[i] {
-                min_sdf[i] = value;
+            if value < out[i] {
+                out[i] = value;
             }
         }
     }
-    Ok(min_sdf)
+    Ok(())
+}
+
+#[allow(dead_code)]
+pub(crate) fn eval_sdf_min_native(
+    kernels: &[BoxedSdfEvaluator],
+    xyz: &[f64],
+    n_pts: usize,
+    b_min: &[f64; 3],
+    b_max: &[f64; 3],
+    enclosed: bool,
+) -> Result<Vec<f32>, CoreError> {
+    let mut out = Vec::with_capacity(n_pts);
+    eval_sdf_min_native_into(kernels, xyz, n_pts, b_min, b_max, enclosed, &mut out)?;
+    Ok(out)
 }
 
 #[cfg(feature = "tch-kernels")]
