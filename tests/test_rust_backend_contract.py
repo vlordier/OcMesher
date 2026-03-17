@@ -281,7 +281,7 @@ def test_make_rust_ocmesher_forwards_default_backend_meshing_params(sample_camer
     assert call_kwargs["inv_scale"] == 10
     assert call_kwargs["min_dist"] == 1
     assert call_kwargs["memory_limit_mb"] == 1000
-    assert call_kwargs["bisection_iters"] == 15
+    assert call_kwargs["bisection_iters"] == 22
     assert call_kwargs["bisection_tol"] == 0.0
     assert call_kwargs["enclosed"] is True
     assert call_kwargs["simplify_occluded"] is True
