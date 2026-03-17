@@ -125,7 +125,7 @@
     ],
     "scenes": {},
     "upstream_behavior_errors": [
-      "Rust wrapper benchmark unavailable: ImportError(\"cannot import name 'make_rust_ocmesher' from 'ocmesher' (/private/var/folders/y3/3sdhft5n6fx_7vbxz9gffhqr0000gn/T/ocmesher-api-parity-zdv0vzri/ocmesher/__init__.py)\")"
+      "Rust wrapper benchmark unavailable: ImportError(\"cannot import name 'make_rust_ocmesher' from 'ocmesher' (/private/var/folders/y3/3sdhft5n6fx_7vbxz9gffhqr0000gn/T/ocmesher-api-parity-j_5xn58v/ocmesher/__init__.py)\")"
     ]
   },
   "current": {
@@ -202,9 +202,9 @@
             "verts_sum": -1467.125
           },
           "timing": {
-            "avg_ms": 9.027951173872376,
-            "best_ms": 8.603499998571351,
-            "median_ms": 8.858895496814512
+            "avg_ms": 8.019555330974981,
+            "best_ms": 7.753499987302348,
+            "median_ms": 8.008853998035192
           }
         },
         "rust_wrapper_sphere": {
@@ -218,9 +218,9 @@
             "verts_sum": 49640.90751688918
           },
           "timing": {
-            "avg_ms": 44.07666666763058,
-            "best_ms": 42.48654199182056,
-            "median_ms": 44.05716649489477
+            "avg_ms": 40.984715165298745,
+            "best_ms": 40.013666002778336,
+            "median_ms": 41.01458350487519
           }
         },
         "rust_wrapper_sphere_plane": {
@@ -234,9 +234,9 @@
             "verts_sum": 50781.706116469926
           },
           "timing": {
-            "avg_ms": 66.03591649036389,
-            "best_ms": 47.95999999623746,
-            "median_ms": 52.54885398608167
+            "avg_ms": 45.37597233138513,
+            "best_ms": 43.739540997194126,
+            "median_ms": 44.534063010360114
           }
         }
       }
@@ -248,6 +248,10 @@
       "current": {
         "returncode": 0,
         "stderr": ""
+      },
+      "current_rust_extension": {
+        "returncode": 0,
+        "stderr": "\u26a0\ufe0f  Warning: `build-backend` in pyproject.toml is not set to `maturin`, packaging tools such as pip will not use maturin to build this project.\n\ud83d\udd17 Found pyo3 bindings\n\ud83d\udc0d Found CPython 3.11 at /Users/vincent/Work/OcMesher/.venv/bin/python\nChecked 18 packages in 3ms\n    Finished `release` profile [optimized] target(s) in 0.05s\n\ud83d\udce6 Built wheel for CPython 3.11 to /var/folders/y3/3sdhft5n6fx_7vbxz9gffhqr0000gn/T/.tmp10pNxe/ocmesher-1.0.0-cp311-cp311-macosx_11_0_arm64.whl\n\ud83d\udee0 Installed ocmesher-1.0.0"
       },
       "upstream": {
         "returncode": 0,
@@ -315,7 +319,7 @@
     },
     "behavior": {
       "errors": [
-        "Rust wrapper benchmark unavailable: ImportError(\"cannot import name 'make_rust_ocmesher' from 'ocmesher' (/private/var/folders/y3/3sdhft5n6fx_7vbxz9gffhqr0000gn/T/ocmesher-api-parity-zdv0vzri/ocmesher/__init__.py)\")"
+        "Rust wrapper benchmark unavailable: ImportError(\"cannot import name 'make_rust_ocmesher' from 'ocmesher' (/private/var/folders/y3/3sdhft5n6fx_7vbxz9gffhqr0000gn/T/ocmesher-api-parity-j_5xn58v/ocmesher/__init__.py)\")"
       ],
       "scenes": {
         "ocmesher_plane": {
@@ -329,9 +333,9 @@
             "verts_sum": -2005.4830064645776
           },
           "timing": {
-            "avg_ms": 9.744284994667396,
-            "best_ms": 9.272416995372623,
-            "median_ms": 9.76347949472256
+            "avg_ms": 8.82835416511322,
+            "best_ms": 8.755832997849211,
+            "median_ms": 8.829083002638072
           }
         },
         "ocmesher_sphere": {
@@ -345,9 +349,9 @@
             "verts_sum": 49640.90750520678
           },
           "timing": {
-            "avg_ms": 51.76277767168358,
-            "best_ms": 51.36687500635162,
-            "median_ms": 51.71745800180361
+            "avg_ms": 47.5202083325712,
+            "best_ms": 47.10258299019188,
+            "median_ms": 47.27850049675908
           }
         },
         "ocmesher_sphere_plane": {
@@ -361,9 +365,9 @@
             "verts_sum": 50781.70610478752
           },
           "timing": {
-            "avg_ms": 57.28356233642747,
-            "best_ms": 56.50799997965805,
-            "median_ms": 57.16583301546052
+            "avg_ms": 52.91479133302346,
+            "best_ms": 52.04670800594613,
+            "median_ms": 52.96499999531079
           }
         }
       }

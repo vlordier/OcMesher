@@ -87,6 +87,36 @@ def ensure_python_deps(repo_path: Path, python_exe: str, packages: list[str]) ->
     return pip_attempt
 
 
+def ensure_rust_extension(repo_path: Path, python_exe: str) -> CmdResult:
+    import_check = run_cmd(
+        [python_exe, "-c", "import ocmesher_rust"],
+        cwd=repo_path,
+    )
+    if import_check.code == 0:
+        return CmdResult(0, "ocmesher_rust already available", "")
+
+    manifest = repo_path / "ocmesher-rust" / "crates" / "ocmesher-py" / "Cargo.toml"
+    if not manifest.exists():
+        return CmdResult(1, "", f"missing manifest: {manifest}")
+
+    maturin = shutil.which("maturin")
+    if maturin:
+        return run_cmd([maturin, "develop", "--release", "--manifest-path", str(manifest)], cwd=repo_path)
+
+    uv_bin = shutil.which("uv")
+    if uv_bin:
+        return run_cmd(
+            [uv_bin, "run", "maturin", "develop", "--release", "--manifest-path", str(manifest)],
+            cwd=repo_path,
+        )
+
+    return CmdResult(
+        1,
+        "",
+        "neither maturin nor uv found in PATH; cannot build ocmesher_rust for parity benchmark",
+    )
+
+
 API_SNAPSHOT_SCRIPT = r'''
 import inspect, json
 
@@ -242,8 +272,8 @@ try:
         "rust_wrapper_sphere_plane": [scene_sphere, scene_plane],
     }
 
-    mesher = make_rust_ocmesher(cameras, bounds, pixels_per_cube=32, coarse_count=100_000)
     for name, sdfs in scenes.items():
+        mesher = make_rust_ocmesher(cameras, bounds, pixels_per_cube=32, coarse_count=100_000)
         meshes, tags = mesher(sdfs)
         for _ in range(WARMUPS):
             mesher(sdfs)
@@ -390,6 +420,11 @@ def main() -> None:
     bootstrap["current"] = {
         "returncode": bootstrap_current.code,
         "stderr": bootstrap_current.stderr.strip(),
+    }
+    rust_ext_current = ensure_rust_extension(repo_root, args.python)
+    bootstrap["current_rust_extension"] = {
+        "returncode": rust_ext_current.code,
+        "stderr": rust_ext_current.stderr.strip(),
     }
     current_snapshot = gather_repo_snapshot(repo_root, args.python)
 
