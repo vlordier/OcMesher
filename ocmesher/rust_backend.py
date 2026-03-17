@@ -117,15 +117,48 @@ def build_batched_sdf_kernels(
 ) -> list[Callable[[np.ndarray[Any, Any]], np.ndarray[Any, Any]]]:
     """Build SDF callables that prefer ``evaluate_batch`` when available."""
 
+    def _evaluate_batched(
+        eval_batch: Callable[[np.ndarray[Any, Any]], Any],
+        xyz: np.ndarray[Any, Any],
+    ) -> np.ndarray[Any, Any]:
+        n_pts = len(xyz)
+        first_end = min(batch_size, n_pts)
+        first_chunk = _extract_sdf(eval_batch(xyz[:first_end]))
+
+        # Fast path: fixed-shape outputs (the common case for SDF vectors).
+        out_shape = (n_pts, *first_chunk.shape[1:])
+        out = np.empty(out_shape, dtype=first_chunk.dtype)
+        out[:first_end] = first_chunk
+
+        cursor = first_end
+        while cursor < n_pts:
+            end = min(cursor + batch_size, n_pts)
+            chunk = _extract_sdf(eval_batch(xyz[cursor:end]))
+            if chunk.shape[1:] != first_chunk.shape[1:]:
+                # Keep behavior correct if a custom kernel emits varying trailing shapes.
+                fallback_chunks: list[np.ndarray[Any, Any]] = [first_chunk]
+                offset = first_end
+                while offset < cursor:
+                    next_end = min(offset + batch_size, n_pts)
+                    fallback_chunks.append(_extract_sdf(eval_batch(xyz[offset:next_end])))
+                    offset = next_end
+                fallback_chunks.append(chunk)
+                offset = end
+                while offset < n_pts:
+                    next_end = min(offset + batch_size, n_pts)
+                    fallback_chunks.append(_extract_sdf(eval_batch(xyz[offset:next_end])))
+                    offset = next_end
+                return np.concatenate(fallback_chunks, axis=0)
+            out[cursor:end] = chunk
+            cursor = end
+
+        return out
+
     def _evaluate(kernel: Any, xyz: np.ndarray[Any, Any]) -> np.ndarray[Any, Any]:
         eval_batch = getattr(kernel, "evaluate_batch", None)
         if callable(eval_batch):
             if batch_size is not None and batch_size > 0 and len(xyz) > batch_size:
-                chunks: list[np.ndarray[Any, Any]] = []
-                for start in range(0, len(xyz), batch_size):
-                    chunk_xyz = xyz[start : start + batch_size]
-                    chunks.append(_extract_sdf(eval_batch(chunk_xyz)))
-                return np.concatenate(chunks, axis=0)
+                return _evaluate_batched(eval_batch, xyz)
             return _extract_sdf(eval_batch(xyz))
         return _extract_sdf(kernel(xyz))
 
