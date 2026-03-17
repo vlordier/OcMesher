@@ -206,6 +206,7 @@ Notes:
 - `ocmesher-rust/crates/ocmesher-core` now also exposes a Rust-native `SdfEvaluator` path via `run_meshing_pipeline_native(...)`, so the meshing pipeline can be driven from Rust without Python callables.
 - The compiled extension also exposes `Backend.extract_native_sphere(...)`, `Backend.extract_native_plane(...)`, `Backend.extract_native_sphere_plane(...)`, and `Backend.extract_native_scene(...)` as no-Python-callback pilot paths, including a small primitive-spec scene API.
 - The optional `tch-kernels` feature adds tensor-backed Rust paths, including `Backend.extract_tch_sphere(...)`, `Backend.extract_tch_plane(...)`, `Backend.extract_tch_sphere_plane(...)`, and `Backend.extract_tch_scene(...)`, and builds when `LIBTORCH` points at a valid libtorch root; on macOS the extension links with an rpath targeting the Python `torch/lib` bundle.
+- For Apple Silicon, set `OCMESHER_TCH_MPS_ADAPTIVE=1` to enable adaptive per-batch MPS routing (CPU vs GPU) in the Rust `tch` kernels; this is useful when medium-sized batches run faster on CPU due transfer/dispatch overhead.
 
 Relevant files:
 - [ocmesher/rust_backend.py](ocmesher/rust_backend.py)

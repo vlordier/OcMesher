@@ -363,7 +363,9 @@ pub(crate) fn eval_sdf_min_native(
 pub mod tch_kernels {
     use super::{BoxedSdfEvaluator, PrimitiveSpec, SdfEvaluator};
     use crate::CoreError;
+    use std::collections::HashMap;
     use std::sync::{Mutex, OnceLock};
+    use std::time::Instant;
     use tch::{Device, Kind, Tensor};
 
     const CUDA_BATCH_THRESHOLD_DEFAULT: usize = 8192;
@@ -372,6 +374,9 @@ pub mod tch_kernels {
     const MPS_FP16_THRESHOLD: usize = 131072;
     const MPS_BF16_THRESHOLD: usize = 131072;
     const CUDA_FP8_THRESHOLD: usize = 262144;
+    const ADAPTIVE_GPU_MARGIN_PCT: u128 = 98;
+    const KERNEL_KIND_SPHERE: u8 = 0;
+    const KERNEL_KIND_PLANE: u8 = 1;
 
     fn parse_threshold_env(name: &str, default_value: usize) -> usize {
         std::env::var(name)
@@ -411,6 +416,41 @@ pub mod tch_kernels {
                 .map(|v| v == "1" || v.eq_ignore_ascii_case("true") || v.eq_ignore_ascii_case("yes"))
                 .unwrap_or(false)
         })
+    }
+
+    fn mps_adaptive_enabled() -> bool {
+        static ENABLED: OnceLock<bool> = OnceLock::new();
+        *ENABLED.get_or_init(|| {
+            std::env::var("OCMESHER_TCH_MPS_ADAPTIVE")
+                .ok()
+                .as_deref()
+                .map(|v| v == "1" || v.eq_ignore_ascii_case("true") || v.eq_ignore_ascii_case("yes"))
+                .unwrap_or(false)
+        })
+    }
+
+    fn bucket_for_points(n_pts: usize) -> usize {
+        n_pts.max(1).next_power_of_two()
+    }
+
+    fn adaptive_route_cache() -> &'static Mutex<HashMap<(u8, usize), bool>> {
+        static CACHE: OnceLock<Mutex<HashMap<(u8, usize), bool>>> = OnceLock::new();
+        CACHE.get_or_init(|| Mutex::new(HashMap::new()))
+    }
+
+    fn adaptive_cached_route(kernel_kind: u8, n_pts: usize) -> Option<bool> {
+        let bucket = bucket_for_points(n_pts);
+        adaptive_route_cache()
+            .lock()
+            .ok()
+            .and_then(|cache| cache.get(&(kernel_kind, bucket)).copied())
+    }
+
+    fn adaptive_store_route(kernel_kind: u8, n_pts: usize, use_gpu: bool) {
+        let bucket = bucket_for_points(n_pts);
+        if let Ok(mut cache) = adaptive_route_cache().lock() {
+            cache.insert((kernel_kind, bucket), use_gpu);
+        }
     }
 
     fn should_use_gpu(device: Device, n_pts: usize) -> bool {
@@ -565,6 +605,124 @@ pub mod tch_kernels {
         Ok([normal[0] / norm, normal[1] / norm, normal[2] / norm])
     }
 
+    fn eval_sphere_cpu(center: [f32; 3], radius: f32, xyz: &[f64], out: &mut Vec<f32>) {
+        let n_pts = xyz.len() / 3;
+        out.clear();
+        out.reserve(n_pts);
+        for point in xyz.chunks_exact(3) {
+            let dx = point[0] - center[0] as f64;
+            let dy = point[1] - center[1] as f64;
+            let dz = point[2] - center[2] as f64;
+            out.push(((dx * dx + dy * dy + dz * dz).sqrt() - radius as f64) as f32);
+        }
+    }
+
+    fn eval_plane_cpu(normal: [f32; 3], offset: f32, xyz: &[f64], out: &mut Vec<f32>) {
+        let n_pts = xyz.len() / 3;
+        out.clear();
+        out.reserve(n_pts);
+        for point in xyz.chunks_exact(3) {
+            out.push(
+                (point[0] * normal[0] as f64
+                    + point[1] * normal[1] as f64
+                    + point[2] * normal[2] as f64
+                    - offset as f64) as f32,
+            );
+        }
+    }
+
+    fn eval_sphere_gpu(
+        scratch: &mut TchSphereScratch,
+        center: [f32; 3],
+        radius: f32,
+        device: Device,
+        xyz: &[f64],
+        n_pts: usize,
+        out: &mut Vec<f32>,
+    ) {
+        let compute_kind = gpu_compute_kind(device, n_pts);
+        let xyz_tensor = load_xyz_to_device(&mut scratch.io, xyz, n_pts, device, compute_kind);
+        let center_tensor = if compute_kind == Kind::Half {
+            if scratch.center_row_half.is_none() {
+                scratch.center_row_half = Some(scratch.center_row.to_kind(Kind::Half));
+            }
+            scratch
+                .center_row_half
+                .as_ref()
+                .expect("half center tensor should be initialized")
+        } else if compute_kind == Kind::BFloat16 {
+            if scratch.center_row_bf16.is_none() {
+                scratch.center_row_bf16 = Some(scratch.center_row.to_kind(Kind::BFloat16));
+            }
+            scratch
+                .center_row_bf16
+                .as_ref()
+                .expect("bf16 center tensor should be initialized")
+        } else if compute_kind == Kind::Float8e4m3fn {
+            if scratch.center_row_fp8.is_none() {
+                scratch.center_row_fp8 = Some(scratch.center_row.to_kind(Kind::Float8e4m3fn));
+            }
+            scratch
+                .center_row_fp8
+                .as_ref()
+                .expect("fp8 center tensor should be initialized")
+        } else {
+            &scratch.center_row
+        };
+        let diff = xyz_tensor - center_tensor;
+        let dims = [1i64];
+        let dist = (&diff * &diff)
+            .sum_dim_intlist(&dims[..], false, compute_kind)
+            .sqrt()
+            - (radius as f64);
+        let _ = center;
+        copy_from_device_into_vec(&mut scratch.io, &dist, n_pts, out);
+    }
+
+    fn eval_plane_gpu(
+        scratch: &mut TchPlaneScratch,
+        device: Device,
+        xyz: &[f64],
+        n_pts: usize,
+        offset: f32,
+        out: &mut Vec<f32>,
+    ) {
+        let compute_kind = gpu_compute_kind(device, n_pts);
+        let xyz_tensor = load_xyz_to_device(&mut scratch.io, xyz, n_pts, device, compute_kind);
+        let normal_tensor = if compute_kind == Kind::Half {
+            if scratch.normal_row_half.is_none() {
+                scratch.normal_row_half = Some(scratch.normal_row.to_kind(Kind::Half));
+            }
+            scratch
+                .normal_row_half
+                .as_ref()
+                .expect("half normal tensor should be initialized")
+        } else if compute_kind == Kind::BFloat16 {
+            if scratch.normal_row_bf16.is_none() {
+                scratch.normal_row_bf16 = Some(scratch.normal_row.to_kind(Kind::BFloat16));
+            }
+            scratch
+                .normal_row_bf16
+                .as_ref()
+                .expect("bf16 normal tensor should be initialized")
+        } else if compute_kind == Kind::Float8e4m3fn {
+            if scratch.normal_row_fp8.is_none() {
+                scratch.normal_row_fp8 = Some(scratch.normal_row.to_kind(Kind::Float8e4m3fn));
+            }
+            scratch
+                .normal_row_fp8
+                .as_ref()
+                .expect("fp8 normal tensor should be initialized")
+        } else {
+            &scratch.normal_row
+        };
+        let dims = [1i64];
+        let dist = (&xyz_tensor * normal_tensor)
+            .sum_dim_intlist(&dims[..], false, compute_kind)
+            - (offset as f64);
+        copy_from_device_into_vec(&mut scratch.io, &dist, n_pts, out);
+    }
+
     pub fn build_tch_kernels(specs: &[PrimitiveSpec], device: Device) -> Result<Vec<BoxedSdfEvaluator>, CoreError> {
         let mut kernels = Vec::with_capacity(specs.len());
         for spec in specs {
@@ -657,16 +815,49 @@ pub mod tch_kernels {
                 )));
             }
 
-            if !should_use_gpu(self.device, n_pts) {
-                out.clear();
-                out.reserve(n_pts);
-                for point in xyz.chunks_exact(3) {
-                    // Use f64 arithmetic (matching native SphereKernel), cast to f32 at the end.
-                    let dx = point[0] - self.center[0] as f64;
-                    let dy = point[1] - self.center[1] as f64;
-                    let dz = point[2] - self.center[2] as f64;
-                    out.push(((dx * dx + dy * dy + dz * dz).sqrt() - self.radius as f64) as f32);
+            if self.device == Device::Mps && mps_adaptive_enabled() {
+                if let Some(use_gpu) = adaptive_cached_route(KERNEL_KIND_SPHERE, n_pts) {
+                    if !use_gpu {
+                        eval_sphere_cpu(self.center, self.radius, xyz, out);
+                        return Ok(());
+                    }
+
+                    let mut scratch = self
+                        .scratch
+                        .lock()
+                        .map_err(|_| CoreError::Sdf("TchSphereKernel scratch lock poisoned".to_string()))?;
+                    eval_sphere_gpu(&mut scratch, self.center, self.radius, self.device, xyz, n_pts, out);
+                    return Ok(());
                 }
+
+                let mut cpu_out = Vec::with_capacity(n_pts);
+                let cpu_start = Instant::now();
+                eval_sphere_cpu(self.center, self.radius, xyz, &mut cpu_out);
+                let cpu_us = cpu_start.elapsed().as_micros();
+
+                let mut gpu_out = Vec::with_capacity(n_pts);
+                let gpu_start = Instant::now();
+                {
+                    let mut scratch = self
+                        .scratch
+                        .lock()
+                        .map_err(|_| CoreError::Sdf("TchSphereKernel scratch lock poisoned".to_string()))?;
+                    eval_sphere_gpu(&mut scratch, self.center, self.radius, self.device, xyz, n_pts, &mut gpu_out);
+                }
+                let gpu_us = gpu_start.elapsed().as_micros();
+
+                let use_gpu = gpu_us.saturating_mul(100) <= cpu_us.saturating_mul(ADAPTIVE_GPU_MARGIN_PCT);
+                adaptive_store_route(KERNEL_KIND_SPHERE, n_pts, use_gpu);
+                if use_gpu {
+                    *out = gpu_out;
+                } else {
+                    *out = cpu_out;
+                }
+                return Ok(());
+            }
+
+            if !should_use_gpu(self.device, n_pts) {
+                eval_sphere_cpu(self.center, self.radius, xyz, out);
                 return Ok(());
             }
 
@@ -674,42 +865,7 @@ pub mod tch_kernels {
                 .scratch
                 .lock()
                 .map_err(|_| CoreError::Sdf("TchSphereKernel scratch lock poisoned".to_string()))?;
-            let compute_kind = gpu_compute_kind(self.device, n_pts);
-            let xyz_tensor = load_xyz_to_device(&mut scratch.io, xyz, n_pts, self.device, compute_kind);
-            let center_tensor = if compute_kind == Kind::Half {
-                if scratch.center_row_half.is_none() {
-                    scratch.center_row_half = Some(scratch.center_row.to_kind(Kind::Half));
-                }
-                scratch
-                    .center_row_half
-                    .as_ref()
-                    .expect("half center tensor should be initialized")
-            } else if compute_kind == Kind::BFloat16 {
-                if scratch.center_row_bf16.is_none() {
-                    scratch.center_row_bf16 = Some(scratch.center_row.to_kind(Kind::BFloat16));
-                }
-                scratch
-                    .center_row_bf16
-                    .as_ref()
-                    .expect("bf16 center tensor should be initialized")
-            } else if compute_kind == Kind::Float8e4m3fn {
-                if scratch.center_row_fp8.is_none() {
-                    scratch.center_row_fp8 = Some(scratch.center_row.to_kind(Kind::Float8e4m3fn));
-                }
-                scratch
-                    .center_row_fp8
-                    .as_ref()
-                    .expect("fp8 center tensor should be initialized")
-            } else {
-                &scratch.center_row
-            };
-            let diff = xyz_tensor - center_tensor;
-            let dims = [1i64];
-            let dist = (&diff * &diff)
-                .sum_dim_intlist(&dims[..], false, compute_kind)
-                .sqrt()
-                - (self.radius as f64);
-            copy_from_device_into_vec(&mut scratch.io, &dist, n_pts, out);
+            eval_sphere_gpu(&mut scratch, self.center, self.radius, self.device, xyz, n_pts, out);
             Ok(())
         }
     }
@@ -724,18 +880,49 @@ pub mod tch_kernels {
                 )));
             }
 
-            if !should_use_gpu(self.device, n_pts) {
-                out.clear();
-                out.reserve(n_pts);
-                for point in xyz.chunks_exact(3) {
-                    // Use f64 arithmetic (matching native PlaneKernel), cast to f32 at the end.
-                    out.push(
-                        (point[0] * self.normal[0] as f64
-                            + point[1] * self.normal[1] as f64
-                            + point[2] * self.normal[2] as f64
-                            - self.offset as f64) as f32,
-                    );
+            if self.device == Device::Mps && mps_adaptive_enabled() {
+                if let Some(use_gpu) = adaptive_cached_route(KERNEL_KIND_PLANE, n_pts) {
+                    if !use_gpu {
+                        eval_plane_cpu(self.normal, self.offset, xyz, out);
+                        return Ok(());
+                    }
+
+                    let mut scratch = self
+                        .scratch
+                        .lock()
+                        .map_err(|_| CoreError::Sdf("TchPlaneKernel scratch lock poisoned".to_string()))?;
+                    eval_plane_gpu(&mut scratch, self.device, xyz, n_pts, self.offset, out);
+                    return Ok(());
                 }
+
+                let mut cpu_out = Vec::with_capacity(n_pts);
+                let cpu_start = Instant::now();
+                eval_plane_cpu(self.normal, self.offset, xyz, &mut cpu_out);
+                let cpu_us = cpu_start.elapsed().as_micros();
+
+                let mut gpu_out = Vec::with_capacity(n_pts);
+                let gpu_start = Instant::now();
+                {
+                    let mut scratch = self
+                        .scratch
+                        .lock()
+                        .map_err(|_| CoreError::Sdf("TchPlaneKernel scratch lock poisoned".to_string()))?;
+                    eval_plane_gpu(&mut scratch, self.device, xyz, n_pts, self.offset, &mut gpu_out);
+                }
+                let gpu_us = gpu_start.elapsed().as_micros();
+
+                let use_gpu = gpu_us.saturating_mul(100) <= cpu_us.saturating_mul(ADAPTIVE_GPU_MARGIN_PCT);
+                adaptive_store_route(KERNEL_KIND_PLANE, n_pts, use_gpu);
+                if use_gpu {
+                    *out = gpu_out;
+                } else {
+                    *out = cpu_out;
+                }
+                return Ok(());
+            }
+
+            if !should_use_gpu(self.device, n_pts) {
+                eval_plane_cpu(self.normal, self.offset, xyz, out);
                 return Ok(());
             }
 
@@ -743,40 +930,7 @@ pub mod tch_kernels {
                 .scratch
                 .lock()
                 .map_err(|_| CoreError::Sdf("TchPlaneKernel scratch lock poisoned".to_string()))?;
-            let compute_kind = gpu_compute_kind(self.device, n_pts);
-            let xyz_tensor = load_xyz_to_device(&mut scratch.io, xyz, n_pts, self.device, compute_kind);
-            let normal_tensor = if compute_kind == Kind::Half {
-                if scratch.normal_row_half.is_none() {
-                    scratch.normal_row_half = Some(scratch.normal_row.to_kind(Kind::Half));
-                }
-                scratch
-                    .normal_row_half
-                    .as_ref()
-                    .expect("half normal tensor should be initialized")
-            } else if compute_kind == Kind::BFloat16 {
-                if scratch.normal_row_bf16.is_none() {
-                    scratch.normal_row_bf16 = Some(scratch.normal_row.to_kind(Kind::BFloat16));
-                }
-                scratch
-                    .normal_row_bf16
-                    .as_ref()
-                    .expect("bf16 normal tensor should be initialized")
-            } else if compute_kind == Kind::Float8e4m3fn {
-                if scratch.normal_row_fp8.is_none() {
-                    scratch.normal_row_fp8 = Some(scratch.normal_row.to_kind(Kind::Float8e4m3fn));
-                }
-                scratch
-                    .normal_row_fp8
-                    .as_ref()
-                    .expect("fp8 normal tensor should be initialized")
-            } else {
-                &scratch.normal_row
-            };
-            let dims = [1i64];
-            let dist = (&xyz_tensor * normal_tensor)
-                .sum_dim_intlist(&dims[..], false, compute_kind)
-                - (self.offset as f64);
-            copy_from_device_into_vec(&mut scratch.io, &dist, n_pts, out);
+            eval_plane_gpu(&mut scratch, self.device, xyz, n_pts, self.offset, out);
             Ok(())
         }
     }
