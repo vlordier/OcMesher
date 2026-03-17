@@ -152,6 +152,35 @@ pub(crate) fn eval_sdf_full_native(
     b_max: &[f64; 3],
     enclosed: bool,
 ) -> Result<Vec<f32>, CoreError> {
+    if n_kernels == 1 {
+        let mut sdf = kernels[0].evaluate_batch(xyz, n_pts)?;
+        if sdf.len() != n_pts {
+            return Err(CoreError::Sdf(format!(
+                "native kernel 0 returned {} values for {n_pts} query points",
+                sdf.len()
+            )));
+        }
+
+        if enclosed {
+            for i in 0..n_pts {
+                let x = xyz[i * 3];
+                let y = xyz[i * 3 + 1];
+                let z = xyz[i * 3 + 2];
+                if x <= b_min[0]
+                    || x >= b_max[0]
+                    || y <= b_min[1]
+                    || y >= b_max[1]
+                    || z <= b_min[2]
+                    || z >= b_max[2]
+                {
+                    sdf[i] = 1.0;
+                }
+            }
+        }
+
+        return Ok(sdf);
+    }
+
     let mut result = vec![0.0f32; n_pts * n_kernels];
 
     for (k_idx, kernel) in kernels.iter().enumerate() {
@@ -198,10 +227,36 @@ pub(crate) fn eval_sdf_min_native(
     enclosed: bool,
 ) -> Result<Vec<f32>, CoreError> {
     let n_kernels = kernels.len();
-    let full = eval_sdf_full_native(kernels, xyz, n_pts, n_kernels, b_min, b_max, enclosed)?;
     if n_kernels == 1 {
-        return Ok(full);
+        let mut sdf = kernels[0].evaluate_batch(xyz, n_pts)?;
+        if sdf.len() != n_pts {
+            return Err(CoreError::Sdf(format!(
+                "native kernel 0 returned {} values for {n_pts} query points",
+                sdf.len()
+            )));
+        }
+
+        if enclosed {
+            for i in 0..n_pts {
+                let x = xyz[i * 3];
+                let y = xyz[i * 3 + 1];
+                let z = xyz[i * 3 + 2];
+                if x <= b_min[0]
+                    || x >= b_max[0]
+                    || y <= b_min[1]
+                    || y >= b_max[1]
+                    || z <= b_min[2]
+                    || z >= b_max[2]
+                {
+                    sdf[i] = 1.0;
+                }
+            }
+        }
+
+        return Ok(sdf);
     }
+
+    let full = eval_sdf_full_native(kernels, xyz, n_pts, n_kernels, b_min, b_max, enclosed)?;
 
     let mut min_sdf = vec![f32::INFINITY; n_pts];
     for i in 0..n_pts {
@@ -221,7 +276,7 @@ pub mod tch_kernels {
     use crate::CoreError;
     use tch::{Device, Kind, Tensor};
 
-    const GPU_BATCH_THRESHOLD: usize = 4096;
+    const GPU_BATCH_THRESHOLD: usize = 65536;
 
     fn normalize_normal_f32(normal: [f32; 3]) -> Result<[f32; 3], CoreError> {
         let norm = (normal[0] * normal[0] + normal[1] * normal[1] + normal[2] * normal[2]).sqrt();
