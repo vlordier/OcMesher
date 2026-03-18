@@ -29,6 +29,7 @@ def make_ocmesher(
             - ``"rust"``: Rust wrapper backend via ``make_rust_ocmesher``
         device: Optional device for ``torch``/``rust`` backends (e.g. ``cpu``, ``mps``, ``cuda``).
         **kwargs: Forwarded to the selected backend constructor/factory.
+            Rust backend supports ``kernel_runtime`` (``"auto"|"native"|"tch"``).
 
     Returns:
         Backend instance implementing ``__call__(kernels)``.

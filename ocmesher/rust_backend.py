@@ -222,6 +222,7 @@ class RustOcMesher:
         sdf_batch_size: int | None = None,
         stream_policy: str = "sync",
         use_primitive_inference: bool = True,
+        kernel_runtime: str = "auto",
         backend: RustBackendProtocol | None = None,
     ):
         """Create a Rust-backed mesher with OcMesher-compatible arguments."""
@@ -271,6 +272,10 @@ class RustOcMesher:
         else:
             self.stream_policy = stream_policy
         self.use_primitive_inference = use_primitive_inference
+        if kernel_runtime not in {"auto", "native", "tch"}:
+            msg = "kernel_runtime must be one of: 'auto', 'native', 'tch'"
+            raise ValueError(msg)
+        self.kernel_runtime = kernel_runtime
 
         self._device_caps = caps
         self._backend = backend
@@ -326,9 +331,12 @@ class RustOcMesher:
                 self._inferred_specs_cache[cache_key] = specs
 
         if specs is not None:
-            # On accelerator devices, prefer tch scene extraction when supported.
+            # Choose native/tch scene extraction according to runtime policy.
             sphere_spec, plane_spec = _split_sphere_plane_specs(specs)
-            if self.device in ("mps", "cuda"):
+            prefer_tch = self.kernel_runtime == "tch" or (
+                self.kernel_runtime == "auto" and self.device in ("mps", "cuda")
+            )
+            if prefer_tch:
                 if len(specs) == 1 and sphere_spec is not None and hasattr(self._backend, "extract_tch_sphere"):
                     result = self._backend.extract_tch_sphere(
                         radius=float(sphere_spec["radius"]),
@@ -440,6 +448,7 @@ def make_rust_ocmesher(
         "sdf_batch_size",
         "stream_policy",
         "use_primitive_inference",
+            "kernel_runtime",
     }
     backend_kwargs = {k: v for k, v in kwargs.items() if k not in rust_ocmesher_only}
     wrapper_kwargs = {k: v for k, v in kwargs.items() if k in rust_ocmesher_only}

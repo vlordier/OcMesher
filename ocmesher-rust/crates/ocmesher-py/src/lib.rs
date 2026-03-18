@@ -221,6 +221,18 @@ fn parse_tch_device(device: Option<String>) -> PyResult<Device> {
     match device.as_deref() {
         None | Some("cpu") => Ok(Device::Cpu),
         Some("mps") => Ok(Device::Mps),
+        Some("cuda") => Ok(Device::Cuda(0)),
+        Some(value) if value.starts_with("cuda:") => {
+            let index = value
+                .split_once(':')
+                .and_then(|(_, suffix)| suffix.parse::<usize>().ok())
+                .ok_or_else(|| {
+                    pyo3::exceptions::PyValueError::new_err(format!(
+                        "invalid tch cuda device index: {value}"
+                    ))
+                })?;
+            Ok(Device::Cuda(index))
+        }
         Some(value) => Err(pyo3::exceptions::PyValueError::new_err(format!(
             "unsupported tch device: {value}"
         ))),

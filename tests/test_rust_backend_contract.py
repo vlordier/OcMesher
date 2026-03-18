@@ -177,6 +177,37 @@ def test_rust_ocmesher_prefers_native_scene_on_cpu(sample_cameras, sample_bounds
     assert backend.last_calls[-1][0] == "native_sphere"
 
 
+def test_rust_ocmesher_can_force_tch_scene_on_cpu(sample_cameras, sample_bounds, sphere_kernel):
+    backend = DummyRustBackendWithScenes()
+    mesher = RustOcMesher(
+        sample_cameras,
+        sample_bounds,
+        backend=backend,
+        device="cpu",
+        kernel_runtime="tch",
+    )
+
+    meshes, tags = mesher([sphere_kernel])
+
+    assert meshes == ["mesh"]
+    assert len(tags) == 1
+    assert backend.extract_tch_sphere_calls == 1
+    assert backend.extract_native_sphere_calls == 0
+    assert backend.extract_native_scene_calls == 0
+    assert backend.last_calls[-1][0] == "tch_sphere"
+    assert backend.last_calls[-1][3] == "cpu"
+
+
+def test_rust_ocmesher_rejects_invalid_kernel_runtime(sample_cameras, sample_bounds):
+    with pytest.raises(ValueError, match="kernel_runtime must be one of"):
+        RustOcMesher(
+            sample_cameras,
+            sample_bounds,
+            backend=DummyRustBackend(),
+            kernel_runtime="bad",
+        )
+
+
 def test_rust_ocmesher_caches_inferred_specs(sample_cameras, sample_bounds):
     backend = DummyRustBackendWithScenes()
     mesher = RustOcMesher(sample_cameras, sample_bounds, backend=backend, device="cpu")
@@ -381,6 +412,19 @@ def test_make_rust_ocmesher_forwards_default_backend_meshing_params(sample_camer
     assert call_kwargs["simplify_occluded"] is True
     assert call_kwargs["visible_relax_iter"] == 2
     assert call_kwargs["coarse_count"] == 500000
+
+
+def test_make_rust_ocmesher_forwards_kernel_runtime_to_wrapper(sample_cameras, sample_bounds):
+    mock_backend = DummyRustBackend()
+    mock_ext = MagicMock()
+    mock_ext.find_core_so.return_value = "/fake/core.so"
+    mock_ext.Backend.return_value = mock_backend
+
+    with patch.dict(sys.modules, {"ocmesher_rust": mock_ext}):
+        mesher = make_rust_ocmesher(sample_cameras, sample_bounds, kernel_runtime="tch")
+
+    assert isinstance(mesher, RustOcMesher)
+    assert mesher.kernel_runtime == "tch"
 
 
 def test_make_rust_ocmesher_exported_from_package():

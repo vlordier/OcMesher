@@ -218,12 +218,20 @@ mesher_torch_mps = make_ocmesher(cameras, bounds, backend="torch", device="mps")
 # Rust wrapper backend with tch kernels
 mesher_rust_cpu = make_ocmesher(cameras, bounds, backend="rust", device="cpu")
 mesher_rust_mps = make_ocmesher(cameras, bounds, backend="rust", device="mps")
+
+# Force Rust tch kernels on CPU or MPS (useful for Infinigen runtime wiring)
+mesher_rust_tch_cpu = make_ocmesher(cameras, bounds, backend="rust", device="cpu", kernel_runtime="tch")
+mesher_rust_tch_mps = make_ocmesher(cameras, bounds, backend="rust", device="mps", kernel_runtime="tch")
 ```
 
 Backend selection notes:
 - `backend="cpp"`: best baseline for parity with the original OcMesher behavior.
 - `backend="torch"`: full PyTorch implementation (`TorchOcMesher`).
 - `backend="rust"`: Rust wrapper path (`make_rust_ocmesher`) with native/tch acceleration paths.
+- `kernel_runtime`: Rust wrapper kernel selection policy.
+    - `"auto"` (default): prefers `tch` on `mps/cuda`, native kernels on `cpu`.
+    - `"native"`: always use native Rust kernels when primitive-scene paths are available.
+    - `"tch"`: force Rust `tch` kernels for supported primitive-scene paths on `cpu/mps/cuda`.
 
 ### Performance Guide: Choosing a Backend
 
