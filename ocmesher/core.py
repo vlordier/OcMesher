@@ -11,12 +11,15 @@ import logging
 import os
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
+from typing import Any
 
 import gin  # type: ignore[import-untyped]
 import numpy as np
 import trimesh
 from tqdm import tqdm  # type: ignore[import-untyped]
 
+from ._types import KernelSequence
+from ._validation import validate_mesher_params
 from .utils.interface import (
     POINTER,
     AsBool,
@@ -41,6 +44,9 @@ CAMERA_DATA_STRIDE = 23
 # Maximum number of SDF query points evaluated in a single vectorised batch.
 # Keeping this below ~10M avoids exhausting RAM on large octrees.
 _SDF_BATCH_SIZE = 10_000_000
+
+# Keep very small multi-kernel batches serial to avoid pool startup overhead.
+_SERIAL_MULTI_KERNEL_MAX = 4096
 
 # Default number of SDF worker threads when os.cpu_count() is unavailable.
 _DEFAULT_SDF_WORKERS = 4
@@ -162,6 +168,7 @@ class OcMesher:
         "_bounds_min_np",
         "_oob_mask",
         "_oob_tmp",
+        "_phase_tracker",
         "_sdf_null",
         # Thread pool and reusable buffers
         "_sdf_pool",
@@ -210,6 +217,7 @@ class OcMesher:
         "update_verts",
         "vis_filter",
         "visible_relax_iter",
+        "last_phase_summary",
     )
 
     def __init__(
@@ -235,6 +243,16 @@ class OcMesher:
         """
         cam_poses, Ks, Hs, Ws = _validate_cameras(cameras)
         bounds = _validate_bounds(bounds)
+        validate_mesher_params(
+            pixels_per_cube=pixels_per_cube,
+            inv_scale=inv_scale,
+            min_dist=min_dist,
+            memory_limit_mb=memory_limit_mb,
+            bisection_iters=bisection_iters,
+            visible_relax_iter=visible_relax_iter,
+            coarse_count=coarse_count,
+            bisection_tol=bisection_tol,
+        )
 
         dll = load_cdll(str(Path(__file__).parent.resolve() / "lib" / "core.so"))
         self.float_type = c_double
@@ -288,6 +306,8 @@ class OcMesher:
         # batch (each batch in the bisection inner loop).  Lazy-initialised:
         # only created when more than one kernel is actually used.
         self._sdf_pool: ThreadPoolExecutor | None = None
+        self._phase_tracker = None
+        self.last_phase_summary: dict[str, float] = {}
 
         # Reusable boolean buffers for out-of-bounds masking.
         # Pre-allocated to _SDF_BATCH_SIZE (the maximum batch slice), so
@@ -577,28 +597,42 @@ class OcMesher:
             # Uses pool.submit directly instead of pool.map with a closure
             # factory, eliminating per-batch function object + closure dict
             # construction overhead.
-            pool = self._get_pool(n_kernels)
-            _submit = pool.submit
-
-            for i in range(0, n_XYZ, _batch):
-                end = _min(i + _batch, n_XYZ)
-                XYZ = XYZ_all[i:end]
-                n = end - i
-                futures = [_submit(k, XYZ) for k in kernels]
-                batch_slice = result[i:end]
-                for k_idx, fut in enumerate(futures):
-                    raw = fut.result()
+            if n_XYZ <= min(_batch, _SERIAL_MULTI_KERNEL_MAX):
+                # Single-batch path: avoid creating the persistent pool.
+                XYZ = XYZ_all
+                n = n_XYZ
+                for k_idx, kernel in enumerate(kernels):
+                    raw = kernel(XYZ)
                     sdf = raw if _isinstance(raw, _ndarray) else _asarray(raw)
                     if sdf.shape != (n,):
                         msg = f"kernels[{k_idx}] returned shape {sdf.shape} for {n} query points; expected ({n},)"
                         raise ValueError(msg)
-                    batch_slice[:, k_idx] = sdf
+                    result[:, k_idx] = sdf
                 if _enclosed:
-                    batch_slice[_mask_into(XYZ, _b_min, _b_max)] = 1
+                    result[_mask_into(XYZ, _b_min, _b_max)] = 1
+            else:
+                pool = self._get_pool(n_kernels)
+                _submit = pool.submit
+
+                for i in range(0, n_XYZ, _batch):
+                    end = _min(i + _batch, n_XYZ)
+                    XYZ = XYZ_all[i:end]
+                    n = end - i
+                    futures = [_submit(k, XYZ) for k in kernels]
+                    batch_slice = result[i:end]
+                    for k_idx, fut in enumerate(futures):
+                        raw = fut.result()
+                        sdf = raw if _isinstance(raw, _ndarray) else _asarray(raw)
+                        if sdf.shape != (n,):
+                            msg = f"kernels[{k_idx}] returned shape {sdf.shape} for {n} query points; expected ({n},)"
+                            raise ValueError(msg)
+                        batch_slice[:, k_idx] = sdf
+                    if _enclosed:
+                        batch_slice[_mask_into(XYZ, _b_min, _b_max)] = 1
 
         return result
 
-    def __call__(self, kernels):
+    def __call__(self: Any, kernels: KernelSequence) -> Any:
         """Run the full coarse-to-fine meshing pipeline and return meshes."""
         _validate_kernels(kernels)
         n_elements = len(kernels)
@@ -660,9 +694,11 @@ class OcMesher:
                             _c_min = _empty(n, dtype=_sdf_dtype)
                             _c_sdf_ptr = _sdf_af(_c_min)
                         _c_cap = n
+                    assert _c_pos is not None and _c_pos_ptr is not None and _c_sdf is not None and _c_sdf_ptr is not None
                     _fine_iteration_output(_c_pos_ptr)
                     _kernel_caller(kernels, _c_pos[:n], out=_c_sdf[:n])
                     if not single_kernel:
+                        assert _c_min is not None
                         _c_sdf[:n].min(axis=-1, out=_c_min[:n])
                     n = _fine_iteration(_c_sdf_ptr)
         with Timer("filter visible blocks"):
@@ -693,6 +729,7 @@ class OcMesher:
                     _f_sdf = _empty((n, n_elements), dtype=_sdf_dtype)
                     _f_sdf_ptr = _sdf_af(_f_sdf)
                     _f_cap = n
+                assert _f_pos is not None and _f_pos_ptr is not None and _f_sdf is not None and _f_sdf_ptr is not None
                 _final_iteration2(_f_pos_ptr)
                 _kernel_caller(kernels, _f_pos[:n], out=_f_sdf[:n])
                 inc = _final_iteration3(_f_sdf_ptr)
@@ -704,6 +741,7 @@ class OcMesher:
                     _f_pos_ptr = _af(_f_pos)
                     _f_sdf = _empty((n, n_elements), dtype=_sdf_dtype)
                     _f_sdf_ptr = _sdf_af(_f_sdf)
+                assert _f_pos is not None and _f_pos_ptr is not None and _f_sdf is not None and _f_sdf_ptr is not None
                 _final_iteration2(_f_pos_ptr)
                 _kernel_caller(kernels, _f_pos[:n], out=_f_sdf[:n])
                 self.final_iteration3_occluded(_f_sdf_ptr)
