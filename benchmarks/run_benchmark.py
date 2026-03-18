@@ -29,6 +29,13 @@ import vnoise
 
 logger = logging.getLogger(__name__)
 
+
+def _to_float(value: object) -> float | None:
+    """Best-effort numeric extraction for loosely-typed benchmark result dicts."""
+    if isinstance(value, (int, float)):
+        return float(value)
+    return None
+
 # ---------------------------------------------------------------------------
 # SDF kernels at varying complexity levels
 # ---------------------------------------------------------------------------
@@ -523,9 +530,9 @@ def _micro_vertex_dedup(cameras, bounds, n_runs: int = 5) -> dict[str, object]:
         results["torch_hash_mean_s"] = statistics.mean(times_torch)
 
         min_reliable = 1e-6  # below this, timings are noise
-        np_time = results["numpy_unique_mean_s"]
-        th_time = results["torch_hash_mean_s"]
-        if np_time > min_reliable and th_time > min_reliable:
+        np_time = _to_float(results.get("numpy_unique_mean_s"))
+        th_time = _to_float(results.get("torch_hash_mean_s"))
+        if np_time is not None and th_time is not None and np_time > min_reliable and th_time > min_reliable:
             results["speedup"] = round(np_time / th_time, 1)
     except Exception as exc:  # noqa: BLE001
         results["error"] = str(exc)
@@ -561,8 +568,15 @@ def _micro_coord_computation(_cameras, _bounds, n_runs: int = 5) -> dict[str, ob
         results["n_cubes"] = n_cubes
 
         min_reliable = 1e-6
-        if results["pow2_mean_s"] > min_reliable and results["ldexp_mean_s"] > min_reliable:
-            results["speedup"] = round(results["pow2_mean_s"] / results["ldexp_mean_s"], 1)
+        pow2_time = _to_float(results.get("pow2_mean_s"))
+        ldexp_time = _to_float(results.get("ldexp_mean_s"))
+        if (
+            pow2_time is not None
+            and ldexp_time is not None
+            and pow2_time > min_reliable
+            and ldexp_time > min_reliable
+        ):
+            results["speedup"] = round(pow2_time / ldexp_time, 1)
     except Exception as exc:  # noqa: BLE001
         results["error"] = str(exc)
     return results
@@ -787,16 +801,18 @@ def _micro_pipeline_breakdown(cameras, bounds, n_runs: int = 3) -> dict[str, obj
             surface_mask, corner_sdf = mesher._find_surface_cubes([kernel], coords, levels)
             s_coords = coords[surface_mask]
             s_levels = levels[surface_mask]
-            s_corner_sdf = corner_sdf[surface_mask]
+            s_corner_sdf: torch.Tensor | None = corner_sdf[surface_mask] if corner_sdf is not None else None
             step_times["find_surface"].append(time.perf_counter() - t0)
 
             t0 = time.perf_counter()
-            s_coords, s_levels, s_corner_sdf = mesher._refine_surface_octree(
+            refined_coords, refined_levels, refined_corner_sdf = mesher._refine_surface_octree(
                 [kernel],
                 s_coords,
                 s_levels,
                 corner_sdf=s_corner_sdf,
             )
+            s_coords, s_levels = refined_coords, refined_levels
+            s_corner_sdf = refined_corner_sdf
             step_times["refine_surface"].append(time.perf_counter() - t0)
 
             t0 = time.perf_counter()
@@ -827,10 +843,12 @@ def _micro_pipeline_breakdown(cameras, bounds, n_runs: int = 3) -> dict[str, obj
         for step_name, times_list in step_times.items():
             results[f"{step_name}_mean_s"] = statistics.mean(times_list)
         # Percentage breakdown
-        total_mean = results["total_mean_s"]
-        if total_mean > 0:
+        total_mean = _to_float(results.get("total_mean_s"))
+        if total_mean is not None and total_mean > 0:
             for step_name in ("coarse_octree", "find_surface", "refine_surface", "visibility_filter", "construct_mesh"):
-                results[f"{step_name}_pct"] = round(results[f"{step_name}_mean_s"] / total_mean * 100, 1)
+                step_mean = _to_float(results.get(f"{step_name}_mean_s"))
+                if step_mean is not None:
+                    results[f"{step_name}_pct"] = round(step_mean / total_mean * 100, 1)
     except Exception as exc:  # noqa: BLE001
         results["error"] = str(exc)
     return results
@@ -1244,67 +1262,87 @@ def main() -> None:
     logger.info("SUMMARY")
     logger.info("%s", "=" * 70)
     for sdf_name in sdf_names:
-        r_orig = results.get(f"original_{sdf_name}", {})
-        r_torch_cpu = results.get(f"torch_cpu_{sdf_name}", {})
-        r_gpu = results.get(f"torch_cuda_{sdf_name}", {})
-        r_mps = results.get(f"torch_mps_{sdf_name}", {})
+        r_orig = results.get(f"original_{sdf_name}")
+        r_torch_cpu = results.get(f"torch_cpu_{sdf_name}")
+        r_gpu = results.get(f"torch_cuda_{sdf_name}")
+        r_mps = results.get(f"torch_mps_{sdf_name}")
 
-        if r_orig and "error" not in r_orig and r_torch_cpu and "error" not in r_torch_cpu:
-            sp = r_orig["mean_s"] / max(r_torch_cpu["mean_s"], 1e-6)
+        if isinstance(r_orig, dict) and isinstance(r_torch_cpu, dict) and "error" not in r_orig and "error" not in r_torch_cpu:
+            mean_orig = _to_float(r_orig.get("mean_s"))
+            mean_cpu = _to_float(r_torch_cpu.get("mean_s"))
+            if mean_orig is None or mean_cpu is None:
+                continue
+            sp = mean_orig / max(mean_cpu, 1e-6)
             tag = "faster" if sp > 1 else "slower"
             logger.info(
                 "  [%s] PyTorch CPU  vs C++: %.2fx %s  (%.3fs vs %.3fs)",
                 sdf_name,
                 sp,
                 tag,
-                r_torch_cpu["mean_s"],
-                r_orig["mean_s"],
+                mean_cpu,
+                mean_orig,
             )
-        if r_gpu and "error" not in r_gpu and r_orig and "error" not in r_orig:
-            sp_g = r_orig["mean_s"] / max(r_gpu["mean_s"], 1e-6)
+        if isinstance(r_gpu, dict) and isinstance(r_orig, dict) and "error" not in r_gpu and "error" not in r_orig:
+            mean_orig = _to_float(r_orig.get("mean_s"))
+            mean_gpu = _to_float(r_gpu.get("mean_s"))
+            if mean_orig is None or mean_gpu is None:
+                continue
+            sp_g = mean_orig / max(mean_gpu, 1e-6)
             tag_g = "faster" if sp_g > 1 else "slower"
             logger.info(
                 "  [%s] PyTorch CUDA vs C++: %.2fx %s  (%.3fs vs %.3fs)",
                 sdf_name,
                 sp_g,
                 tag_g,
-                r_gpu["mean_s"],
-                r_orig["mean_s"],
+                mean_gpu,
+                mean_orig,
             )
-        if r_mps and "error" not in r_mps and r_orig and "error" not in r_orig:
-            sp_m = r_orig["mean_s"] / max(r_mps["mean_s"], 1e-6)
+        if isinstance(r_mps, dict) and isinstance(r_orig, dict) and "error" not in r_mps and "error" not in r_orig:
+            mean_orig = _to_float(r_orig.get("mean_s"))
+            mean_mps = _to_float(r_mps.get("mean_s"))
+            if mean_orig is None or mean_mps is None:
+                continue
+            sp_m = mean_orig / max(mean_mps, 1e-6)
             tag_m = "faster" if sp_m > 1 else "slower"
             logger.info(
                 "  [%s] PyTorch MPS  vs C++: %.2fx %s  (%.3fs vs %.3fs)",
                 sdf_name,
                 sp_m,
                 tag_m,
-                r_mps["mean_s"],
-                r_orig["mean_s"],
+                mean_mps,
+                mean_orig,
             )
 
         # Cross-device speedup (if multiple GPU devices available)
-        if r_gpu and r_torch_cpu and "error" not in r_gpu and "error" not in r_torch_cpu:
-            sp_gc = r_torch_cpu["mean_s"] / max(r_gpu["mean_s"], 1e-6)
+        if isinstance(r_gpu, dict) and isinstance(r_torch_cpu, dict) and "error" not in r_gpu and "error" not in r_torch_cpu:
+            mean_cpu = _to_float(r_torch_cpu.get("mean_s"))
+            mean_gpu = _to_float(r_gpu.get("mean_s"))
+            if mean_cpu is None or mean_gpu is None:
+                continue
+            sp_gc = mean_cpu / max(mean_gpu, 1e-6)
             tag_gc = "faster" if sp_gc > 1 else "slower"
             logger.info(
                 "  [%s] PyTorch CUDA vs CPU: %.2fx %s  (%.3fs vs %.3fs)",
                 sdf_name,
                 sp_gc,
                 tag_gc,
-                r_gpu["mean_s"],
-                r_torch_cpu["mean_s"],
+                mean_gpu,
+                mean_cpu,
             )
-        if r_mps and r_torch_cpu and "error" not in r_mps and "error" not in r_torch_cpu:
-            sp_mc = r_torch_cpu["mean_s"] / max(r_mps["mean_s"], 1e-6)
+        if isinstance(r_mps, dict) and isinstance(r_torch_cpu, dict) and "error" not in r_mps and "error" not in r_torch_cpu:
+            mean_cpu = _to_float(r_torch_cpu.get("mean_s"))
+            mean_mps = _to_float(r_mps.get("mean_s"))
+            if mean_cpu is None or mean_mps is None:
+                continue
+            sp_mc = mean_cpu / max(mean_mps, 1e-6)
             tag_mc = "faster" if sp_mc > 1 else "slower"
             logger.info(
                 "  [%s] PyTorch MPS  vs CPU: %.2fx %s  (%.3fs vs %.3fs)",
                 sdf_name,
                 sp_mc,
                 tag_mc,
-                r_mps["mean_s"],
-                r_torch_cpu["mean_s"],
+                mean_mps,
+                mean_cpu,
             )
     logger.info("")
 

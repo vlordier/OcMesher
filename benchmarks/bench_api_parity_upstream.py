@@ -27,6 +27,7 @@ import sys
 import tempfile
 from dataclasses import dataclass
 from pathlib import Path
+from typing import Any
 
 
 GIT_BIN = shutil.which("git") or "git"
@@ -409,9 +410,10 @@ def main() -> None:
 
     repo_root = Path(__file__).resolve().parents[1]
     required_pkgs = ["numpy", "trimesh", "gin-config"]
-    bootstrap = {
+    bootstrap: dict[str, dict[str, Any] | None] = {
         "current": None,
         "upstream": None,
+        "current_rust_extension": None,
     }
 
     # Build current checkout to ensure extension/core artifacts are present.

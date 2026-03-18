@@ -38,22 +38,22 @@ def _checked_ptr(x: Any, ctype: type) -> Any:
 
 
 # note: size of x should not exceed maximum
-def AsInt(x: np.ndarray) -> "POINTER(c_int32)":
+def AsInt(x: np.ndarray) -> Any:
     """Cast *x* to a ``c_int32`` pointer."""
     return _checked_ptr(x, c_int32)
 
 
-def AsDouble(x: np.ndarray) -> "POINTER(c_double)":
+def AsDouble(x: np.ndarray) -> Any:
     """Cast *x* to a ``c_double`` pointer."""
     return _checked_ptr(x, c_double)
 
 
-def AsFloat(x: np.ndarray) -> "POINTER(c_float)":
+def AsFloat(x: np.ndarray) -> Any:
     """Cast *x* to a ``c_float`` pointer."""
     return _checked_ptr(x, c_float)
 
 
-def AsBool(x: np.ndarray) -> "POINTER(c_bool)":
+def AsBool(x: np.ndarray) -> Any:
     """Cast *x* to a ``c_bool`` pointer."""
     return _checked_ptr(x, c_bool)
 
