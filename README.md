@@ -77,6 +77,22 @@ For benchmark runs with optional acceleration backends, install benchmark extras
 uv sync --extra benchmark
 ```
 
+### Running Benchmarks
+
+To run the full benchmark suite, you can use the Makefile target:
+
+```bash
+make bench
+```
+
+This will run the end-to-end benchmarks for the available backends.
+
+Alternatively, you can run the benchmark script directly:
+
+```bash
+uv run python benchmarks/run_benchmark.py
+```
+
 ### Development Checks
 
 For the main Python/C++ repository quality gate, use:

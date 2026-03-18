@@ -16,8 +16,9 @@
 #   make bench-clean remove generated benchmark artifacts (keeps tracked snapshots)
 #   make fix        auto-fix lint + apply formatting
 #   make clean      remove compiled artifacts
+#   make bench      run benchmarks
 
-.PHONY: install test coverage lint lint-python lint-rust lint-cpp format typecheck quality fix bench-clean clean
+.PHONY: install test coverage lint lint-python lint-rust lint-cpp format typecheck quality fix bench-clean clean bench
 
 install:
 	uv sync
@@ -81,3 +82,6 @@ clean:
 	rm -rf .pytest_cache .mypy_cache .ruff_cache .pyright htmlcov .coverage
 	$(MAKE) bench-clean
 	rm -f *.log *.tmp
+
+bench:
+	uv run python benchmarks/run_benchmark.py
