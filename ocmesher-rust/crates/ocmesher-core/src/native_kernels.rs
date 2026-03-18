@@ -194,6 +194,7 @@ impl SdfEvaluator for SphereKernel {
     }
 }
 
+#[allow(clippy::too_many_arguments)]
 pub(crate) fn eval_sdf_full_native_into(
     kernels: &[BoxedSdfEvaluator],
     xyz: &[f64],

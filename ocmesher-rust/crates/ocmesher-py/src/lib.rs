@@ -3,6 +3,12 @@
 
 //! PyO3 extension module `ocmesher_rust`.
 //!
+//! Clippy false positive: PyO3's `PyResult<T>` is type-aliased to `Result<T, PyErr>`,
+//! but clippy's `useless_conversion` lint incorrectly flags the `PyResult` return type
+//! as "useless conversion to the same type". This is a known false positive in clippy
+//! when dealing with type aliases in trait/proc-macro contexts.
+#![allow(clippy::useless_conversion)]
+//!
 //! Exposes:
 //! - [`Backend`]: Python class implementing [`RustBackendProtocol`] from `ocmesher.rust_backend`.
 //!
@@ -25,12 +31,12 @@ use std::sync::Arc;
 use pyo3::prelude::*;
 use pyo3::types::{PyDict, PyList, PyTuple};
 
-use ocmesher_core::{
-    pack_cameras, run_meshing_pipeline_native, validate_bounds, CoreError, CoreLib,
-    MesherParams, PlaneKernel, PlaneSpec, PrimitiveSpec, SphereKernel, SphereSpec, build_native_kernels,
-};
 #[cfg(feature = "tch-kernels")]
-use ocmesher_core::tch_kernels::{TchPlaneKernel, TchSphereKernel, build_tch_kernels};
+use ocmesher_core::tch_kernels::{build_tch_kernels, TchPlaneKernel, TchSphereKernel};
+use ocmesher_core::{
+    build_native_kernels, pack_cameras, run_meshing_pipeline_native, validate_bounds, CoreError,
+    CoreLib, MesherParams, PlaneKernel, PlaneSpec, PrimitiveSpec, SphereKernel, SphereSpec,
+};
 #[cfg(feature = "tch-kernels")]
 use tch::Device;
 
@@ -67,7 +73,10 @@ fn mesh_data_list_to_python<'py>(
         tags_list.append(tag_np)?;
     }
 
-    Ok(PyTuple::new_bound(py, [meshes_list.into_any(), tags_list.into_any()]))
+    Ok(PyTuple::new_bound(
+        py,
+        [meshes_list.into_any(), tags_list.into_any()],
+    ))
 }
 
 fn parse_center_f64(center: Option<Vec<f64>>) -> PyResult<[f64; 3]> {
@@ -86,9 +95,9 @@ fn parse_center_f64(center: Option<Vec<f64>>) -> PyResult<[f64; 3]> {
 
 fn parse_positive_radius(field_name: &str, radius: f64) -> PyResult<f64> {
     if radius <= 0.0 {
-        return Err(pyo3::exceptions::PyValueError::new_err(
-            format!("{field_name} must be positive"),
-        ));
+        return Err(pyo3::exceptions::PyValueError::new_err(format!(
+            "{field_name} must be positive"
+        )));
     }
     Ok(radius)
 }
@@ -108,9 +117,9 @@ fn parse_normal_f64(normal: Option<Vec<f64>>) -> PyResult<[f64; 3]> {
 }
 
 fn dict_required_string(spec: &Bound<'_, PyDict>, key: &str) -> PyResult<String> {
-    let value = spec
-        .get_item(key)?
-        .ok_or_else(|| pyo3::exceptions::PyValueError::new_err(format!("primitive spec missing '{key}'")))?;
+    let value = spec.get_item(key)?.ok_or_else(|| {
+        pyo3::exceptions::PyValueError::new_err(format!("primitive spec missing '{key}'"))
+    })?;
     value.extract::<String>().map_err(|_| {
         pyo3::exceptions::PyValueError::new_err(format!("primitive field '{key}' must be a string"))
     })
@@ -119,7 +128,9 @@ fn dict_required_string(spec: &Bound<'_, PyDict>, key: &str) -> PyResult<String>
 fn dict_optional_vec_f64(spec: &Bound<'_, PyDict>, key: &str) -> PyResult<Option<Vec<f64>>> {
     match spec.get_item(key)? {
         Some(value) => value.extract::<Vec<f64>>().map(Some).map_err(|_| {
-            pyo3::exceptions::PyValueError::new_err(format!("primitive field '{key}' must be a list of floats"))
+            pyo3::exceptions::PyValueError::new_err(format!(
+                "primitive field '{key}' must be a list of floats"
+            ))
         }),
         None => Ok(None),
     }
@@ -128,7 +139,9 @@ fn dict_optional_vec_f64(spec: &Bound<'_, PyDict>, key: &str) -> PyResult<Option
 fn dict_optional_f64(spec: &Bound<'_, PyDict>, key: &str) -> PyResult<Option<f64>> {
     match spec.get_item(key)? {
         Some(value) => value.extract::<f64>().map(Some).map_err(|_| {
-            pyo3::exceptions::PyValueError::new_err(format!("primitive field '{key}' must be a float"))
+            pyo3::exceptions::PyValueError::new_err(format!(
+                "primitive field '{key}' must be a float"
+            ))
         }),
         None => Ok(None),
     }
@@ -150,12 +163,16 @@ fn parse_native_primitive_spec(spec: &Bound<'_, PyDict>) -> PyResult<PrimitiveSp
         "sphere" => {
             let radius = dict_optional_f64(spec, "radius")?.unwrap_or(1.0);
             let center = parse_center_f64(dict_optional_vec_f64(spec, "center")?)?;
-            Ok(PrimitiveSpec::Sphere(SphereSpec::new(center, radius).map_err(map_scene_validation_error)?))
+            Ok(PrimitiveSpec::Sphere(
+                SphereSpec::new(center, radius).map_err(map_scene_validation_error)?,
+            ))
         }
         "plane" => {
             let offset = dict_optional_f64(spec, "offset")?.unwrap_or(0.0);
             let normal = parse_normal_f64(dict_optional_vec_f64(spec, "normal")?)?;
-            Ok(PrimitiveSpec::Plane(PlaneSpec::new(normal, offset).map_err(map_scene_validation_error)?))
+            Ok(PrimitiveSpec::Plane(
+                PlaneSpec::new(normal, offset).map_err(map_scene_validation_error)?,
+            ))
         }
         other => Err(pyo3::exceptions::PyValueError::new_err(format!(
             "unsupported primitive type: {other}"
@@ -175,13 +192,17 @@ fn parse_native_scene_primitives(primitives: &Bound<'_, PyList>) -> PyResult<Vec
         let spec = item.downcast::<PyDict>().map_err(|_| {
             pyo3::exceptions::PyValueError::new_err(format!("primitives[{index}] must be a dict"))
         })?;
-        kernels.push(parse_native_primitive_spec(&spec)?);
+        kernels.push(parse_native_primitive_spec(spec)?);
     }
     Ok(kernels)
 }
 
 #[cfg(feature = "tch-kernels")]
-fn parse_vector_f32(vector: Option<Vec<f64>>, field_name: &str, default: [f32; 3]) -> PyResult<[f32; 3]> {
+fn parse_vector_f32(
+    vector: Option<Vec<f64>>,
+    field_name: &str,
+    default: [f32; 3],
+) -> PyResult<[f32; 3]> {
     match vector {
         Some(values) => {
             if values.len() != 3 {
@@ -213,12 +234,16 @@ fn parse_tch_primitive_spec(spec: &Bound<'_, PyDict>) -> PyResult<PrimitiveSpec>
         "sphere" => {
             let radius = dict_optional_f64(spec, "radius")?.unwrap_or(1.0);
             let center = parse_center_f64(dict_optional_vec_f64(spec, "center")?)?;
-            Ok(PrimitiveSpec::Sphere(SphereSpec::new(center, radius).map_err(map_scene_validation_error)?))
+            Ok(PrimitiveSpec::Sphere(
+                SphereSpec::new(center, radius).map_err(map_scene_validation_error)?,
+            ))
         }
         "plane" => {
             let offset = dict_optional_f64(spec, "offset")?.unwrap_or(0.0);
             let normal = parse_normal_f64(dict_optional_vec_f64(spec, "normal")?)?;
-            Ok(PrimitiveSpec::Plane(PlaneSpec::new(normal, offset).map_err(map_scene_validation_error)?))
+            Ok(PrimitiveSpec::Plane(
+                PlaneSpec::new(normal, offset).map_err(map_scene_validation_error)?,
+            ))
         }
         other => Err(pyo3::exceptions::PyValueError::new_err(format!(
             "unsupported primitive type: {other}"
@@ -320,12 +345,12 @@ impl Backend {
         let hs_py = cameras.get_item(2)?;
         let ws_py = cameras.get_item(3)?;
 
-        let cam_poses_list: Vec<Vec<f64>> = cam_poses_py
-            .extract()
-            .map_err(|_| pyo3::exceptions::PyValueError::new_err("cam_poses must be list of 4x4 arrays"))?;
-        let ks_list: Vec<Vec<f64>> = ks_py
-            .extract()
-            .map_err(|_| pyo3::exceptions::PyValueError::new_err("Ks must be list of 3x3 arrays"))?;
+        let cam_poses_list: Vec<Vec<f64>> = cam_poses_py.extract().map_err(|_| {
+            pyo3::exceptions::PyValueError::new_err("cam_poses must be list of 4x4 arrays")
+        })?;
+        let ks_list: Vec<Vec<f64>> = ks_py.extract().map_err(|_| {
+            pyo3::exceptions::PyValueError::new_err("Ks must be list of 3x3 arrays")
+        })?;
         let hs_list: Vec<f64> = hs_py
             .extract()
             .map_err(|_| pyo3::exceptions::PyValueError::new_err("Hs must be list of numbers"))?;
@@ -359,14 +384,15 @@ impl Backend {
             ks_flat.extend_from_slice(k);
         }
 
-        let cameras_data =
-            pack_cameras(&cam_poses_flat, &ks_flat, &hs_list, &ws_list).map_err(map_scene_validation_error)?;
+        let cameras_data = pack_cameras(&cam_poses_flat, &ks_flat, &hs_list, &ws_list)
+            .map_err(map_scene_validation_error)?;
 
         // Parse bounds
-        let bounds_vec: Vec<f64> = bounds
-            .extract()
-            .map_err(|_| pyo3::exceptions::PyValueError::new_err("bounds must be list of 6 floats"))?;
-        let (b_min, b_max, center, size) = validate_bounds(&bounds_vec).map_err(map_scene_validation_error)?;
+        let bounds_vec: Vec<f64> = bounds.extract().map_err(|_| {
+            pyo3::exceptions::PyValueError::new_err("bounds must be list of 6 floats")
+        })?;
+        let (b_min, b_max, center, size) =
+            validate_bounds(&bounds_vec).map_err(map_scene_validation_error)?;
 
         // Detect hardware capabilities for get_capabilities()
         let (supports_cuda, supports_mps) = detect_torch_capabilities(py);
@@ -459,7 +485,11 @@ impl Backend {
         normal: Option<Vec<f64>>,
     ) -> PyResult<Bound<'py, PyTuple>> {
         let normal_arr = parse_normal_f64(normal)?;
-        let kernels = vec![Box::new(PlaneKernel::new(normal_arr, offset).map_err(map_scene_validation_error)?) as _];
+        let kernels =
+            vec![
+                Box::new(PlaneKernel::new(normal_arr, offset).map_err(map_scene_validation_error)?)
+                    as _,
+            ];
         let mesh_data_list = run_meshing_pipeline_native(&self.lib, &self.params, &kernels)
             .map_err(map_scene_validation_error)?;
 
@@ -481,7 +511,9 @@ impl Backend {
         let plane_normal = parse_normal_f64(plane_normal)?;
         let kernels = vec![
             Box::new(SphereKernel::new(sphere_center, sphere_radius)) as _,
-            Box::new(PlaneKernel::new(plane_normal, plane_offset).map_err(map_scene_validation_error)?) as _,
+            Box::new(
+                PlaneKernel::new(plane_normal, plane_offset).map_err(map_scene_validation_error)?,
+            ) as _,
         ];
         let mesh_data_list = run_meshing_pipeline_native(&self.lib, &self.params, &kernels)
             .map_err(map_scene_validation_error)?;
@@ -516,7 +548,8 @@ impl Backend {
         let radius = parse_positive_radius("radius", radius)?;
         let center_arr = parse_vector_f32(center, "center", [0.0, 0.0, 0.0])?;
         let tch_device = parse_tch_device(device)?;
-        let kernels = vec![Box::new(TchSphereKernel::new(center_arr, radius as f32, tch_device)) as _];
+        let kernels =
+            vec![Box::new(TchSphereKernel::new(center_arr, radius as f32, tch_device)) as _];
         let mesh_data_list = run_meshing_pipeline_native(&self.lib, &self.params, &kernels)
             .map_err(map_scene_validation_error)?;
 
@@ -535,7 +568,10 @@ impl Backend {
     ) -> PyResult<Bound<'py, PyTuple>> {
         let normal_arr = parse_vector_f32(normal, "normal", [0.0, 0.0, 1.0])?;
         let tch_device = parse_tch_device(device)?;
-        let kernels = vec![Box::new(TchPlaneKernel::new(normal_arr, offset as f32, tch_device).map_err(map_scene_validation_error)?) as _];
+        let kernels = vec![Box::new(
+            TchPlaneKernel::new(normal_arr, offset as f32, tch_device)
+                .map_err(map_scene_validation_error)?,
+        ) as _];
         let mesh_data_list = run_meshing_pipeline_native(&self.lib, &self.params, &kernels)
             .map_err(map_scene_validation_error)?;
 
@@ -559,8 +595,15 @@ impl Backend {
         let plane_normal = parse_vector_f32(plane_normal, "plane_normal", [0.0, 0.0, 1.0])?;
         let tch_device = parse_tch_device(device)?;
         let kernels = vec![
-            Box::new(TchSphereKernel::new(sphere_center, sphere_radius as f32, tch_device)) as _,
-            Box::new(TchPlaneKernel::new(plane_normal, plane_offset as f32, tch_device).map_err(map_scene_validation_error)?) as _,
+            Box::new(TchSphereKernel::new(
+                sphere_center,
+                sphere_radius as f32,
+                tch_device,
+            )) as _,
+            Box::new(
+                TchPlaneKernel::new(plane_normal, plane_offset as f32, tch_device)
+                    .map_err(map_scene_validation_error)?,
+            ) as _,
         ];
         let mesh_data_list = run_meshing_pipeline_native(&self.lib, &self.params, &kernels)
             .map_err(map_scene_validation_error)?;
@@ -645,9 +688,7 @@ fn detect_torch_capabilities(py: Python<'_>) -> (bool, bool) {
 #[pyfunction]
 fn find_core_so(py: Python<'_>) -> PyResult<String> {
     let ocmesher = py.import_bound("ocmesher")?;
-    let pkg_file: String = ocmesher
-        .getattr("__file__")?
-        .extract()?;
+    let pkg_file: String = ocmesher.getattr("__file__")?.extract()?;
     let pkg_dir = std::path::Path::new(&pkg_file)
         .parent()
         .ok_or_else(|| pyo3::exceptions::PyRuntimeError::new_err("cannot resolve package dir"))?;
@@ -667,9 +708,7 @@ fn find_core_so(py: Python<'_>) -> PyResult<String> {
 #[pyfunction]
 fn find_core_noomp_so(py: Python<'_>) -> PyResult<String> {
     let ocmesher = py.import_bound("ocmesher")?;
-    let pkg_file: String = ocmesher
-        .getattr("__file__")?
-        .extract()?;
+    let pkg_file: String = ocmesher.getattr("__file__")?.extract()?;
     let pkg_dir = std::path::Path::new(&pkg_file)
         .parent()
         .ok_or_else(|| pyo3::exceptions::PyRuntimeError::new_err("cannot resolve package dir"))?;

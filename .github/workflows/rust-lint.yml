@@ -1,0 +1,49 @@
+name: Rust Lint
+
+on:
+  push:
+    branches: ["main", "develop"]
+    paths:
+      - "ocmesher-rust/**"
+      - "Makefile"
+      - ".github/workflows/rust-lint.yml"
+  pull_request:
+    branches: ["main", "develop"]
+    paths:
+      - "ocmesher-rust/**"
+      - "Makefile"
+      - ".github/workflows/rust-lint.yml"
+
+permissions:
+  contents: read
+
+jobs:
+  rustfmt:
+    name: rustfmt (format check)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Rust
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt
+
+      - name: Run rustfmt
+        working-directory: ocmesher-rust
+        run: cargo fmt --all --check
+
+  clippy:
+    name: clippy (workspace baseline)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Rust
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          components: clippy
+
+      - name: Run clippy
+        working-directory: ocmesher-rust
+        run: cargo clippy --workspace --all-targets -- -D warnings -D clippy::dbg_macro -D clippy::todo -D clippy::unimplemented

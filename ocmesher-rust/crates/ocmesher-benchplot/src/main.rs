@@ -26,9 +26,7 @@ struct SceneSpeedup {
 }
 
 fn usage() {
-    eprintln!(
-        "Usage: ocmesher-benchplot --input <bench_api_parity.json> --output <speedups.png>"
-    );
+    eprintln!("Usage: ocmesher-benchplot --input <bench_api_parity.json> --output <speedups.png>");
 }
 
 fn get_avg(scene: &Value) -> Option<f64> {

@@ -307,6 +307,7 @@ pub fn pack_cameras(
 }
 
 /// Validate and extract scalar bounds from a 6-element array.
+#[allow(clippy::type_complexity)]
 pub fn validate_bounds(bounds: &[f64]) -> Result<([f64; 3], [f64; 3], [f64; 3], f64), CoreError> {
     if bounds.len() != 6 {
         return Err(CoreError::Bounds(format!(
@@ -614,6 +615,7 @@ pub fn run_meshing_pipeline_native(
     Ok(results)
 }
 
+#[allow(clippy::too_many_arguments)]
 fn construct_element_mesh_native(
     lib: &CoreLib,
     element: i32,
