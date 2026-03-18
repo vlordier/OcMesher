@@ -37,7 +37,7 @@ import numpy as np
 import torch
 import trimesh
 
-from ._types import KernelSequence, MeshResult
+from ._types import BoundsLike, CamerasTuple, KernelSequence, MeshResult
 from ._validation import coerce_kernel_sdf, validate_bounds, validate_cameras, validate_kernels, validate_mesher_params
 from .utils.timer import Timer
 
@@ -675,22 +675,22 @@ class TorchOcMesher:
 
     def __init__(
         self,
-        cameras,
-        bounds,
-        pixels_per_cube=8,
-        inv_scale=10,
-        min_dist=1,
-        memory_limit_mb=1000,
-        bisection_iters=15,
-        bisection_tol=0.0,
-        enclosed=True,
-        simplify_occluded=True,
-        visible_relax_iter=2,
-        coarse_count=500000,
-        device=None,
-        n_sdf_workers=_MAX_SDF_WORKERS,
-        use_compile=False,
-    ):
+        cameras: CamerasTuple,
+        bounds: BoundsLike,
+        pixels_per_cube: int = 8,
+        inv_scale: int = 10,
+        min_dist: int = 1,
+        memory_limit_mb: int = 1000,
+        bisection_iters: int = 15,
+        bisection_tol: float = 0.0,
+        enclosed: bool = True,
+        simplify_occluded: bool = True,
+        visible_relax_iter: int = 2,
+        coarse_count: int = 500000,
+        device: str | None = None,
+        n_sdf_workers: int = _MAX_SDF_WORKERS,
+        use_compile: bool = False,
+    ) -> None:
         """Initialise the mesher with camera intrinsics and bounds.
 
         Args:

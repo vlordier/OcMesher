@@ -17,7 +17,7 @@ def make_ocmesher(
     backend: str = "cpp",
     device: str | None = None,
     **kwargs: Any,
-):
+) -> Any:
     """Create an OcMesher backend instance from a simple backend/device selector.
 
     Args:

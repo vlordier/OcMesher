@@ -32,9 +32,21 @@ Factory function to create the appropriate mesher backend.
 
 ::: ocmesher.factory.make_ocmesher
 
+### `make_rust_ocmesher`
+
+Factory helper that initializes the compiled Rust extension backend and wraps it in `RustOcMesher`.
+
+::: ocmesher.rust_backend.make_rust_ocmesher
+
 ----
 
 ## Utility Functions
+
+### `build_batched_sdf_kernels`
+
+Helper that adapts callable kernels to batched evaluation, preferring `evaluate_batch(...)` when present.
+
+::: ocmesher.rust_backend.build_batched_sdf_kernels
 
 ### `validate_cameras`
 
