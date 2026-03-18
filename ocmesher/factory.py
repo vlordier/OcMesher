@@ -9,6 +9,8 @@ from typing import Any
 
 from .core import OcMesher
 
+__all__ = ["make_ocmesher"]
+
 
 def make_ocmesher(
     cameras: Any,

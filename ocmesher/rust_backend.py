@@ -25,6 +25,11 @@ if TYPE_CHECKING:
 
     from ._types import CamerasTuple
 
+__all__ = [
+    "RustOcMesher",
+    "build_batched_sdf_kernels",
+    "make_rust_ocmesher",
+]
 
 RESULT_ARITY = 2
 

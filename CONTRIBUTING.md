@@ -24,13 +24,22 @@ uv run pre-commit install
 ## Development Guidelines
 
 - Follow the project style enforced by **ruff** (see `pyproject.toml` for rules).
-<!-- Python and C++ guidelines removed: now Rust-native only -->
 - Run linting and tests before submitting (see commands below).
 
 ## Common Development Commands
 
+### Python
+
 ```bash
-## Common Development Commands
+# Run tests
+pytest tests/ -v
+
+# Run linting and formatting
+ruff check ocmesher/ tests/
+ruff format ocmesher/ tests/
+```
+
+### Rust
 
 ```bash
 # Build the Rust project
@@ -43,12 +52,8 @@ cargo test
 cargo fmt --all -- --check
 cargo clippy --all-targets --all-features -- -D warnings
 ```
-```
 
-You can also use the provided `Makefile` shortcuts:
-
-```bash
-<!-- Makefile shortcuts for Python/C++ removed -->
+You can also use the provided `Makefile` shortcuts (for convenience):
 ```
 
 ## Submitting Changes
