@@ -504,7 +504,7 @@ class OcMesher:
         _lor(out_bound, _tmp, out=out_bound)
         return out_bound
 
-    def kernel_caller(self, kernels, XYZ_all, *, out=None):
+    def kernel_caller(self, kernels: KernelSequence, XYZ_all: Any, *, out: np.ndarray | None = None) -> np.ndarray:
         """Evaluate SDF *kernels* at the given *XYZ_all* positions.
 
         Optimisations over the naïve implementation:

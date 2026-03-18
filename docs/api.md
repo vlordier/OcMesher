@@ -2,9 +2,9 @@
 
 ## `OcMesher`
 
-The main Rust-native mesher. Accepts SDF kernels and camera data, runs coarse-to-fine octree meshing, and returns mesh objects.
+The main C++-backed mesher. Accepts SDF kernels and camera data, runs coarse-to-fine octree meshing, and returns mesh objects.
 
-::: ocmesher.OcMesher
+::: ocmesher.core.OcMesher
 
 ----
 

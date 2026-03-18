@@ -5,7 +5,7 @@
 [![Static Analysis](https://github.com/princeton-vl/OcMesher/actions/workflows/static-analysis.yml/badge.svg)](https://github.com/princeton-vl/OcMesher/actions/workflows/static-analysis.yml)
 [![Docs](https://github.com/princeton-vl/OcMesher/actions/workflows/docs.yml/badge.svg)](https://princeton-vl.github.io/OcMesher/)
 [![Python 3.10+](https://img.shields.io/badge/python-3.10%2B-blue)](https://www.python.org/downloads/)
-[![License: BSD-3-Clause](https://img.shields.io/badge/license-BSD--3--Clause-blue.svg)](LICENSE)
+[![License: BSD-3-Clause](https://img.shields.io/badge/license-BSD--3--Clause-blue.svg)](https://github.com/princeton-vl/OcMesher/blob/main/LICENSE)
 
 Implementation source-code for <it>OcMesher</it>, which extracts a mesh for an unbounded scene represented by signed distance functions (SDFs). Even though the scene is unbounded, the mesh is memory-efficient, and highly detailed from a given set of camera views. OcMesher is used by default in [Infinigen](https://github.com/princeton-vl/infinigen) to speed up video generation, improve rendering quality, and export terrain meshes to external simulators.
 
@@ -79,7 +79,15 @@ uv sync --extra benchmark
 
 ### Development Checks
 
-The repo uses `cargo fmt` for formatting and `cargo clippy` for linting.
+For the main Python/C++ repository quality gate, use:
+
+```bash
+make quality
+```
+
+This runs Ruff, the configured type checker, and the Python test suite.
+
+For the Rust workspace, use `cargo fmt` for formatting and `cargo clippy` for linting.
 
 To check formatting and linting:
 
@@ -94,11 +102,10 @@ For local performance and regression validation, use the Rust-native benchmark s
 
 ```bash
 cargo bench
+uv run python benchmarks/bench_rust_scene.py --runs 3 --snapshot-json benchmark_artifacts/bench_rust_scene_snapshot.json
 ```
 
 To persist benchmark results with run metadata for later branch-to-branch comparison, use the output from `cargo bench` or custom Rust-native benchmarking tools.
-uv run python benchmarks/bench_rust_scene.py --runs 3 --snapshot-json benchmark_artifacts/bench_rust_scene_snapshot.json
-```
 
 The benchmark helpers also support comparing snapshot files from two runs or
 branches:
@@ -151,7 +158,7 @@ cargo run --release --manifest-path ocmesher-rust/Cargo.toml -p ocmesher-benchpl
 The chart below uses speedup defined as `upstream_avg_ms / current_avg_ms`, so
 values above `1.0x` mean the current Rust wrapper is faster.
 
-![API parity speedups](benchmark_artifacts/bench_api_speedups.png)
+![API parity speedups](https://raw.githubusercontent.com/princeton-vl/OcMesher/main/benchmark_artifacts/bench_api_speedups.png)
 
 ### Torch Backend Contract
 
@@ -175,7 +182,7 @@ Current contract surface:
 - `evaluate_sdf_batch(...)`: public batched SDF entry point with optional output reuse and CUDA stream control.
 - `to_backend_dlpack(...)`: exports backend-native tensors for zero-copy exchange.
 
-The shared protocol and capability dataclass live in [ocmesher/backend_contract.py](ocmesher/backend_contract.py).
+The shared protocol and capability dataclass live in [ocmesher/backend_contract.py](https://github.com/princeton-vl/OcMesher/blob/main/ocmesher/backend_contract.py).
 
 ### Backend Options (Simple User API)
 
@@ -235,7 +242,7 @@ Notes:
 - Set `OCMESHER_TCH_ADAPTIVE_DEBUG=1` to print adaptive calibration/cache decisions (device, kernel, bucket, chosen route) for profiling and tuning.
 
 Relevant files:
-- [ocmesher/rust_backend.py](ocmesher/rust_backend.py)
-- [ocmesher-rust/Cargo.toml](ocmesher-rust/Cargo.toml)
-- [ocmesher-rust/crates/ocmesher-core/src/lib.rs](ocmesher-rust/crates/ocmesher-core/src/lib.rs)
-- [ocmesher-rust/crates/ocmesher-py/src/lib.rs](ocmesher-rust/crates/ocmesher-py/src/lib.rs)
+- [ocmesher/rust_backend.py](https://github.com/princeton-vl/OcMesher/blob/main/ocmesher/rust_backend.py)
+- [ocmesher-rust/Cargo.toml](https://github.com/princeton-vl/OcMesher/blob/main/ocmesher-rust/Cargo.toml)
+- [ocmesher-rust/crates/ocmesher-core/src/lib.rs](https://github.com/princeton-vl/OcMesher/blob/main/ocmesher-rust/crates/ocmesher-core/src/lib.rs)
+- [ocmesher-rust/crates/ocmesher-py/src/lib.rs](https://github.com/princeton-vl/OcMesher/blob/main/ocmesher-rust/crates/ocmesher-py/src/lib.rs)
