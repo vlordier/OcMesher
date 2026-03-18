@@ -14,7 +14,7 @@
 #   make fix        auto-fix lint + apply formatting
 #   make clean      remove compiled artifacts
 
-.PHONY: install test coverage lint format typecheck fix clean
+.PHONY: install test coverage lint format typecheck quality fix clean
 
 install:
 	uv sync
@@ -35,6 +35,11 @@ format:
 typecheck:
 	uv run ty check ocmesher/
 
+quality:
+	uv run ruff check .
+	uv run ty check ocmesher/
+	uv run python -m pytest tests/ -v --ignore=tests/cpp
+
 fix:
 	uv run ruff check . --fix
 	uv run ruff format .
@@ -43,4 +48,5 @@ clean:
 	rm -rf ocmesher/lib/
 	find . -type d -name __pycache__ -exec rm -rf {} + 2>/dev/null || true
 	find . -name "*.pyc" -delete 2>/dev/null || true
-	rm -rf .pytest_cache htmlcov .coverage
+	rm -rf .pytest_cache .mypy_cache .ruff_cache .pyright htmlcov .coverage
+	rm -f *.log *.tmp
