@@ -140,6 +140,9 @@ ignore = [
     "PLR0915",  # too-many-statements (__call__ orchestrates meshing)
     "PLR2004",  # magic value comparison (batch size thresholds)
 ]
+"ocmesher/factory.py" = [
+    "PLC0415",  # lazy backend imports avoid importing optional deps at module import
+]
 # benchmark script – standalone runner
 "benchmarks/run_benchmark.py" = [
     "SLF001",   # private member access (benchmarking internal methods)
@@ -266,7 +269,7 @@ filterwarnings = [
 
 [tool.coverage.run]
 source = ["ocmesher"]
-omit = ["tests/*"]
+omit = ["tests/*", "ocmesher/torch_core.py"]
 
 [tool.coverage.report]
 show_missing = true

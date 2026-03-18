@@ -8,8 +8,6 @@ from __future__ import annotations
 from typing import Any, Literal
 
 from .core import OcMesher
-from .rust_backend import make_rust_ocmesher
-from .torch_core import TorchOcMesher
 
 BackendName = Literal["cpp", "torch", "rust"]
 
@@ -39,14 +37,19 @@ def make_ocmesher(
 
     Raises:
         ValueError: If backend is not one of ``cpp``, ``torch``, or ``rust``.
+        ImportError: If the required backend module is not installed.
     """
     if backend == "cpp":
         return OcMesher(cameras, bounds, **kwargs)
 
     if backend == "torch":
+        from .torch_core import TorchOcMesher
+
         return TorchOcMesher(cameras, bounds, device=device, **kwargs)
 
     if backend == "rust":
+        from .rust_backend import make_rust_ocmesher
+
         if device is None:
             return make_rust_ocmesher(cameras, bounds, **kwargs)
         return make_rust_ocmesher(cameras, bounds, device=device, **kwargs)
