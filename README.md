@@ -102,7 +102,7 @@ For local performance and regression validation, use the Rust-native benchmark s
 
 ```bash
 cargo bench
-uv run python benchmarks/bench_rust_scene.py --runs 3 --snapshot-json benchmark_artifacts/bench_rust_scene_snapshot.json
+uv run python benchmarks/bench_rust_scene.py --runs 3 --snapshot-json benchmark_artifacts/generated/bench_rust_scene_snapshot.json
 ```
 
 To persist benchmark results with run metadata for later branch-to-branch comparison, use the output from `cargo bench` or custom Rust-native benchmarking tools.
@@ -113,11 +113,12 @@ branches:
 ```bash
 uv run python benchmarks/bench_python_overhead.py --compare old.json new.json
 uv run python benchmarks/bench_e2e.py --compare old.json new.json
-uv run python benchmarks/bench_rust_scene.py --compare benchmark_artifacts/bench_rust_scene_snapshot.json benchmark_artifacts/bench_rust_scene_mps_snapshot.json
+uv run python benchmarks/bench_rust_scene.py --compare benchmark_artifacts/generated/bench_rust_scene_snapshot.json benchmark_artifacts/generated/bench_rust_scene_mps_snapshot.json
 ```
 
 Notes:
 - Snapshot files include execution metadata such as branch, commit, Python version, platform, and command line.
+- Local run outputs should go under `benchmark_artifacts/generated/` (git-ignored) to keep `benchmark_artifacts/` snapshots tidy.
 - Optional runtime tiers such as `numba` and `mlx` are skipped automatically when their dependencies are not installed.
 - The MLX benchmark is a narrow SDF-only pilot on macOS, not a full mesher backend.
 - The Rust scene benchmark compares the compiled `extract_native_scene(...)` and `extract_tch_scene(...)` pilot paths on the same primitive list.

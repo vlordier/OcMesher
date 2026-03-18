@@ -39,6 +39,7 @@ env/
 lib/
 results/
 benchmark_results/
+benchmark_artifacts/generated/
 
 # Test / coverage artifacts
 .pytest_cache/

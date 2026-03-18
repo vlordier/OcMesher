@@ -13,10 +13,11 @@
 #   make typecheck  run ty static type checker
 #   make lint-rust  run Rust fmt + clippy baseline
 #   make lint-cpp   run C++ formatting/static-analysis checks when tools exist
+#   make bench-clean remove generated benchmark artifacts (keeps tracked snapshots)
 #   make fix        auto-fix lint + apply formatting
 #   make clean      remove compiled artifacts
 
-.PHONY: install test coverage lint lint-python lint-rust lint-cpp format typecheck quality fix clean
+.PHONY: install test coverage lint lint-python lint-rust lint-cpp format typecheck quality fix bench-clean clean
 
 install:
 	uv sync
@@ -68,9 +69,15 @@ fix:
 	uv run ruff check . --fix
 	uv run ruff format .
 
+bench-clean:
+	rm -rf benchmark_artifacts/generated
+	rm -rf benchmark_artifacts/legacy_root_results
+	rm -f benchmark_results*.json
+
 clean:
 	rm -rf ocmesher/lib/
 	find . -type d -name __pycache__ -exec rm -rf {} + 2>/dev/null || true
 	find . -name "*.pyc" -delete 2>/dev/null || true
 	rm -rf .pytest_cache .mypy_cache .ruff_cache .pyright htmlcov .coverage
+	$(MAKE) bench-clean
 	rm -f *.log *.tmp
