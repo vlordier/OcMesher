@@ -61,6 +61,7 @@ plugins:
 nav:
   - Home: index.md
   - Backends: backends.md
+  - Infinigen Quickstart: infinigen.md
   - API Reference: api.md
   - Changelog: changelog.md
   - Contributing: contributing.md

@@ -68,3 +68,5 @@ Notes:
   - `OCMESHER_TCH_ADAPTIVE_DEBUG=1`
 
 For complete setup, examples, and benchmark guidance, see the Home page and API reference.
+
+For pipeline-focused integration steps, see [Infinigen Integration Quickstart](infinigen.md).
