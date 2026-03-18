@@ -15,13 +15,9 @@ from typing import TYPE_CHECKING, Any, Protocol, cast
 import numpy as np
 
 from ._validation import (
-    validate_bounds as _shared_validate_bounds,
-)
-from ._validation import (
-    validate_cameras as _shared_validate_cameras,
-)
-from ._validation import (
-    validate_kernels as _shared_validate_kernels,
+    validate_bounds,
+    validate_cameras,
+    validate_kernels,
 )
 
 if TYPE_CHECKING:
@@ -59,32 +55,6 @@ def _extract_sdf(output: Any) -> np.ndarray[Any, Any]:
         msg = "kernel output dict must contain 'sdf' or 'SDF'"
         raise KeyError(msg)
     return np.asarray(output)
-
-
-def _validate_cameras(
-    cameras: Sequence[Any],
-) -> tuple[
-    list[np.ndarray[Any, Any]],
-    list[np.ndarray[Any, Any]],
-    list[int],
-    list[int],
-]:
-    cam_poses_raw, ks_raw, hs_raw, ws_raw = _shared_validate_cameras(
-        cast("CamerasTuple", cameras)
-    )
-    cam_poses = [np.asarray(p, dtype=np.float64) for p in cam_poses_raw]
-    ks = [np.asarray(k, dtype=np.float64) for k in ks_raw]
-    hs = [int(h) for h in hs_raw]
-    ws = [int(w) for w in ws_raw]
-    return cam_poses, ks, hs, ws
-
-
-def _validate_bounds(bounds: Any) -> np.ndarray[Any, Any]:
-    return _shared_validate_bounds(bounds)
-
-
-def _validate_kernels(kernels: Sequence[Any]) -> None:
-    _shared_validate_kernels(kernels)
 
 
 def build_batched_sdf_kernels(
@@ -255,9 +225,9 @@ class RustOcMesher:
         backend: RustBackendProtocol | None = None,
     ):
         """Create a Rust-backed mesher with OcMesher-compatible arguments."""
-        cam_poses, ks, hs, ws = _validate_cameras(cameras)
+        cam_poses, ks, hs, ws = validate_cameras(cast("CamerasTuple", cameras))
         self.cameras = (cam_poses, ks, hs, ws)
-        self.bounds = _validate_bounds(bounds)
+        self.bounds = validate_bounds(bounds)
 
         self.pixels_per_cube = pixels_per_cube
         self.inv_scale = inv_scale
@@ -336,7 +306,7 @@ class RustOcMesher:
 
     def __call__(self, kernels: Sequence[Any]) -> tuple[Any, Any]:
         """Execute extraction via configured Rust backend bridge."""
-        _validate_kernels(kernels)
+        validate_kernels(kernels)
         if self._backend is None:
             msg = (
                 "Rust backend bridge is not configured. Provide backend=... when "
