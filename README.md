@@ -177,6 +177,30 @@ Current contract surface:
 
 The shared protocol and capability dataclass live in [ocmesher/backend_contract.py](ocmesher/backend_contract.py).
 
+### Backend Options (Simple User API)
+
+Use `ocmesher.make_ocmesher(...)` to pick a backend explicitly:
+
+```python
+from ocmesher import make_ocmesher
+
+# Original C++ backend
+mesher_cpp = make_ocmesher(cameras, bounds, backend="cpp")
+
+# PyTorch backend on CPU or MPS
+mesher_torch_cpu = make_ocmesher(cameras, bounds, backend="torch", device="cpu")
+mesher_torch_mps = make_ocmesher(cameras, bounds, backend="torch", device="mps")
+
+# Rust wrapper backend with tch kernels
+mesher_rust_cpu = make_ocmesher(cameras, bounds, backend="rust", device="cpu")
+mesher_rust_mps = make_ocmesher(cameras, bounds, backend="rust", device="mps")
+```
+
+Backend selection notes:
+- `backend="cpp"`: best baseline for parity with the original OcMesher behavior.
+- `backend="torch"`: full PyTorch implementation (`TorchOcMesher`).
+- `backend="rust"`: Rust wrapper path (`make_rust_ocmesher`) with native/tch acceleration paths.
+
 ### Rust Backend
 
 The repo now also carries a Rust integration workspace based on the
