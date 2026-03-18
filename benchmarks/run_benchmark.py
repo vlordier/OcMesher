@@ -24,8 +24,8 @@ from pathlib import Path
 from typing import TypeAlias
 
 import numpy as np
-import psutil
-import vnoise
+import psutil  # type: ignore[import-untyped]
+import vnoise  # type: ignore[import-untyped]
 
 logger = logging.getLogger(__name__)
 

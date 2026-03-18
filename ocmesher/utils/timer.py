@@ -13,7 +13,7 @@ from time import perf_counter_ns
 from types import TracebackType
 from typing import Iterator, Self
 
-import psutil
+import psutil  # type: ignore[import-untyped]
 
 logger = logging.getLogger(__name__)
 

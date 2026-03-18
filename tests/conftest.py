@@ -36,7 +36,7 @@ def torch_device(request):
 def torch_mesher_factory(sample_bounds):
     """Factory for creating TorchOcMesher instances in tests."""
 
-    from ocmesher.torch_core import TorchOcMesher
+    from ocmesher.torch_core import TorchOcMesher  # type: ignore[import-not-found]
 
     created_meshers = []
 

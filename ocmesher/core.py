@@ -12,10 +12,10 @@ import os
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 
-import gin
+import gin  # type: ignore[import-untyped]
 import numpy as np
 import trimesh
-from tqdm import tqdm
+from tqdm import tqdm  # type: ignore[import-untyped]
 
 from .utils.interface import (
     POINTER,
@@ -33,6 +33,8 @@ from .utils.interface import (
 from .utils.timer import Timer
 
 logger = logging.getLogger(__name__)
+
+__all__ = ["OcMesher", "CAMERA_DATA_STRIDE", "_SDF_BATCH_SIZE", "_validate_cameras", "_validate_bounds", "_validate_kernels"]
 
 CAMERA_DATA_STRIDE = 23
 
@@ -92,6 +94,14 @@ def _validate_cameras(cameras):
     for i, k in enumerate(Ks):
         if k.shape != (3, 3):
             msg = f"Ks[{i}] must be a 3x3 matrix, got shape {k.shape}"
+            raise ValueError(msg)
+    for i, h in enumerate(Hs):
+        if not isinstance(h, int) or h <= 0:
+            msg = f"Hs[{i}] must be a positive integer"
+            raise ValueError(msg)
+    for i, w in enumerate(Ws):
+        if not isinstance(w, int) or w <= 0:
+            msg = f"Ws[{i}] must be a positive integer"
             raise ValueError(msg)
     return cam_poses, Ks, Hs, Ws
 

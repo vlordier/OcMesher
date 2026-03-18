@@ -128,7 +128,7 @@ class TestValidationModule:
 
     def test_core_reexports_validation(self):
         """core.py must re-export validators so existing code still works."""
-        from ocmesher.core import _validate_bounds, _validate_cameras, _validate_kernels
+        from ocmesher.core import _validate_bounds, _validate_cameras, _validate_kernels  # type: ignore[import-not-found]
 
         assert callable(_validate_cameras)
         assert callable(_validate_bounds)
@@ -172,7 +172,7 @@ class TestConstantsModule:
     def test_core_imports_stride(self):
         """CAMERA_DATA_STRIDE re-exported from core must match _constants."""
         from ocmesher._constants import CAMERA_DATA_STRIDE as CONST_STRIDE
-        from ocmesher.core import CAMERA_DATA_STRIDE as CORE_STRIDE
+        from ocmesher.core import CAMERA_DATA_STRIDE as CORE_STRIDE  # type: ignore[import-not-found]
 
         assert CORE_STRIDE == CONST_STRIDE
 

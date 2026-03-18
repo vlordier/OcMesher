@@ -41,6 +41,8 @@ from .utils.timer import Timer
 
 logger = logging.getLogger(__name__)
 
+__all__ = ["TorchOcMesher"]
+
 
 def _mps_available() -> bool:
     """Return True if MPS (Apple Silicon GPU) backend is available."""

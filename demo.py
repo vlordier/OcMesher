@@ -11,9 +11,9 @@ Outputs the resulting mesh to ``results/demo.obj``.
 from pathlib import Path
 
 import numpy as np
-import vnoise
+import vnoise  # type: ignore[import-untyped]
 
-from ocmesher import OcMesher
+from ocmesher import OcMesher  # type: ignore[attr-defined]
 
 noise = vnoise.Noise()
 

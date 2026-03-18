@@ -1,0 +1,24 @@
+{
+  "$schema": "https://raw.githubusercontent.com/microsoft/pyright/main/packages/pyright/schema/pyrightconfig.schema.json",
+  "include": [
+    "ocmesher",
+    "benchmarks",
+    "tests",
+    "demo.py"
+  ],
+  "exclude": [
+    "ocmesher/source",
+    "ocmesher-rust",
+    "site",
+    "results",
+    "benchmark_artifacts",
+    "**/__pycache__"
+  ],
+  "extraPaths": [
+    "."
+  ],
+  "reportMissingImports": "error",
+  "reportMissingTypeStubs": "none",
+  "venvPath": ".",
+  "venv": ".venv"
+}

@@ -13,7 +13,7 @@ import pytest
 torch = pytest.importorskip("torch", reason="torch not installed")
 
 from ocmesher._validation import out_of_bounds_mask, preprocess_cameras
-from ocmesher.torch_core import TorchOcMesher
+from ocmesher.torch_core import TorchOcMesher  # type: ignore[import-not-found]
 
 
 # ---------------------------------------------------------------------------
@@ -109,7 +109,7 @@ class TestOutOfBoundsMask:
 
     def test_matches_core_static_method(self, sample_bounds):
         """Shared helper must match OcMesher._out_of_bounds_mask exactly."""
-        from ocmesher.core import OcMesher
+        from ocmesher.core import OcMesher  # type: ignore[import-not-found]
 
         rng = np.random.default_rng(42)
         xyz = rng.uniform(-10, 10, (100, 3))

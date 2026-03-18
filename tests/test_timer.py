@@ -7,7 +7,7 @@ import time
 from datetime import timedelta
 from unittest.mock import patch
 
-import psutil
+import psutil  # type: ignore[import-untyped]
 import pytest
 
 from ocmesher.utils.timer import PhaseTracker, Timer

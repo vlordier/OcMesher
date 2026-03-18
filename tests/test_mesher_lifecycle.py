@@ -8,7 +8,7 @@ from unittest.mock import MagicMock, patch
 import numpy as np
 import pytest
 
-from ocmesher.core import (
+from ocmesher.core import (  # type: ignore[import-not-found]
     _SDF_BATCH_SIZE,
     CAMERA_DATA_STRIDE,
     OcMesher,

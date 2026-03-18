@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from typing import Any, cast
+
 import numpy as np
 import pytest
 
@@ -276,7 +278,7 @@ class TestValidateMesherParams:
     )
     def test_zero_rejected_for_positive_params(self, param: str):
         with pytest.raises(ValueError, match=f"{param} must be > 0"):
-            validate_mesher_params(**{**_VALID_PARAMS, param: 0})
+            validate_mesher_params(**cast(Any, {**_VALID_PARAMS, param: 0}))
 
     @pytest.mark.parametrize(
         "param",
@@ -291,7 +293,7 @@ class TestValidateMesherParams:
     )
     def test_negative_rejected_for_positive_params(self, param: str):
         with pytest.raises(ValueError, match=f"{param} must be > 0"):
-            validate_mesher_params(**{**_VALID_PARAMS, param: -1})
+            validate_mesher_params(**cast(Any, {**_VALID_PARAMS, param: -1}))
 
     def test_negative_visible_relax_iter_rejected(self):
         with pytest.raises(ValueError, match="visible_relax_iter must be >= 0"):
