@@ -10,12 +10,24 @@ compatible with Infinigen's runtime backend loading.
 from __future__ import annotations
 
 import sys
-from typing import TYPE_CHECKING, Any, Protocol
+from typing import TYPE_CHECKING, Any, Protocol, cast
 
 import numpy as np
 
+from ._validation import (
+    validate_bounds as _shared_validate_bounds,
+)
+from ._validation import (
+    validate_cameras as _shared_validate_cameras,
+)
+from ._validation import (
+    validate_kernels as _shared_validate_kernels,
+)
+
 if TYPE_CHECKING:
     from collections.abc import Callable, Sequence
+
+    from ._types import CamerasTuple
 
 
 RESULT_ARITY = 2
@@ -57,57 +69,22 @@ def _validate_cameras(
     list[int],
     list[int],
 ]:
-    if not isinstance(cameras, (tuple, list)) or len(cameras) != 4:
-        msg = "cameras must be a tuple/list of (cam_poses, Ks, Hs, Ws)"
-        raise ValueError(msg)
-    cam_poses_raw, ks_raw, hs_raw, ws_raw = cameras
-    if len(cam_poses_raw) == 0:
-        msg = "At least one camera is required"
-        raise ValueError(msg)
-    if not (len(cam_poses_raw) == len(ks_raw) == len(hs_raw) == len(ws_raw)):
-        msg = "Camera arrays must all have the same length"
-        raise ValueError(msg)
-
+    cam_poses_raw, ks_raw, hs_raw, ws_raw = _shared_validate_cameras(
+        cast("CamerasTuple", cameras)
+    )
     cam_poses = [np.asarray(p, dtype=np.float64) for p in cam_poses_raw]
     ks = [np.asarray(k, dtype=np.float64) for k in ks_raw]
     hs = [int(h) for h in hs_raw]
     ws = [int(w) for w in ws_raw]
-
-    for i, pose in enumerate(cam_poses):
-        if pose.shape != (4, 4):
-            msg = f"cam_poses[{i}] must be 4x4, got shape {pose.shape}"
-            raise ValueError(msg)
-    for i, k in enumerate(ks):
-        if k.shape != (3, 3):
-            msg = f"Ks[{i}] must be 3x3, got shape {k.shape}"
-            raise ValueError(msg)
-
     return cam_poses, ks, hs, ws
 
 
 def _validate_bounds(bounds: Any) -> np.ndarray[Any, Any]:
-    bounds_np = np.asarray(bounds, dtype=np.float64)
-    if bounds_np.shape != (6,):
-        msg = "bounds must have 6 elements [x_min, x_max, y_min, y_max, z_min, z_max]"
-        raise ValueError(msg)
-    if not np.all(np.isfinite(bounds_np)):
-        msg = "bounds must contain finite values"
-        raise ValueError(msg)
-    for axis in range(3):
-        if bounds_np[axis * 2] >= bounds_np[axis * 2 + 1]:
-            msg = "bounds min must be less than max on each axis"
-            raise ValueError(msg)
-    return bounds_np
+    return _shared_validate_bounds(bounds)
 
 
 def _validate_kernels(kernels: Sequence[Any]) -> None:
-    if not isinstance(kernels, (list, tuple)) or len(kernels) == 0:
-        msg = "kernels must be a non-empty list/tuple of callables"
-        raise ValueError(msg)
-    for i, kernel in enumerate(kernels):
-        if not callable(kernel):
-            msg = f"kernels[{i}] must be callable"
-            raise TypeError(msg)
+    _shared_validate_kernels(kernels)
 
 
 def build_batched_sdf_kernels(

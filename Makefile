@@ -34,7 +34,8 @@ lint:
 
 lint-python:
 	uv run ruff check .
-	@~/.local/bin/ty check ocmesher/ 2>&1 | grep -q "^error\[" && exit 1 || true
+	@TY_OUT="$$(~/.local/bin/ty check ocmesher/ 2>&1 || true)"; \
+	echo "$$TY_OUT" | grep -q "^error\[" && { echo "$$TY_OUT"; exit 1; } || true
 
 lint-rust:
 	cd ocmesher-rust && cargo fmt --all --check
