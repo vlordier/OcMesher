@@ -128,7 +128,11 @@ class TestValidationModule:
 
     def test_core_reexports_validation(self):
         """core.py must re-export validators so existing code still works."""
-        from ocmesher.core import _validate_bounds, _validate_cameras, _validate_kernels  # type: ignore[import-not-found]
+        from ocmesher.core import (  # type: ignore[import-not-found]
+            _validate_bounds,
+            _validate_cameras,
+            _validate_kernels,
+        )
 
         assert callable(_validate_cameras)
         assert callable(_validate_bounds)

@@ -57,7 +57,7 @@ def _validate_cameras(
     list[int],
     list[int],
 ]:
-    if not isinstance(cameras, (tuple, list)) or len(cameras) != 4:  # noqa: PLR2004
+    if not isinstance(cameras, (tuple, list)) or len(cameras) != 4:
         msg = "cameras must be a tuple/list of (cam_poses, Ks, Hs, Ws)"
         raise ValueError(msg)
     cam_poses_raw, ks_raw, hs_raw, ws_raw = cameras
@@ -116,7 +116,6 @@ def build_batched_sdf_kernels(
     batch_size: int | None = None,
 ) -> list[Callable[[np.ndarray[Any, Any]], np.ndarray[Any, Any]]]:
     """Build SDF callables that prefer ``evaluate_batch`` when available."""
-
     effective_batch_size = int(batch_size) if batch_size is not None else 0
 
     def _evaluate_batched(

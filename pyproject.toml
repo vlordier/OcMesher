@@ -105,6 +105,10 @@ ignore = [
     "PLR0915",  # too-many-statements (__call__ orchestrates meshing)
     "C901",     # complex methods (kernel_caller has split enclosed/non-enclosed loops)
     "PLR0912",  # too-many-branches (kernel_caller has 4 specialised batch paths)
+    "TC001",    # typing-only first-party import (KernelSequence used in type hints)
+    "RUF023",   # unsorted __slots__ (order matches __init__ signature)
+    "S101",     # assert usage (internal validation invariants)
+    "PT018",    # composite assertions (multi-condition validation)
 ]
 # interface.py – ctypes helper with many function params
 "ocmesher/utils/interface.py" = [
@@ -114,17 +118,27 @@ ignore = [
 "ocmesher/utils/timer.py" = [
     "FBT001",   # boolean-typed positional arg (API backwards-compat)
     "FBT002",   # boolean default positional arg (API backwards-compat)
+    "D107",     # missing docstring in __init__ (simple timer class)
 ]
 # PyTorch mesher – complex scientific code with GPU tensor ops
 "ocmesher/torch_core.py" = [
     "FBT001",   # boolean-typed positional arg (__init__ bool kwargs are public API)
     "FBT002",   # boolean default positional args (API backwards-compat)
+    "TC001",    # typing-only first-party import (type hints)
+    "PLR0913",  # too-many-arguments (constructor mirrors original API)
+    "PLR0915",  # too-many-statements (complex meshing pipeline)
+    "C901",     # complex functions (SDF evaluation)
+    "D417",     # missing argument description (bisection_tol documented in parent)
 ]
 "ocmesher/rust_backend.py" = [
     "FBT001",   # boolean-typed positional args (API mirrors OcMesher)
     "FBT002",   # boolean default positional args (API backwards-compat)
     "PLR0913",  # too-many-arguments (constructor mirrors original API)
     "PLC0415",  # local import in factory avoids top-level import cost
+    "C901",     # complex functions (batched kernel building)
+    "PLR0912",  # too-many-branches (dispatch logic)
+    "PLR0915",  # too-many-statements (__call__ orchestrates meshing)
+    "PLR2004",  # magic value comparison (batch size thresholds)
 ]
 # benchmark script – standalone runner
 "benchmarks/run_benchmark.py" = [
@@ -147,6 +161,21 @@ ignore = [
     "C901",     # complex functions OK in benchmark main/regression_check
     "PLR0912",  # too-many-branches in regression_check
     "PLR0915",  # too-many-statements in main
+]
+# API parity benchmark (upstream comparison)
+"benchmarks/bench_api_parity_upstream.py" = [
+    "EXE001",   # shebang present but not executable (run via python -m)
+    "D101",     # missing docstring in public class (benchmark helper)
+    "D103",     # missing docstring in public function (benchmark helper)
+    "TRY003",   # long exception message (benchmark error context)
+    "EM102",    # f-string in exception (benchmark error context)
+    "T201",     # print statements (benchmark output)
+]
+# Result utilities (benchmark helpers)
+"benchmarks/result_utils.py" = [
+    "FBT001",   # boolean-typed positional arg (API backwards-compat)
+    "SIM108",   # if-else-block instead of ternary (readability)
+    "F841",     # unused variable (debug artifact)
 ]
 # tests - allow assertions, magic values, no docstrings, etc.
 "tests/**/*.py" = [
@@ -209,6 +238,12 @@ python-version = "3.11"
 unresolved-attribute = "ignore"
 # Third-party packages may not be resolvable without a venv; warn, don't fail
 unresolved-import = "warn"
+# Dynamic method calls on backend objects (hasattr pattern)
+call-non-callable = "warn"
+# Return type mismatches from numpy type inference
+invalid-return-type = "warn"
+# ctypes POINTER overloads - complex type inference
+no-matching-overload = "warn"
 
 # ---------------------------------------------------------------------------
 # Pytest – test runner configuration

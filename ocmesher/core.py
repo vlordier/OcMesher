@@ -13,10 +13,10 @@ from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 from typing import Any
 
-import gin  # type: ignore[import-untyped]
+import gin
 import numpy as np
 import trimesh
-from tqdm import tqdm  # type: ignore[import-untyped]
+from tqdm import tqdm
 
 from ._types import KernelSequence
 from ._validation import validate_mesher_params
@@ -37,7 +37,7 @@ from .utils.timer import Timer
 
 logger = logging.getLogger(__name__)
 
-__all__ = ["OcMesher", "CAMERA_DATA_STRIDE", "_SDF_BATCH_SIZE", "_validate_cameras", "_validate_bounds", "_validate_kernels"]
+__all__ = ["CAMERA_DATA_STRIDE", "_SDF_BATCH_SIZE", "OcMesher", "_validate_bounds", "_validate_cameras", "_validate_kernels"]
 
 CAMERA_DATA_STRIDE = 23
 
@@ -592,43 +592,42 @@ class OcMesher:
                         msg = f"kernels[0] returned shape {sdf.shape} for {n} query points; expected ({n},)"
                         raise ValueError(msg)
                     result[i:end, 0] = sdf
+        # ---- Multi-kernel path: dispatch via persistent thread pool ----
+        # Uses pool.submit directly instead of pool.map with a closure
+        # factory, eliminating per-batch function object + closure dict
+        # construction overhead.
+        elif n_XYZ <= min(_batch, _SERIAL_MULTI_KERNEL_MAX):
+            # Single-batch path: avoid creating the persistent pool.
+            XYZ = XYZ_all
+            n = n_XYZ
+            for k_idx, kernel in enumerate(kernels):
+                raw = kernel(XYZ)
+                sdf = raw if _isinstance(raw, _ndarray) else _asarray(raw)
+                if sdf.shape != (n,):
+                    msg = f"kernels[{k_idx}] returned shape {sdf.shape} for {n} query points; expected ({n},)"
+                    raise ValueError(msg)
+                result[:, k_idx] = sdf
+            if _enclosed:
+                result[_mask_into(XYZ, _b_min, _b_max)] = 1
         else:
-            # ---- Multi-kernel path: dispatch via persistent thread pool ----
-            # Uses pool.submit directly instead of pool.map with a closure
-            # factory, eliminating per-batch function object + closure dict
-            # construction overhead.
-            if n_XYZ <= min(_batch, _SERIAL_MULTI_KERNEL_MAX):
-                # Single-batch path: avoid creating the persistent pool.
-                XYZ = XYZ_all
-                n = n_XYZ
-                for k_idx, kernel in enumerate(kernels):
-                    raw = kernel(XYZ)
+            pool = self._get_pool(n_kernels)
+            _submit = pool.submit
+
+            for i in range(0, n_XYZ, _batch):
+                end = _min(i + _batch, n_XYZ)
+                XYZ = XYZ_all[i:end]
+                n = end - i
+                futures = [_submit(k, XYZ) for k in kernels]
+                batch_slice = result[i:end]
+                for k_idx, fut in enumerate(futures):
+                    raw = fut.result()
                     sdf = raw if _isinstance(raw, _ndarray) else _asarray(raw)
                     if sdf.shape != (n,):
                         msg = f"kernels[{k_idx}] returned shape {sdf.shape} for {n} query points; expected ({n},)"
                         raise ValueError(msg)
-                    result[:, k_idx] = sdf
+                    batch_slice[:, k_idx] = sdf
                 if _enclosed:
-                    result[_mask_into(XYZ, _b_min, _b_max)] = 1
-            else:
-                pool = self._get_pool(n_kernels)
-                _submit = pool.submit
-
-                for i in range(0, n_XYZ, _batch):
-                    end = _min(i + _batch, n_XYZ)
-                    XYZ = XYZ_all[i:end]
-                    n = end - i
-                    futures = [_submit(k, XYZ) for k in kernels]
-                    batch_slice = result[i:end]
-                    for k_idx, fut in enumerate(futures):
-                        raw = fut.result()
-                        sdf = raw if _isinstance(raw, _ndarray) else _asarray(raw)
-                        if sdf.shape != (n,):
-                            msg = f"kernels[{k_idx}] returned shape {sdf.shape} for {n} query points; expected ({n},)"
-                            raise ValueError(msg)
-                        batch_slice[:, k_idx] = sdf
-                    if _enclosed:
-                        batch_slice[_mask_into(XYZ, _b_min, _b_max)] = 1
+                    batch_slice[_mask_into(XYZ, _b_min, _b_max)] = 1
 
         return result
 

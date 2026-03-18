@@ -7,13 +7,14 @@
 
 import logging
 import os
+from collections.abc import Iterator
 from contextlib import contextmanager
 from datetime import UTC, datetime, timedelta
 from time import perf_counter_ns
 from types import TracebackType
-from typing import Iterator, Self
+from typing import Self
 
-import psutil  # type: ignore[import-untyped]
+import psutil
 
 logger = logging.getLogger(__name__)
 

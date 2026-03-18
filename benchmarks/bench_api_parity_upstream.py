@@ -21,14 +21,12 @@ from __future__ import annotations
 import argparse
 import json
 import shutil
-import statistics
 import subprocess
 import sys
 import tempfile
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
-
 
 GIT_BIN = shutil.which("git") or "git"
 SH_BIN = "/bin/sh"
@@ -118,7 +116,7 @@ def ensure_rust_extension(repo_path: Path, python_exe: str) -> CmdResult:
     )
 
 
-API_SNAPSHOT_SCRIPT = r'''
+API_SNAPSHOT_SCRIPT = r"""
 import inspect, json
 
 payload = {
@@ -185,10 +183,10 @@ for name in symbol_names:
     payload["symbols"][name] = entry
 
 print(json.dumps(payload, sort_keys=True))
-'''
+"""
 
 
-BEHAVIOR_SNAPSHOT_SCRIPT = r'''
+BEHAVIOR_SNAPSHOT_SCRIPT = r"""
 import json, statistics, time
 import numpy as np
 
@@ -293,7 +291,7 @@ except Exception as exc:
     payload["errors"].append(f"Rust wrapper benchmark unavailable: {exc!r}")
 
 print(json.dumps(payload, sort_keys=True))
-'''
+"""
 
 
 def gather_repo_snapshot(repo_path: Path, python_exe: str) -> dict:
