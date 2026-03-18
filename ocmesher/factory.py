@@ -5,18 +5,16 @@
 
 from __future__ import annotations
 
-from typing import Any, Literal
+from typing import Any
 
 from .core import OcMesher
-
-BackendName = Literal["cpp", "torch", "rust"]
 
 
 def make_ocmesher(
     cameras: Any,
     bounds: Any,
     *,
-    backend: BackendName = "cpp",
+    backend: str = "cpp",
     device: str | None = None,
     **kwargs: Any,
 ):

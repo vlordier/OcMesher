@@ -4,12 +4,8 @@ from __future__ import annotations
 
 import sys
 import types
-from typing import TYPE_CHECKING
 
 import pytest
-
-if TYPE_CHECKING:
-    from ocmesher.factory import BackendName
 
 
 def _sample_inputs(sample_camera_pose, sample_intrinsics):
@@ -146,13 +142,3 @@ class TestMakeOcMesherRustBackend:
         factory.make_ocmesher(cameras, bounds, backend="rust", coarse_count=123)
 
         assert calls[-1] == {"coarse_count": 123}
-
-
-class TestBackendNameType:
-    """Sanity-check literal values used by static typing."""
-
-    def test_backend_name_values(self):
-        valid: BackendName = "cpp"
-        valid = "torch"
-        valid = "rust"
-        assert valid == "rust"
