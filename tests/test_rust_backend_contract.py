@@ -177,6 +177,18 @@ def test_rust_ocmesher_prefers_tch_scene_on_cuda_indexed_device(sample_cameras, 
     assert backend.last_calls[-1][3] == "cuda:0"
 
 
+def test_rust_ocmesher_normalizes_cuda_device_input(sample_cameras, sample_bounds, sphere_kernel):
+    backend = DummyRustBackendWithScenes()
+    mesher = RustOcMesher(sample_cameras, sample_bounds, backend=backend, device=" CUDA:00 ")
+
+    meshes, tags = mesher([sphere_kernel])
+
+    assert meshes == ["mesh"]
+    assert len(tags) == 1
+    assert mesher.device == "cuda:0"
+    assert backend.last_calls[-1][3] == "cuda:0"
+
+
 def test_rust_ocmesher_prefers_native_scene_on_cpu(sample_cameras, sample_bounds, sphere_kernel):
     backend = DummyRustBackendWithScenes()
     mesher = RustOcMesher(sample_cameras, sample_bounds, backend=backend, device="cpu")
@@ -219,6 +231,16 @@ def test_rust_ocmesher_rejects_invalid_kernel_runtime(sample_cameras, sample_bou
             sample_bounds,
             backend=DummyRustBackend(),
             kernel_runtime="bad",
+        )
+
+
+def test_rust_ocmesher_rejects_invalid_device_string(sample_cameras, sample_bounds):
+    with pytest.raises(ValueError, match="device must be one of"):
+        RustOcMesher(
+            sample_cameras,
+            sample_bounds,
+            backend=DummyRustBackend(),
+            device="gpu",
         )
 
 
@@ -306,6 +328,17 @@ def test_stream_policy_auto_preserved_on_cuda_indexed_device(sample_cameras, sam
         backend=DummyRustBackend(),
     )
     assert mesher.stream_policy == "auto"
+
+
+def test_rust_ocmesher_rejects_invalid_stream_policy(sample_cameras, sample_bounds):
+    with pytest.raises(ValueError, match="stream_policy must be one of"):
+        RustOcMesher(
+            sample_cameras,
+            sample_bounds,
+            device="cpu",
+            stream_policy="async",
+            backend=DummyRustBackend(),
+        )
 
 
 def test_rust_ocmesher_default_device_prefers_cuda(sample_cameras, sample_bounds):
@@ -450,6 +483,61 @@ def test_make_rust_ocmesher_forwards_kernel_runtime_to_wrapper(sample_cameras, s
 
     assert isinstance(mesher, RustOcMesher)
     assert mesher.kernel_runtime == "tch"
+
+
+def test_make_rust_ocmesher_rejects_invalid_kernel_runtime_before_backend_init(
+    sample_cameras,
+    sample_bounds,
+):
+    mock_ext = MagicMock()
+    mock_ext.find_core_so.return_value = "/fake/core.so"
+
+    with patch.dict(sys.modules, {"ocmesher_rust": mock_ext}), pytest.raises(
+        ValueError,
+        match="kernel_runtime must be one of",
+    ):
+        make_rust_ocmesher(sample_cameras, sample_bounds, kernel_runtime="invalid")
+
+    mock_ext.Backend.assert_not_called()
+
+
+def test_make_rust_ocmesher_rejects_non_string_kernel_runtime(sample_cameras, sample_bounds):
+    mock_ext = MagicMock()
+    mock_ext.find_core_so.return_value = "/fake/core.so"
+
+    with patch.dict(sys.modules, {"ocmesher_rust": mock_ext}), pytest.raises(
+        TypeError,
+        match="kernel_runtime must be a string",
+    ):
+        make_rust_ocmesher(sample_cameras, sample_bounds, kernel_runtime=1)
+
+    mock_ext.Backend.assert_not_called()
+
+
+def test_make_rust_ocmesher_rejects_invalid_device_before_backend_init(sample_cameras, sample_bounds):
+    mock_ext = MagicMock()
+    mock_ext.find_core_so.return_value = "/fake/core.so"
+
+    with patch.dict(sys.modules, {"ocmesher_rust": mock_ext}), pytest.raises(
+        ValueError,
+        match="device must be one of",
+    ):
+        make_rust_ocmesher(sample_cameras, sample_bounds, device="gpu")
+
+    mock_ext.Backend.assert_not_called()
+
+
+def test_make_rust_ocmesher_normalizes_device_before_wrapper(sample_cameras, sample_bounds):
+    mock_backend = DummyRustBackend()
+    mock_ext = MagicMock()
+    mock_ext.find_core_so.return_value = "/fake/core.so"
+    mock_ext.Backend.return_value = mock_backend
+
+    with patch.dict(sys.modules, {"ocmesher_rust": mock_ext}):
+        mesher = make_rust_ocmesher(sample_cameras, sample_bounds, device=" CUDA:00 ")
+
+    assert isinstance(mesher, RustOcMesher)
+    assert mesher.device == "cuda:0"
 
 
 def test_make_rust_ocmesher_exported_from_package():

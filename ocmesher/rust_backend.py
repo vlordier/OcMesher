@@ -29,6 +29,25 @@ if TYPE_CHECKING:
 RESULT_ARITY = 2
 
 
+def _normalize_rust_device(device: str) -> str:
+    normalized = device.strip().lower()
+    if normalized in {"cpu", "mps", "cuda"}:
+        return normalized
+    if normalized.startswith("cuda:"):
+        suffix = normalized.split(":", maxsplit=1)[1]
+        if suffix.isdigit():
+            return f"cuda:{int(suffix)}"
+    msg = "device must be one of: 'cpu', 'mps', 'cuda', or 'cuda:<index>'"
+    raise ValueError(msg)
+
+
+def _validate_kernel_runtime(kernel_runtime: str) -> str:
+    if kernel_runtime not in {"auto", "native", "tch"}:
+        msg = "kernel_runtime must be one of: 'auto', 'native', 'tch'"
+        raise ValueError(msg)
+    return kernel_runtime
+
+
 def _device_family(device: str) -> str:
     normalized = device.strip().lower()
     if normalized.startswith("cuda"):
@@ -259,7 +278,7 @@ class RustOcMesher:
             else:
                 self.device = "cpu"
         else:
-            self.device = device
+            self.device = _normalize_rust_device(device)
         self._device_family = _device_family(self.device)
 
         self.dtype: str | None
@@ -281,11 +300,11 @@ class RustOcMesher:
             self.stream_policy = "sync"
         else:
             self.stream_policy = stream_policy
-        self.use_primitive_inference = use_primitive_inference
-        if kernel_runtime not in {"auto", "native", "tch"}:
-            msg = "kernel_runtime must be one of: 'auto', 'native', 'tch'"
+        if self.stream_policy not in {"sync", "auto"}:
+            msg = "stream_policy must be one of: 'sync', 'auto'"
             raise ValueError(msg)
-        self.kernel_runtime = kernel_runtime
+        self.use_primitive_inference = use_primitive_inference
+        self.kernel_runtime = _validate_kernel_runtime(kernel_runtime)
 
         self._device_caps = caps
         self._backend = backend
@@ -458,10 +477,25 @@ def make_rust_ocmesher(
         "sdf_batch_size",
         "stream_policy",
         "use_primitive_inference",
-            "kernel_runtime",
+        "kernel_runtime",
     }
     backend_kwargs = {k: v for k, v in kwargs.items() if k not in rust_ocmesher_only}
     wrapper_kwargs = {k: v for k, v in kwargs.items() if k in rust_ocmesher_only}
+
+    # Fail fast on invalid wrapper device strings before constructing the backend.
+    device = wrapper_kwargs.get("device")
+    if device is not None:
+        if not isinstance(device, str):
+            msg = "device must be a string"
+            raise TypeError(msg)
+        wrapper_kwargs["device"] = _normalize_rust_device(device)
+
+    kernel_runtime = wrapper_kwargs.get("kernel_runtime")
+    if kernel_runtime is not None:
+        if not isinstance(kernel_runtime, str):
+            msg = "kernel_runtime must be a string"
+            raise TypeError(msg)
+        wrapper_kwargs["kernel_runtime"] = _validate_kernel_runtime(kernel_runtime)
 
     # Keep backend defaults aligned with RustOcMesher/OcMesher-compatible defaults.
     backend_defaults = {

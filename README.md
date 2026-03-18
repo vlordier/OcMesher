@@ -228,6 +228,8 @@ Backend selection notes:
 - `backend="cpp"`: best baseline for parity with the original OcMesher behavior.
 - `backend="torch"`: full PyTorch implementation (`TorchOcMesher`).
 - `backend="rust"`: Rust wrapper path (`make_rust_ocmesher`) with native/tch acceleration paths.
+- `device` for `backend="rust"`: `"cpu"`, `"mps"`, `"cuda"`, or `"cuda:<index>"`.
+- `stream_policy` for `backend="rust"`: `"sync"` or `"auto"` (`"auto"` falls back to `"sync"` on CPU).
 - `kernel_runtime`: Rust wrapper kernel selection policy.
     - `"auto"` (default): prefers `tch` on `mps/cuda`, native kernels on `cpu`.
     - `"native"`: always use native Rust kernels when primitive-scene paths are available.
@@ -265,8 +267,7 @@ Typical pipeline timing on Apple M4 Pro with `device="mps"`:
 
 ### Rust Backend
 
-The repo now also carries a Rust integration workspace based on the
-`rust-integration-infinigen-v1` branch. The Python entry points are
+The repo includes a Rust integration workspace. The Python entry points are
 `ocmesher.RustOcMesher` and `ocmesher.make_rust_ocmesher(...)`.
 
 Build the PyO3 extension into the active environment with:
@@ -291,6 +292,11 @@ from ocmesher import make_rust_ocmesher
 mesher = make_rust_ocmesher(cameras, bounds)
 meshes, in_view_tags = mesher([sdf])
 ```
+
+Common Rust wrapper controls:
+- `device`: `"cpu"`, `"mps"`, `"cuda"`, or `"cuda:<index>"`.
+- `stream_policy`: `"sync"` or `"auto"` (`"auto"` downgrades to `"sync"` on CPU).
+- `kernel_runtime`: `"auto"`, `"native"`, or `"tch"`.
 
 Notes:
 - The Rust workspace currently bridges to the existing `ocmesher/lib/core.so` shared library rather than replacing the meshing algorithm with a pure Rust core.
