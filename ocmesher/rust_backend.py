@@ -29,6 +29,15 @@ if TYPE_CHECKING:
 RESULT_ARITY = 2
 
 
+def _device_family(device: str) -> str:
+    normalized = device.strip().lower()
+    if normalized.startswith("cuda"):
+        return "cuda"
+    if normalized == "mps":
+        return "mps"
+    return "cpu"
+
+
 def _torch_device_capabilities() -> dict[str, bool]:
     supports_cuda = False
     supports_mps = False
@@ -251,9 +260,10 @@ class RustOcMesher:
                 self.device = "cpu"
         else:
             self.device = device
+        self._device_family = _device_family(self.device)
 
         self.dtype: str | None
-        if dtype is None and self.device == "mps":
+        if dtype is None and self._device_family == "mps":
             self.dtype = "float32"
         else:
             self.dtype = dtype
@@ -267,7 +277,7 @@ class RustOcMesher:
             else (batch_size if batch_size is not None else max_batch)
         )
 
-        if stream_policy == "auto" and self.device not in ("cuda", "mps"):
+        if stream_policy == "auto" and self._device_family not in ("cuda", "mps"):
             self.stream_policy = "sync"
         else:
             self.stream_policy = stream_policy
@@ -289,8 +299,8 @@ class RustOcMesher:
             "supports_mps": self._device_caps["supports_mps"],
             "preferred_dtype": "float32",
             "max_batch": self.max_batch,
-            "max_batch_mps": self.max_batch if self.device == "mps" else None,
-            "supports_async": self.device in ("cuda", "mps"),
+            "max_batch_mps": self.max_batch if self._device_family == "mps" else None,
+            "supports_async": self._device_family in ("cuda", "mps"),
             "default_stream_policy": self.stream_policy,
             "version": self.__version__,
         }
@@ -334,7 +344,7 @@ class RustOcMesher:
             # Choose native/tch scene extraction according to runtime policy.
             sphere_spec, plane_spec = _split_sphere_plane_specs(specs)
             prefer_tch = self.kernel_runtime == "tch" or (
-                self.kernel_runtime == "auto" and self.device in ("mps", "cuda")
+                self.kernel_runtime == "auto" and self._device_family in ("mps", "cuda")
             )
             if prefer_tch:
                 if len(specs) == 1 and sphere_spec is not None and hasattr(self._backend, "extract_tch_sphere"):

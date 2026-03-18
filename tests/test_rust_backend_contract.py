@@ -163,6 +163,20 @@ def test_rust_ocmesher_prefers_tch_scene_on_mps(sample_cameras, sample_bounds, s
     assert backend.last_calls[-1][3] == "mps"
 
 
+def test_rust_ocmesher_prefers_tch_scene_on_cuda_indexed_device(sample_cameras, sample_bounds, sphere_kernel):
+    backend = DummyRustBackendWithScenes()
+    mesher = RustOcMesher(sample_cameras, sample_bounds, backend=backend, device="cuda:0")
+
+    meshes, tags = mesher([sphere_kernel])
+
+    assert meshes == ["mesh"]
+    assert len(tags) == 1
+    assert backend.extract_tch_sphere_calls == 1
+    assert backend.extract_native_scene_calls == 0
+    assert backend.last_calls[-1][0] == "tch_sphere"
+    assert backend.last_calls[-1][3] == "cuda:0"
+
+
 def test_rust_ocmesher_prefers_native_scene_on_cpu(sample_cameras, sample_bounds, sphere_kernel):
     backend = DummyRustBackendWithScenes()
     mesher = RustOcMesher(sample_cameras, sample_bounds, backend=backend, device="cpu")
@@ -281,6 +295,17 @@ def test_stream_policy_auto_guarded_on_cpu(sample_cameras, sample_bounds):
         backend=DummyRustBackend(),
     )
     assert mesher.stream_policy == "sync"
+
+
+def test_stream_policy_auto_preserved_on_cuda_indexed_device(sample_cameras, sample_bounds):
+    mesher = RustOcMesher(
+        sample_cameras,
+        sample_bounds,
+        device="cuda:0",
+        stream_policy="auto",
+        backend=DummyRustBackend(),
+    )
+    assert mesher.stream_policy == "auto"
 
 
 def test_rust_ocmesher_default_device_prefers_cuda(sample_cameras, sample_bounds):
