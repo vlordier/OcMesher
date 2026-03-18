@@ -109,6 +109,28 @@ def test_rust_ocmesher_requires_backend(sample_cameras, sample_bounds, sphere_ke
         mesher([sphere_kernel])
 
 
+def test_rust_ocmesher_rejects_invalid_cameras(sample_intrinsics, sample_bounds):
+    bad_pose = np.eye(3)
+    bad_cameras = ([bad_pose], [sample_intrinsics], [720], [1280])
+
+    with pytest.raises(ValueError, match="4x4"):
+        RustOcMesher(bad_cameras, sample_bounds)
+
+
+def test_rust_ocmesher_rejects_invalid_bounds(sample_cameras):
+    bad_bounds = [1.0, -1.0, -1.0, 1.0, -1.0, 1.0]
+
+    with pytest.raises(ValueError, match="x_min"):
+        RustOcMesher(sample_cameras, bad_bounds)
+
+
+def test_rust_ocmesher_rejects_non_callable_kernel(sample_cameras, sample_bounds):
+    mesher = RustOcMesher(sample_cameras, sample_bounds, backend=DummyRustBackend())
+
+    with pytest.raises(TypeError, match=r"kernels\[0\] must be callable"):
+        mesher(["not-a-kernel"])
+
+
 def test_rust_ocmesher_returns_backend_payload(sample_cameras, sample_bounds, sphere_kernel):
     backend = DummyRustBackend()
     mesher = RustOcMesher(
