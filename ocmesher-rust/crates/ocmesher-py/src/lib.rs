@@ -388,6 +388,7 @@ impl Backend {
             simplify_occluded,
             visible_relax_iter,
             coarse_count,
+            fine_batch_size: 1,
         };
 
         Ok(Backend {

@@ -117,12 +117,14 @@ def build_batched_sdf_kernels(
 ) -> list[Callable[[np.ndarray[Any, Any]], np.ndarray[Any, Any]]]:
     """Build SDF callables that prefer ``evaluate_batch`` when available."""
 
+    effective_batch_size = int(batch_size) if batch_size is not None else 0
+
     def _evaluate_batched(
         eval_batch: Callable[[np.ndarray[Any, Any]], Any],
         xyz: np.ndarray[Any, Any],
     ) -> np.ndarray[Any, Any]:
         n_pts = len(xyz)
-        first_end = min(batch_size, n_pts)
+        first_end = min(effective_batch_size, n_pts)
         first_chunk = _extract_sdf(eval_batch(xyz[:first_end]))
 
         # Fast path: fixed-shape outputs (the common case for SDF vectors).
@@ -132,20 +134,20 @@ def build_batched_sdf_kernels(
 
         cursor = first_end
         while cursor < n_pts:
-            end = min(cursor + batch_size, n_pts)
+            end = min(cursor + effective_batch_size, n_pts)
             chunk = _extract_sdf(eval_batch(xyz[cursor:end]))
             if chunk.shape[1:] != first_chunk.shape[1:]:
                 # Keep behavior correct if a custom kernel emits varying trailing shapes.
                 fallback_chunks: list[np.ndarray[Any, Any]] = [first_chunk]
                 offset = first_end
                 while offset < cursor:
-                    next_end = min(offset + batch_size, n_pts)
+                    next_end = min(offset + effective_batch_size, n_pts)
                     fallback_chunks.append(_extract_sdf(eval_batch(xyz[offset:next_end])))
                     offset = next_end
                 fallback_chunks.append(chunk)
                 offset = end
                 while offset < n_pts:
-                    next_end = min(offset + batch_size, n_pts)
+                    next_end = min(offset + effective_batch_size, n_pts)
                     fallback_chunks.append(_extract_sdf(eval_batch(xyz[offset:next_end])))
                     offset = next_end
                 return np.concatenate(fallback_chunks, axis=0)
