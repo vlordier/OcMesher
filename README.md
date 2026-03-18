@@ -209,6 +209,36 @@ Backend selection notes:
 - `backend="torch"`: full PyTorch implementation (`TorchOcMesher`).
 - `backend="rust"`: Rust wrapper path (`make_rust_ocmesher`) with native/tch acceleration paths.
 
+### Performance Guide: Choosing a Backend
+
+| Backend | Platform | Relative Speed | Notes |
+|---------|----------|----------------|-------|
+| `torch` + `device="mps"` | Apple Silicon (M1–M4) | ⚡ ~2.2× faster than CPU | **Recommended on macOS** |
+| `torch` + `device="cuda"` | NVIDIA GPU | ⚡ fastest on Linux/Windows | Requires CUDA-enabled PyTorch |
+| `torch` + `device="cpu"` | Any | moderate | Good cross-platform fallback |
+| `cpp` | Linux / macOS | baseline | Original impl; requires `bash install.sh` |
+| `rust` + `device="mps"` | Apple Silicon | fast | Adaptive CPU/GPU routing available |
+| `rust` + `device="cpu"` | Any | similar to torch CPU | Rust overhead varies with batch size |
+
+**Quick selection guide:**
+
+- **Apple Silicon Mac (M1/M2/M3/M4):** Use `backend="torch", device="mps"` — approximately 2.2× faster than CPU, with the coarse octree step benefiting most from GPU parallelism.
+- **NVIDIA GPU (Linux/Windows):** Use `backend="torch", device="cuda"` for maximum throughput.
+- **CPU-only / CI / reproducibility:** Use `backend="cpp"` for exact parity with the upstream implementation, or `backend="torch", device="cpu"` as a pure-Python fallback.
+- **Rust experiments:** Use `backend="rust"` with optional `OCMESHER_TCH_MPS_ADAPTIVE=1` (Apple Silicon) or `OCMESHER_TCH_CUDA_ADAPTIVE=1` (NVIDIA) for adaptive per-batch device routing.
+
+Typical pipeline timing on Apple M4 Pro with `device="mps"`:
+
+| Stage | Time |
+|-------|------|
+| Coarse octree | ~0.26 s |
+| Find surface | ~0.15 s |
+| Visibility filter | ~0.03 s |
+| Construct mesh | ~0.01 s |
+| **Total** | **~0.45 s** |
+
+> **macOS OpenMP note:** The C++ backend requires `libomp.dylib` from LLVM. Install it with `brew install llvm`, then rebuild with `bash install.sh`. The build script automatically embeds the correct rpath into `core.so` so it can find the library at runtime.
+
 ### Rust Backend
 
 The repo now also carries a Rust integration workspace based on the
