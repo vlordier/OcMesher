@@ -66,7 +66,18 @@ gx2() {
 	local out_so="$1"
 	local in_obj="$2"
 	local omp_flags="$3"
-	"${compiler}" "${LDFLAGS_ARRAY[@]}" -O3 -shared ${omp_flags} -o "${out_so}" "${in_obj}"
+	
+	# On macOS, set rpath so the binary can find libomp.dylib at runtime
+	local rpath_flags=""
+	if [ "${OS}" = "Darwin" ]; then
+		if [ "${ARCH}" = "arm64" ]; then
+			rpath_flags="-Wl,-rpath,/opt/homebrew/opt/llvm/lib"
+		else
+			rpath_flags="-Wl,-rpath,/usr/local/opt/llvm/lib"
+		fi
+	fi
+	
+	"${compiler}" "${LDFLAGS_ARRAY[@]}" -O3 -shared ${omp_flags} ${rpath_flags} -o "${out_so}" "${in_obj}"
 }
 
 patch_core_omp_runtime_macos() {

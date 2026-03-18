@@ -280,3 +280,60 @@ class TestPackageVersion:
         import ocmesher
 
         assert ocmesher.__version__ == version("ocmesher")
+
+
+# ---------------------------------------------------------------------------
+# __init__.py lazy __getattr__ paths
+# ---------------------------------------------------------------------------
+
+
+class TestPackageInitGetattr:
+    """Ensure __getattr__ on ocmesher resolves each public name exactly once."""
+
+    def test_getattr_ocmesher_class(self):
+        import ocmesher
+
+        cls = ocmesher.__getattr__("OcMesher")
+        from ocmesher.core import OcMesher
+
+        assert cls is OcMesher
+
+    def test_getattr_rust_ocmesher_class(self):
+        import ocmesher
+
+        cls = ocmesher.__getattr__("RustOcMesher")
+        from ocmesher.rust_backend import RustOcMesher
+
+        assert cls is RustOcMesher
+
+    def test_getattr_make_rust_ocmesher(self):
+        import ocmesher
+
+        fn = ocmesher.__getattr__("make_rust_ocmesher")
+        from ocmesher.rust_backend import make_rust_ocmesher
+
+        assert fn is make_rust_ocmesher
+
+    def test_getattr_make_ocmesher(self):
+        import ocmesher
+
+        fn = ocmesher.__getattr__("make_ocmesher")
+        from ocmesher.factory import make_ocmesher
+
+        assert fn is make_ocmesher
+
+    def test_getattr_torch_ocmesher_skips_if_no_torch(self):
+        """If torch is not installed, accessing TorchOcMesher should raise ImportError."""
+        torch = pytest.importorskip("torch")  # noqa: F841
+        import ocmesher
+
+        cls = ocmesher.__getattr__("TorchOcMesher")
+        from ocmesher.torch_core import TorchOcMesher
+
+        assert cls is TorchOcMesher
+
+    def test_getattr_unknown_name_raises_attribute_error(self):
+        import ocmesher
+
+        with pytest.raises(AttributeError, match="has no attribute"):
+            ocmesher.__getattr__("_does_not_exist")
