@@ -44,7 +44,7 @@ def make_ocmesher(
         Backend instance implementing ``__call__(kernels)``.
 
     Raises:
-        ValueError: If backend is not one of ``cpp``, ``torch``, or ``rust``.
+        ValueError: If backend is not one of ``cpp``, ``torch``, ``rust``, or ``mlx``.
         ImportError: If the required backend module is not installed.
     """
     if backend == _BACKEND_CPP:
