@@ -28,6 +28,9 @@ env/
 # IDE / Editor
 .vscode/
 .idea/
+
+# Copilot memory (session and workspace data)
+memories/
 *.swp
 *.swo
 *~
