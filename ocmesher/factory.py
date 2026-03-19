@@ -58,8 +58,6 @@ def make_ocmesher(
     if backend == _BACKEND_RUST:
         from .rust_backend import make_rust_ocmesher
 
-        if device is None:
-            return make_rust_ocmesher(cameras, bounds, **kwargs)
         return make_rust_ocmesher(cameras, bounds, device=device, **kwargs)
 
     if backend == _BACKEND_MLX:
