@@ -807,16 +807,14 @@ class MLXOcMesher:
             idx_c = bx_c * hb + by_c  # (N,)
 
             # Build depth buffer: for each bin, store minimum depth
+            # Use sorting + unique for efficient min-per-bin computation
             depth_buf = np.full(buf_size, np.inf, dtype=np.float32)
             valid_idx = idx_c[valid_mask]
             valid_depth = depth[c, valid_mask]
-
-            # Use sorting to find minimums efficiently
-            sort_idx = np.argsort(valid_idx)
-            sorted_idx = valid_idx[sort_idx]
-            sorted_depth = valid_depth[sort_idx]
-
-            # Find unique bins and their minimum depths
+            sort_order = np.argsort(valid_idx)
+            sorted_idx = valid_idx[sort_order]
+            sorted_depth = valid_depth[sort_order]
+            # np.unique returns first occurrence of each unique value
             unique_bins, first_pos = np.unique(sorted_idx, return_index=True)
             depth_buf[unique_bins] = sorted_depth[first_pos]
 
@@ -902,8 +900,8 @@ class MLXOcMesher:
             quantized[:, 1] * self._dedup_prime_y +
             quantized[:, 2] * self._dedup_prime_z
         )
-        unique_hashes, inverse = np.unique(hash_vals, return_inverse=True)
-        n_unique = len(unique_hashes)
+        _, inverse = np.unique(hash_vals, return_inverse=True)
+        n_unique = int(inverse.max()) + 1  # Count unique without storing them
         n_verts = len(inverse)
 
         rep_idx = np.zeros(n_unique, dtype=np.int64)
