@@ -402,9 +402,9 @@ class MLXOcMesher:
                 "bit_shifts": bit_shifts,
             }
 
-    def close(self) -> None:
-        """Clean up resources (no-op for MLX backend)."""
-        pass
+    def close(self) -> "MLXOcMesher":
+        """Clean up resources (no-op for MLX backend). Returns self for chaining."""
+        return self
 
     def __call__(self, kernels: KernelSequence) -> MeshResult:
         """Extract meshes from SDF kernels.
