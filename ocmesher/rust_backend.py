@@ -14,6 +14,7 @@ from typing import TYPE_CHECKING, Any, Protocol, cast
 
 import numpy as np
 
+from ._constants import KERNEL_RUNTIME_VALUES, STREAM_POLICY_VALUES
 from ._validation import (
     validate_bounds,
     validate_cameras,
@@ -47,8 +48,8 @@ def _normalize_rust_device(device: str) -> str:
 
 
 def _validate_kernel_runtime(kernel_runtime: str) -> str:
-    if kernel_runtime not in {"auto", "native", "tch"}:
-        msg = "kernel_runtime must be one of: 'auto', 'native', 'tch'"
+    if kernel_runtime not in KERNEL_RUNTIME_VALUES:
+        msg = f"kernel_runtime must be one of: {', '.join(repr(v) for v in KERNEL_RUNTIME_VALUES)}"
         raise ValueError(msg)
     return kernel_runtime
 
@@ -305,8 +306,8 @@ class RustOcMesher:
             self.stream_policy = "sync"
         else:
             self.stream_policy = stream_policy
-        if self.stream_policy not in {"sync", "auto"}:
-            msg = "stream_policy must be one of: 'sync', 'auto'"
+        if self.stream_policy not in STREAM_POLICY_VALUES:
+            msg = f"stream_policy must be one of: {', '.join(repr(v) for v in STREAM_POLICY_VALUES)}"
             raise ValueError(msg)
         self.use_primitive_inference = use_primitive_inference
         self.kernel_runtime = _validate_kernel_runtime(kernel_runtime)

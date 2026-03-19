@@ -1,4 +1,4 @@
-"""Centralised numeric constants shared across OcMesher backends.
+"""Centralised numeric and string constants shared across OcMesher backends.
 
 Having all tuneable defaults in one place makes it easy to discover,
 document, and adjust them without hunting through multiple files.
@@ -16,8 +16,10 @@ __all__ = [
     "HASH_PRIME_X",
     "HASH_PRIME_Y",
     "HASH_PRIME_Z",
+    "KERNEL_RUNTIME_VALUES",
     "MAX_SDF_WORKERS",
     "SDF_BATCH_SIZE",
+    "STREAM_POLICY_VALUES",
     "TORCH_SDF_CHUNK_SIZE",
 ]
 
@@ -63,3 +65,14 @@ HASH_PRIME_Z: int = 1_000_000_021
 # Smaller than SDF_BATCH_SIZE (which targets the C++ backend) to
 # improve cache locality during GPU→CPU transfers.
 TORCH_SDF_CHUNK_SIZE: int = 2_000_000
+
+# Valid values for ``kernel_runtime`` in Rust backend.
+# - "auto": choose best available runtime automatically (default)
+# - "native": use native Rust kernel implementations
+# - "tch": use PyTorch (libtorch) via tch-rs bindings
+KERNEL_RUNTIME_VALUES: tuple[str, str, str] = ("auto", "native", "tch")
+
+# Valid values for ``stream_policy`` in Rust backend.
+# - "sync": synchronous execution (default for CPU)
+# - "auto": CUDA/MPS stream-based execution when available
+STREAM_POLICY_VALUES: tuple[str, str] = ("sync", "auto")
