@@ -97,6 +97,9 @@ _SPEC_TYPE_PLANE = "plane"
 _ORIGIN_3D = [0.0, 0.0, 0.0]
 _UNIT_Z_3D = [0.0, 0.0, 1.0]
 
+# Error message for result arity validation.
+_RESULT_ARITY_ERROR = "Rust backend must return (meshes, in_view_tags)"
+
 
 def _device_family(device: str) -> str:
     normalized = device.strip().lower()
@@ -490,8 +493,7 @@ class RustOcMesher:
             )
             result = self._backend.extract_meshes(sdf_kernels)
         if len(result) != RESULT_ARITY:
-            msg = "Rust backend must return (meshes, in_view_tags)"
-            raise TypeError(msg)
+            raise TypeError(_RESULT_ARITY_ERROR)
         return result[0], result[1]
 
     def close(self):
