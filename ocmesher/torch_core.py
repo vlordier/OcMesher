@@ -31,12 +31,16 @@ from __future__ import annotations
 
 import logging
 from concurrent.futures import ThreadPoolExecutor
-from typing import Any, Callable, ClassVar
+from typing import TYPE_CHECKING, Any, ClassVar
+
+if TYPE_CHECKING:
+    from collections.abc import Callable
 
 import numpy as np
 import torch
 import trimesh
 
+from ._constants import BIT_SHIFTS, CORNER_QUANT_SCALE, DENOM_EPS, VIS_BIN_FACTOR
 from ._types import BoundsLike, CamerasTuple, KernelSequence, MeshResult
 from ._validation import coerce_kernel_sdf, validate_bounds, validate_cameras, validate_kernels, validate_mesher_params
 from .utils.timer import Timer
@@ -50,8 +54,6 @@ def _mps_available() -> bool:
     """Return True if MPS (Apple Silicon GPU) backend is available."""
     return hasattr(torch.backends, "mps") and torch.backends.mps.is_available()
 
-
-from ._constants import DENOM_EPS, CORNER_QUANT_SCALE, VIS_BIN_FACTOR, BIT_SHIFTS
 
 _DENOM_EPS = DENOM_EPS  # Alias for internal use
 _CORNER_QUANT_SCALE = CORNER_QUANT_SCALE  # Alias for internal use
