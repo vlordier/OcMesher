@@ -29,7 +29,7 @@ from typing import ClassVar
 import numpy as np
 
 from ._types import BoundsLike, CamerasTuple, KernelSequence, MeshResult
-from ._validation import coerce_kernel_sdf, validate_bounds, validate_cameras, validate_kernels, validate_mesher_params
+from ._validation import validate_bounds, validate_cameras, validate_kernels, validate_mesher_params
 from .utils.timer import Timer
 
 logger = logging.getLogger(__name__)
