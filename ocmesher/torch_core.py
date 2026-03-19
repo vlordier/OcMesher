@@ -66,6 +66,9 @@ _CORNER_QUANT_SCALE = 1e8
 # Factor for computing visibility bin dimensions from image size.
 _VIS_BIN_FACTOR = 10.0
 
+# Bit shift values for cube configuration indexing.
+_BIT_SHIFTS = [1 << i for i in range(8)]
+
 # ---------------------------------------------------------------------------
 # Marching-cubes lookup tables (classic Lorensen & Cline, 1987)
 # ---------------------------------------------------------------------------
@@ -864,7 +867,7 @@ class TorchOcMesher:
         tri_table_t = torch.from_numpy(tri_table_np).to(self.device)
 
         # Pre-compute bit-shift values for cube configuration
-        bit_shifts = torch.tensor([1 << i for i in range(8)], dtype=torch.int32, device=self.device)
+        bit_shifts = torch.tensor(_BIT_SHIFTS, dtype=torch.int32, device=self.device)
 
         TorchOcMesher._mc_cache[self.device] = {
             "edge_table": edge_table_t,
