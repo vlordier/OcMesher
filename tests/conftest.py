@@ -19,6 +19,8 @@ if str(REPO_ROOT) not in sys.path:
 # test harness so the full suite remains runnable.
 if sys.platform == "darwin":
     os.environ.setdefault("KMP_DUPLICATE_LIB_OK", "TRUE")
+
+
 @pytest.fixture(params=["cpu", "cuda", "mps"], scope="session")
 def torch_device(request):
     """Parametrised fixture yielding each available torch device string."""

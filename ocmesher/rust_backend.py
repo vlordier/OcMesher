@@ -126,9 +126,7 @@ def _torch_device_capabilities() -> dict[str, bool]:
     torch = sys.modules.get("torch")
     if torch is not None:
         supports_cuda = bool(torch.cuda.is_available())
-        supports_mps = bool(
-            hasattr(torch.backends, "mps") and torch.backends.mps.is_available()
-        )
+        supports_mps = bool(hasattr(torch.backends, "mps") and torch.backends.mps.is_available())
 
     return {
         "supports_cuda": supports_cuda,
@@ -216,6 +214,7 @@ def build_batched_sdf_kernels(
 
     batched_kernels: list[Callable[[np.ndarray[Any, Any]], np.ndarray[Any, Any]]] = []
     for kernel in kernels:
+
         def _wrapped(xyz: np.ndarray[Any, Any], *, _kernel: Any = kernel) -> np.ndarray[Any, Any]:
             return _evaluate(_kernel, xyz)
 
@@ -241,18 +240,24 @@ def _infer_native_primitive_specs(kernels: Sequence[Any]) -> list[dict[str, Any]
             return None
 
         # Sphere centered at origin: f(x)=||x||-r (same value on unit axes).
-        if np.allclose(values[1:4], values[1], atol=SPEC_INFERENCE_ATOL) and np.isclose(values[1], values[4], atol=SPEC_INFERENCE_ATOL):
+        if np.allclose(values[1:4], values[1], atol=SPEC_INFERENCE_ATOL) and np.isclose(
+            values[1], values[4], atol=SPEC_INFERENCE_ATOL
+        ):
             radius = max(0.0, -float(values[0]))
             if np.isclose(values[1], 1.0 - radius, atol=SPEC_INFERENCE_RTOL):
                 specs.append({"type": _SPEC_TYPE_SPHERE, "center": _ORIGIN_3D, "radius": radius})
                 continue
 
         # Z-plane: f(x)=z-offset.
-        if np.isclose(values[0], 0.0, atol=SPEC_INFERENCE_ATOL) and np.isclose(values[1], 0.0, atol=SPEC_INFERENCE_ATOL) and np.isclose(
-            values[2], 0.0, atol=SPEC_INFERENCE_ATOL
+        if (
+            np.isclose(values[0], 0.0, atol=SPEC_INFERENCE_ATOL)
+            and np.isclose(values[1], 0.0, atol=SPEC_INFERENCE_ATOL)
+            and np.isclose(values[2], 0.0, atol=SPEC_INFERENCE_ATOL)
         ):
             offset = -float(values[0])
-            if np.isclose(values[3], 1.0 - offset, atol=SPEC_INFERENCE_RTOL) and np.isclose(values[4], -1.0 - offset, atol=SPEC_INFERENCE_RTOL):
+            if np.isclose(values[3], 1.0 - offset, atol=SPEC_INFERENCE_RTOL) and np.isclose(
+                values[4], -1.0 - offset, atol=SPEC_INFERENCE_RTOL
+            ):
                 specs.append({"type": _SPEC_TYPE_PLANE, "normal": _UNIT_Z_3D, "offset": offset})
                 continue
 
@@ -362,12 +367,14 @@ class RustOcMesher:
         self.batch_size = batch_size
         self.sdf_batch_size = sdf_batch_size
         self._effective_batch_size = (
-            sdf_batch_size
-            if sdf_batch_size is not None
-            else (batch_size if batch_size is not None else max_batch)
+            sdf_batch_size if sdf_batch_size is not None else (batch_size if batch_size is not None else max_batch)
         )
 
-        if stream_policy == "auto" and self._device_family not in (_DEVICE_FAMILY_CUDA, _DEVICE_FAMILY_MPS, _DEVICE_FAMILY_MLX):
+        if stream_policy == "auto" and self._device_family not in (
+            _DEVICE_FAMILY_CUDA,
+            _DEVICE_FAMILY_MPS,
+            _DEVICE_FAMILY_MLX,
+        ):
             self.stream_policy = "sync"
         else:
             self.stream_policy = stream_policy
@@ -389,7 +396,9 @@ class RustOcMesher:
             "supports_mlx": self._mlx_caps["supports_mlx"],
             "preferred_dtype": _MPS_PREFERRED_DTYPE,
             "max_batch": self.max_batch,
-            "max_batch_mps": self.max_batch if self._device_family in (_DEVICE_FAMILY_MPS, _DEVICE_FAMILY_MLX) else None,
+            "max_batch_mps": self.max_batch
+            if self._device_family in (_DEVICE_FAMILY_MPS, _DEVICE_FAMILY_MLX)
+            else None,
             "supports_async": self._device_family in (_DEVICE_FAMILY_CUDA, _DEVICE_FAMILY_MPS, _DEVICE_FAMILY_MLX),
             "default_stream_policy": self.stream_policy,
             "version": self.__version__,

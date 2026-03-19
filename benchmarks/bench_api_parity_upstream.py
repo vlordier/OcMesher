@@ -299,12 +299,12 @@ def gather_repo_snapshot(repo_path: Path, python_exe: str) -> dict:
     behavior_res = run_cmd([python_exe, "-c", BEHAVIOR_SNAPSHOT_SCRIPT], cwd=repo_path)
 
     return {
-        "api": parse_json_from_stdout(api_res.stdout) if api_res.code == 0 else {
-            "errors": [f"api snapshot failed rc={api_res.code}: {api_res.stderr.strip()}"]
-        },
-        "behavior": parse_json_from_stdout(behavior_res.stdout) if behavior_res.code == 0 else {
-            "errors": [f"behavior snapshot failed rc={behavior_res.code}: {behavior_res.stderr.strip()}"]
-        },
+        "api": parse_json_from_stdout(api_res.stdout)
+        if api_res.code == 0
+        else {"errors": [f"api snapshot failed rc={api_res.code}: {api_res.stderr.strip()}"]},
+        "behavior": parse_json_from_stdout(behavior_res.stdout)
+        if behavior_res.code == 0
+        else {"errors": [f"behavior snapshot failed rc={behavior_res.code}: {behavior_res.stderr.strip()}"]},
     }
 
 

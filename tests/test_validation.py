@@ -92,9 +92,7 @@ class TestPreprocessCameras:
     """Tests for ``preprocess_cameras`` including error paths."""
 
     def test_returns_correct_shapes(self, sample_camera_pose, sample_intrinsics):
-        inv, intr, hs, ws = preprocess_cameras(
-            [sample_camera_pose], [sample_intrinsics], [720], [1280]
-        )
+        inv, intr, hs, ws = preprocess_cameras([sample_camera_pose], [sample_intrinsics], [720], [1280])
         assert inv.shape == (1, 3, 4)
         assert intr.shape == (1, 3, 3)
         assert hs == (720,)
@@ -112,9 +110,7 @@ class TestPreprocessCameras:
         assert intr.shape == (n, 3, 3)
 
     def test_inv_poses_are_contiguous(self, sample_camera_pose, sample_intrinsics):
-        inv, intr, _, _ = preprocess_cameras(
-            [sample_camera_pose], [sample_intrinsics], [720], [1280]
-        )
+        inv, intr, _, _ = preprocess_cameras([sample_camera_pose], [sample_intrinsics], [720], [1280])
         assert inv.flags["C_CONTIGUOUS"]
         assert intr.flags["C_CONTIGUOUS"]
 
@@ -481,12 +477,14 @@ class TestOutOfBoundsMask:
 
     def test_mixed_points(self):
         b_min, b_max = self._make_bounds()
-        pts = np.array([
-            [0.0, 0.0, 0.0],   # inside
-            [2.0, 0.0, 0.0],   # outside x
-            [0.0, 2.0, 0.0],   # outside y
-            [0.0, 0.0, -2.0],  # outside z
-        ])
+        pts = np.array(
+            [
+                [0.0, 0.0, 0.0],  # inside
+                [2.0, 0.0, 0.0],  # outside x
+                [0.0, 2.0, 0.0],  # outside y
+                [0.0, 0.0, -2.0],  # outside z
+            ]
+        )
         mask = out_of_bounds_mask(pts, b_min, b_max)
         np.testing.assert_array_equal(mask, [False, True, True, True])
 

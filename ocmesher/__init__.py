@@ -11,7 +11,15 @@ from importlib.metadata import PackageNotFoundError, version
 # "No handlers could be found for logger 'ocmesher'" warnings.
 logging.getLogger(__name__).addHandler(logging.NullHandler())
 
-__all__ = ["CAMERA_DATA_STRIDE", "OcMesher", "RustOcMesher", "TorchOcMesher", "MLXOcMesher", "make_ocmesher", "make_rust_ocmesher"]
+__all__ = [
+    "CAMERA_DATA_STRIDE",
+    "MLXOcMesher",
+    "OcMesher",
+    "RustOcMesher",
+    "TorchOcMesher",
+    "make_ocmesher",
+    "make_rust_ocmesher",
+]
 
 try:
     __version__ = version("ocmesher")
@@ -21,33 +29,20 @@ except PackageNotFoundError:
 
 def __getattr__(name: str):
     """Lazy-import backends so optional runtimes load only when needed."""
-    if name == "CAMERA_DATA_STRIDE":
-        from ._constants import CAMERA_DATA_STRIDE
+    lazy_imports: dict[str, tuple[str, str]] = {
+        "CAMERA_DATA_STRIDE": ("._constants", "CAMERA_DATA_STRIDE"),
+        "OcMesher": (".core", "OcMesher"),
+        "TorchOcMesher": (".torch_core", "TorchOcMesher"),
+        "RustOcMesher": (".rust_backend", "RustOcMesher"),
+        "MLXOcMesher": (".mlx_core", "MLXOcMesher"),
+        "make_rust_ocmesher": (".rust_backend", "make_rust_ocmesher"),
+        "make_ocmesher": (".factory", "make_ocmesher"),
+    }
+    if name in lazy_imports:
+        module_path, attr = lazy_imports[name]
+        import importlib
 
-        return CAMERA_DATA_STRIDE
-    if name == "OcMesher":
-        from .core import OcMesher
-
-        return OcMesher
-    if name == "TorchOcMesher":
-        from .torch_core import TorchOcMesher
-
-        return TorchOcMesher
-    if name == "RustOcMesher":
-        from .rust_backend import RustOcMesher
-
-        return RustOcMesher
-    if name == "MLXOcMesher":
-        from .mlx_core import MLXOcMesher
-
-        return MLXOcMesher
-    if name == "make_rust_ocmesher":
-        from .rust_backend import make_rust_ocmesher
-
-        return make_rust_ocmesher
-    if name == "make_ocmesher":
-        from .factory import make_ocmesher
-
-        return make_ocmesher
+        mod = importlib.import_module(module_path, __name__)
+        return getattr(mod, attr)
     msg = f"module {__name__!r} has no attribute {name!r}"
     raise AttributeError(msg)

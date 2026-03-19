@@ -48,7 +48,14 @@ from .utils.timer import Timer
 
 logger = logging.getLogger(__name__)
 
-__all__ = ["CAMERA_DATA_STRIDE", "_SDF_BATCH_SIZE", "OcMesher", "_validate_bounds", "_validate_cameras", "_validate_kernels"]
+__all__ = [
+    "CAMERA_DATA_STRIDE",
+    "_SDF_BATCH_SIZE",
+    "OcMesher",
+    "_validate_bounds",
+    "_validate_cameras",
+    "_validate_kernels",
+]
 
 CAMERA_DATA_STRIDE = 23
 
@@ -627,7 +634,9 @@ class OcMesher:
                             _c_min = _empty(n, dtype=_sdf_dtype)
                             _c_sdf_ptr = _sdf_af(_c_min)
                         _c_cap = n
-                    assert _c_pos is not None and _c_pos_ptr is not None and _c_sdf is not None and _c_sdf_ptr is not None
+                    assert (
+                        _c_pos is not None and _c_pos_ptr is not None and _c_sdf is not None and _c_sdf_ptr is not None
+                    )
                     _fine_iteration_output(_c_pos_ptr)
                     _kernel_caller(kernels, _c_pos[:n], out=_c_sdf[:n])
                     if not single_kernel:

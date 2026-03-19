@@ -36,6 +36,7 @@ def _to_float(value: object) -> float | None:
         return float(value)
     return None
 
+
 # ---------------------------------------------------------------------------
 # SDF kernels at varying complexity levels
 # ---------------------------------------------------------------------------
@@ -570,12 +571,7 @@ def _micro_coord_computation(_cameras, _bounds, n_runs: int = 5) -> dict[str, ob
         min_reliable = 1e-6
         pow2_time = _to_float(results.get("pow2_mean_s"))
         ldexp_time = _to_float(results.get("ldexp_mean_s"))
-        if (
-            pow2_time is not None
-            and ldexp_time is not None
-            and pow2_time > min_reliable
-            and ldexp_time > min_reliable
-        ):
+        if pow2_time is not None and ldexp_time is not None and pow2_time > min_reliable and ldexp_time > min_reliable:
             results["speedup"] = round(pow2_time / ldexp_time, 1)
     except Exception as exc:  # noqa: BLE001
         results["error"] = str(exc)
@@ -1267,7 +1263,12 @@ def main() -> None:
         r_gpu = results.get(f"torch_cuda_{sdf_name}")
         r_mps = results.get(f"torch_mps_{sdf_name}")
 
-        if isinstance(r_orig, dict) and isinstance(r_torch_cpu, dict) and "error" not in r_orig and "error" not in r_torch_cpu:
+        if (
+            isinstance(r_orig, dict)
+            and isinstance(r_torch_cpu, dict)
+            and "error" not in r_orig
+            and "error" not in r_torch_cpu
+        ):
             mean_orig = _to_float(r_orig.get("mean_s"))
             mean_cpu = _to_float(r_torch_cpu.get("mean_s"))
             if mean_orig is None or mean_cpu is None:
@@ -1314,7 +1315,12 @@ def main() -> None:
             )
 
         # Cross-device speedup (if multiple GPU devices available)
-        if isinstance(r_gpu, dict) and isinstance(r_torch_cpu, dict) and "error" not in r_gpu and "error" not in r_torch_cpu:
+        if (
+            isinstance(r_gpu, dict)
+            and isinstance(r_torch_cpu, dict)
+            and "error" not in r_gpu
+            and "error" not in r_torch_cpu
+        ):
             mean_cpu = _to_float(r_torch_cpu.get("mean_s"))
             mean_gpu = _to_float(r_gpu.get("mean_s"))
             if mean_cpu is None or mean_gpu is None:
@@ -1329,7 +1335,12 @@ def main() -> None:
                 mean_gpu,
                 mean_cpu,
             )
-        if isinstance(r_mps, dict) and isinstance(r_torch_cpu, dict) and "error" not in r_mps and "error" not in r_torch_cpu:
+        if (
+            isinstance(r_mps, dict)
+            and isinstance(r_torch_cpu, dict)
+            and "error" not in r_mps
+            and "error" not in r_torch_cpu
+        ):
             mean_cpu = _to_float(r_torch_cpu.get("mean_s"))
             mean_mps = _to_float(r_mps.get("mean_s"))
             if mean_cpu is None or mean_mps is None:

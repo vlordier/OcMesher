@@ -36,12 +36,7 @@ def compare_signatures(lhs: MeshSignature, rhs: MeshSignature, *, atol: float = 
     faces_delta = lhs["faces"] - rhs["faces"]
     verts_sum_delta = lhs["verts_sum"] - rhs["verts_sum"]
     faces_sum_delta = lhs["faces_sum"] - rhs["faces_sum"]
-    matches = (
-        verts_delta == 0
-        and faces_delta == 0
-        and abs(verts_sum_delta) <= atol
-        and faces_sum_delta == 0
-    )
+    matches = verts_delta == 0 and faces_delta == 0 and abs(verts_sum_delta) <= atol and faces_sum_delta == 0
     return {
         "matches": matches,
         "verts_delta": verts_delta,
@@ -66,7 +61,9 @@ def _signature_python_script(*, pixels_per_cube: int, coarse_count: int) -> str:
     )
 
 
-def _compute_signature_in_repo(repo_path: Path, *, python_exe: str, pixels_per_cube: int, coarse_count: int) -> MeshSignature:
+def _compute_signature_in_repo(
+    repo_path: Path, *, python_exe: str, pixels_per_cube: int, coarse_count: int
+) -> MeshSignature:
     """Compute signature for one repository checkout."""
     cmd = [
         python_exe,

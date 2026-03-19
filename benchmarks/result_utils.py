@@ -172,7 +172,7 @@ def _compare_values(
         else:
             pct_diff = float("inf") if val_b > 0 else float("-inf")
 
-        abs_diff = val_b - val_a
+        abs_diff = val_b - val_a  # noqa: F841 # kept for debugging
         is_significant = abs(pct_diff) >= threshold_pct
 
         if is_significant or verbose:

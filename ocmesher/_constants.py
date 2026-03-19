@@ -11,6 +11,7 @@ import os
 import numpy as np
 
 __all__ = [
+    "BIT_SHIFTS",
     "CAMERA_DATA_STRIDE",
     "CORNER_QUANT_SCALE",
     "DEFAULT_BISECTION_ITERS",
@@ -27,7 +28,6 @@ __all__ = [
     "DENOM_EPS",
     "DEVICE_FAMILY_VALUES",
     "DEVICE_VALUES",
-    "BIT_SHIFTS",
     "HASH_PRIME_X",
     "HASH_PRIME_Y",
     "HASH_PRIME_Z",

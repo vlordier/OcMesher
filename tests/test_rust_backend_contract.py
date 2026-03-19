@@ -415,9 +415,12 @@ def test_rust_ocmesher_default_device_falls_back_to_cpu(sample_cameras, sample_b
 
 def test_make_rust_ocmesher_raises_import_error_without_extension(sample_cameras, sample_bounds):
     """Without ocmesher_rust installed, make_rust_ocmesher raises ImportError."""
-    with patch.dict(sys.modules, {"ocmesher_rust": None}), pytest.raises(
-        ImportError,
-        match="ocmesher_rust is not installed",
+    with (
+        patch.dict(sys.modules, {"ocmesher_rust": None}),
+        pytest.raises(
+            ImportError,
+            match="ocmesher_rust is not installed",
+        ),
     ):
         make_rust_ocmesher(sample_cameras, sample_bounds)
 
@@ -492,9 +495,12 @@ def test_make_rust_ocmesher_rejects_invalid_kernel_runtime_before_backend_init(
     mock_ext = MagicMock()
     mock_ext.find_core_so.return_value = "/fake/core.so"
 
-    with patch.dict(sys.modules, {"ocmesher_rust": mock_ext}), pytest.raises(
-        ValueError,
-        match="kernel_runtime must be one of",
+    with (
+        patch.dict(sys.modules, {"ocmesher_rust": mock_ext}),
+        pytest.raises(
+            ValueError,
+            match="kernel_runtime must be one of",
+        ),
     ):
         make_rust_ocmesher(sample_cameras, sample_bounds, kernel_runtime="invalid")
 
@@ -505,9 +511,12 @@ def test_make_rust_ocmesher_rejects_non_string_kernel_runtime(sample_cameras, sa
     mock_ext = MagicMock()
     mock_ext.find_core_so.return_value = "/fake/core.so"
 
-    with patch.dict(sys.modules, {"ocmesher_rust": mock_ext}), pytest.raises(
-        TypeError,
-        match="kernel_runtime must be a string",
+    with (
+        patch.dict(sys.modules, {"ocmesher_rust": mock_ext}),
+        pytest.raises(
+            TypeError,
+            match="kernel_runtime must be a string",
+        ),
     ):
         make_rust_ocmesher(sample_cameras, sample_bounds, kernel_runtime=1)
 
@@ -518,9 +527,12 @@ def test_make_rust_ocmesher_rejects_invalid_device_before_backend_init(sample_ca
     mock_ext = MagicMock()
     mock_ext.find_core_so.return_value = "/fake/core.so"
 
-    with patch.dict(sys.modules, {"ocmesher_rust": mock_ext}), pytest.raises(
-        ValueError,
-        match="device must be one of",
+    with (
+        patch.dict(sys.modules, {"ocmesher_rust": mock_ext}),
+        pytest.raises(
+            ValueError,
+            match="device must be one of",
+        ),
     ):
         make_rust_ocmesher(sample_cameras, sample_bounds, device="gpu")
 
