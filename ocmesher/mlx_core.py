@@ -560,6 +560,12 @@ class MLXOcMesher:
         chunk_size = max(1, min(n_points, _SDF_CHUNK_SIZE // n_kernels))
         results: list[np.ndarray] = []
 
+        # For enclosed mode, mark out-of-bounds points
+        if self.enclosed:
+            b_min = self.bounds_min.astype(positions.dtype)
+            b_max = self.bounds_max.astype(positions.dtype)
+            out_bound = np.any(positions <= b_min, axis=1) | np.any(positions >= b_max, axis=1)
+
         for start in range(0, n_points, chunk_size):
             end = min(start + chunk_size, n_points)
             chunk_pos = positions[start:end]
@@ -571,40 +577,74 @@ class MLXOcMesher:
                 ))
 
             sdf_chunk = np.stack(chunk_results, axis=1)  # (chunk, n_kernels)
+
+            # For enclosed mode, set SDF to 1 for out-of-bounds points
+            if self.enclosed:
+                out_bound_chunk = out_bound[start:end]
+                sdf_chunk[out_bound_chunk] = 1.0
+
             results.append(sdf_chunk)
 
         return np.concatenate(results, axis=0)  # (n_points, n_kernels)
 
     def _build_coarse_octree(self) -> tuple[np.ndarray, np.ndarray]:
-        """Build coarse octree covering the scene."""
-        target_count = self.coarse_count
-        max_level = 20
+        """Build coarse octree covering the scene using explicit expansion steps.
 
+        This matches Torch's approach: iteratively expand cubes until no more
+        need expansion or coarse_count budget is reached.
+        """
         coords = np.array([[0, 0, 0]], dtype=np.int64)
         levels = np.array([0], dtype=np.int64)
 
-        for level in range(max_level):
-            mask = self._projected_sizes(self._cube_centers(coords, levels), levels) >= self.pixels_per_cube
-            if not mask.any():
+        for _ in range(30):  # max 30 expansion steps, matching Torch
+            n = len(coords)
+            if n >= self.coarse_count:
                 break
 
-            children = (coords[mask, np.newaxis, :] + self._child_offsets[np.newaxis, :, :]).reshape(-1, 3)
-            child_levels = np.full(len(children), level + 1, dtype=np.int64)
+            cube_scales = self._cube_scales(levels)
+            positions = self._cube_centers(coords, levels, cube_scales=cube_scales)
+            proj = self._projected_sizes(positions, levels, cube_scales=cube_scales)
+            to_expand = proj > self.inv_scale
 
-            next_coords = np.concatenate([coords[~mask], children], axis=0)
-            next_levels = np.concatenate([levels[~mask], child_levels], axis=0)
-
-            if len(next_coords) >= target_count:
+            if not to_expand.any():
                 break
 
-            coords, levels = next_coords, next_levels
+            expand_idx = np.where(to_expand)[0]
+            n_expand = len(expand_idx)
+            n_keep = n - n_expand
+
+            # Budget limiting: if expanding all would exceed coarse_count, prioritize highest proj
+            remaining = self.coarse_count - n_keep
+            if remaining < n_expand * 8:
+                budget = max(1, remaining // 8)
+                # Get indices of cubes with highest projected sizes
+                sorted_idx = np.argsort(proj[expand_idx])[::-1]
+                expand_idx = expand_idx[sorted_idx[:budget]]
+                to_expand = np.zeros(n, dtype=bool)
+                to_expand[expand_idx] = True
+                n_expand = len(expand_idx)
+                n_keep = n - n_expand
+
+            keep_mask = ~to_expand
+            # Generate 8 children for each cube to expand
+            # Child coords are parent * 2 + offset (standard octree coordinate system)
+            child_c = (coords[expand_idx, np.newaxis, :] * 2 + self._child_offsets[np.newaxis, :, :]).reshape(-1, 3)
+            child_l = np.full(len(expand_idx) * 8, levels[expand_idx[0]] + 1, dtype=np.int64)
+
+            coords = np.concatenate([coords[keep_mask], child_c])
+            levels = np.concatenate([levels[keep_mask], child_l])
 
         return coords, levels
 
     def _find_surface_cubes(
         self, kernels: list[Any], coords: np.ndarray, levels: np.ndarray
     ) -> tuple[np.ndarray, np.ndarray | None]:
-        """Detect surface cubes by evaluating SDF at corners."""
+        """Detect surface cubes by evaluating SDF at corners.
+
+        Uses straddle detection: a cube is a surface cube if some corners have
+        SDF >= 0 and others have SDF < 0 (i.e., the zero isosurface crosses
+        through the cube). This matches Torch's implementation.
+        """
         n = len(coords)
         if n == 0:
             return np.array([], dtype=bool), None
@@ -615,13 +655,22 @@ class MLXOcMesher:
         sdf_flat = self._evaluate_sdf(kernels, flat_pos)  # (N*8, K)
         corner_sdf = sdf_flat.reshape(n, 8, len(kernels))  # (N, 8, K)
 
-        sdf_min = corner_sdf.min(axis=1)  # (N, K)
-        sdf_max = corner_sdf.max(axis=1)
+        # Straddle detection: check if some corners are >= 0 and some are < 0
+        signs = corner_sdf >= 0  # (N, 8, K)
+        # A cube straddles the surface if it has both positive and negative corners
+        has_pos = signs.any(axis=1)  # (N, K)
+        has_neg = (~signs).any(axis=1)  # (N, K)
+        surface_mask = has_pos & has_neg  # (N, K)
 
+        # For enclosed mode, we only need to know if surface is inside
+        # For non-enclosed, we also need to check that surface exits the cube
         if self.enclosed:
-            surface_mask = sdf_min.min(axis=1) < 0
+            # Just check straddle - any kernel with straddling is enough
+            surface_mask = surface_mask.any(axis=1)  # (N,)
         else:
-            surface_mask = (sdf_min.min(axis=1) < 0) & (sdf_max.max(axis=1) > 0)
+            sdf_min = corner_sdf.min(axis=1)  # (N, K)
+            sdf_max = corner_sdf.max(axis=1)  # (N, K)
+            surface_mask = surface_mask.any(axis=1) & (sdf_min.min(axis=1) < 0) & (sdf_max.max(axis=1) > 0)
 
         return surface_mask, corner_sdf
 
@@ -683,46 +732,106 @@ class MLXOcMesher:
         )
 
     def _visibility_filter(self, positions: np.ndarray) -> np.ndarray:
-        """Depth-buffer visibility filtering."""
+        """Depth-buffer visibility filtering using neighbor relaxation.
+
+        Matches Torch's _visibility_filter behavior with proper neighbor relaxation.
+        A point is visible if it's in any camera's view AND its depth is <= the
+        depth of any point in its neighboring bins (relaxation radius).
+        """
         if not self.simplify_occluded:
             return np.ones(len(positions), dtype=bool)
 
         positions_f = positions.astype(np.float32)
         n_pos = len(positions)
 
+        # Project all positions to camera coordinates
         cam_coords = np.einsum("cij,nj->cni", self._inv_pose_R, positions_f) + self._inv_pose_t
-        r = np.linalg.norm(cam_coords, axis=2).clip(min=self.min_dist)
+        depth = cam_coords[:, :, 2]  # (C, N)
+        depth_safe = depth + 1e-10
 
-        uv = cam_coords[:, :, :2] / r[:, :, np.newaxis]
-        proj = self.size * self._inv_pix_ang_ppc / r
+        # Pixel coordinates (C, N)
+        px = cam_coords[:, :, 0] / depth_safe
+        py = cam_coords[:, :, 1] / depth_safe
 
-        vis_mask = np.ones(n_pos, dtype=bool)
+        # Per-camera in-view check
+        h_all = self._Hs_np.astype(np.float32)  # (C,)
+        w_all = self._Ws_np.astype(np.float32)  # (C,)
+        in_view_all = (depth > 0) & (px >= 0) & (px < w_all[:, np.newaxis]) & (py >= 0) & (py < h_all[:, np.newaxis])  # (C, N)
 
+        # Early exit if no points in any view
+        if not in_view_all.any():
+            return np.zeros(n_pos, dtype=bool)
+
+        # Pre-compute neighbor offsets based on visible_relax_iter
+        rl = self.visible_relax_iter
+        dx_range = np.arange(-rl, rl + 1, dtype=np.int32)
+        dy_range = np.arange(-rl, rl + 1, dtype=np.int32)
+        grid_dx, grid_dy = np.meshgrid(dx_range, dy_range, indexing="ij")
+        self._relax_dx = grid_dx.reshape(-1)
+        self._relax_dy = grid_dy.reshape(-1)
+        self._n_relax = len(self._relax_dx)
+
+        # Bin coordinates for all cameras at once
+        factor = float(_VIS_BIN_FACTOR)
+        bx_all = np.clip((px * factor).astype(np.int32), 0, None)  # (C, N)
+        by_all = np.clip((py * factor).astype(np.int32), 0, None)  # (C, N)
+
+        vis_mask = np.zeros(n_pos, dtype=bool)
+
+        # Per-camera depth buffer and neighbor relaxation
         for c in range(self.n_cameras):
-            h, w = int(self.cameras[2][c]), int(self.cameras[3][c])
+            hb = int(self._vis_hb[c])
+            wb = int(self._vis_wb[c])
+            buf_size = hb * wb
 
-            vis_hb = int(self._vis_hb[c])
-            vis_wb = int(self._vis_wb[c])
+            # Clamp bin coords to valid range for this camera
+            bx_c = np.minimum(bx_all[c], wb - 1)
+            by_c = np.minimum(by_all[c], hb - 1)
 
-            bins_h = max(1, h // vis_hb)
-            bins_w = max(1, w // vis_wb)
+            in_view = in_view_all[c]  # (N,)
+            valid_mask = in_view & (depth[c] > 0)
 
-            in_bounds = (
-                (uv[c, :, 0] >= 0) & (uv[c, :, 0] < w - 1) &
-                (uv[c, :, 1] >= 0) & (uv[c, :, 1] < h - 1)
-            )
+            if not valid_mask.any():
+                continue
 
-            bin_x = np.clip((uv[c, :, 0] / bins_w).astype(np.int32), 0, vis_wb - 1)
-            bin_y = np.clip((uv[c, :, 1] / bins_h).astype(np.int32), 0, vis_hb - 1)
+            # Linear bin indices for this camera
+            idx_c = bx_c * hb + by_c  # (N,)
 
-            for bx in range(vis_wb):
-                for by in range(vis_hb):
-                    mask = (bin_x == bx) & (bin_y == by) & in_bounds
-                    if not mask.any():
-                        continue
-                    min_depth = r[c, mask].min()
-                    far_mask = mask & (r[c] > min_depth * 1.05)
-                    vis_mask[far_mask] = False
+            # Build depth buffer: for each bin, store minimum depth
+            depth_buf = np.full(buf_size, np.inf, dtype=np.float32)
+            valid_idx = idx_c[valid_mask]
+            valid_depth = depth[c, valid_mask]
+
+            # Use sorting to find minimums efficiently
+            sort_idx = np.argsort(valid_idx)
+            sorted_idx = valid_idx[sort_idx]
+            sorted_depth = valid_depth[sort_idx]
+
+            # Find unique bins and their minimum depths
+            unique_bins, first_pos = np.unique(sorted_idx, return_index=True)
+            depth_buf[unique_bins] = sorted_depth[first_pos]
+
+            # Relaxation: for each valid point, check if depth <= any neighbor's depth
+            nb_dx = self._relax_dx  # (R,)
+            nb_dy = self._relax_dy  # (R,)
+
+            # Compute neighbor bin indices for all relaxation offsets
+            # nbx, nby: (N, R)
+            nbx = np.clip(bx_c[:, np.newaxis] + nb_dx[np.newaxis, :], 0, wb - 1)
+            nby = np.clip(by_c[:, np.newaxis] + nb_dy[np.newaxis, :], 0, hb - 1)
+            nb_idx = nbx * hb + nby  # (N, R)
+
+            # Gather neighbor depths: (N, R)
+            nb_depths = depth_buf[nb_idx]
+
+            # Point is near front surface if its depth <= any neighbor's depth
+            # depth[c]: (N,), nb_depths: (N, R) -> (N, R) comparison
+            near_front = depth[c, :, np.newaxis] <= nb_depths  # (N, 1) vs (N, R) -> (N, R)
+            near_front = near_front.any(axis=1)  # (N,)
+
+            # Visible if in view AND near front surface
+            camera_visible = in_view & near_front
+            vis_mask |= camera_visible
 
         return vis_mask
 

@@ -141,4 +141,5 @@ class TestMakeOcMesherRustBackend:
         cameras, bounds = _sample_inputs(sample_camera_pose, sample_intrinsics)
         factory.make_ocmesher(cameras, bounds, backend="rust", coarse_count=123)
 
-        assert calls[-1] == {"coarse_count": 123}
+        assert calls[-1]["coarse_count"] == 123
+        assert calls[-1]["device"] is None
