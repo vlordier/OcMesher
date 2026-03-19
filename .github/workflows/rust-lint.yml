@@ -26,10 +26,10 @@ jobs:
     name: rustfmt (format check)
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@b693db276a2b4e79b781a0f97477dfc3bb4e52f3
 
       - name: Set up Rust
-        uses: dtolnay/rust-toolchain@stable
+        uses: dtolnay/rust-toolchain@45b25828f3b5d74f62e5e123a832ee92ea58a55d
 
       - name: Run rustfmt
         working-directory: ocmesher-rust
@@ -39,10 +39,10 @@ jobs:
     name: clippy (workspace baseline)
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@b693db276a2b4e79b781a0f97477dfc3bb4e52f3
 
       - name: Set up Rust
-        uses: dtolnay/rust-toolchain@stable
+        uses: dtolnay/rust-toolchain@45b25828f3b5d74f62e5e123a832ee92ea58a55d
 
       - name: Run clippy
         working-directory: ocmesher-rust

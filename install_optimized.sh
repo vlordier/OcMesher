@@ -1,6 +1,6 @@
 #!/bin/bash
 # Optimized build for Apple M4 (arm64) benchmarking (Rust-native).
-set -e
+set -euo pipefail
 
 OS=$(uname -s)
 ARCH=$(uname -m)

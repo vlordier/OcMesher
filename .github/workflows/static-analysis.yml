@@ -28,7 +28,7 @@ jobs:
     name: clang-format (formatting check)
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@b693db276a2b4e79b781a0f97477dfc3bb4e52f3
 
       - name: Install clang-format
         run: |
@@ -44,7 +44,7 @@ jobs:
     name: clang-tidy (static analysis + naming)
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@b693db276a2b4e79b781a0f97477dfc3bb4e52f3
 
       - name: Install dependencies
         run: |
@@ -64,7 +64,7 @@ jobs:
     name: cppcheck (extra static analysis)
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@b693db276a2b4e79b781a0f97477dfc3bb4e52f3
 
       - name: Install cppcheck
         run: |
@@ -86,7 +86,7 @@ jobs:
     name: include-what-you-use (dependency hygiene)
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@b693db276a2b4e79b781a0f97477dfc3bb4e52f3
 
       - name: Install iwyu
         run: |

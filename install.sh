@@ -1,6 +1,6 @@
 #!/bin/bash
 
-set -e
+set -euo pipefail
 
 OS=$(uname -s)
 ARCH=$(uname -m)

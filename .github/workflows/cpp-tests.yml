@@ -22,7 +22,7 @@ jobs:
   build-and-test:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@b693db276a2b4e79b781a0f97477dfc3bb4e52f3
 
       - name: Install dependencies
         run: |
