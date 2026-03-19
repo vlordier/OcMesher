@@ -380,8 +380,9 @@ class MLXOcMesher:
         # Heights and widths: (C,)
         self._Hs_np = np.array(self.cameras[2], dtype=np.int32)
         self._Ws_np = np.array(self.cameras[3], dtype=np.int32)
-        self._Hs_f32 = self._Hs_np.astype(np.float32)  # Pre-cast for visibility filter
-        self._Ws_f32 = self._Ws_np.astype(np.float32)
+        # Pre-compute pixel dimensions as float32 arrays for visibility filter
+        self._Hs_f32 = self._Hs_np.astype(np.float32)  # (C,)
+        self._Ws_f32 = self._Ws_np.astype(np.float32)  # (C,)
 
         self.n_cameras = len(self.cameras[0])
 
@@ -412,6 +413,7 @@ class MLXOcMesher:
         self._vis_inv_factor = float(_VIS_BIN_FACTOR)
         self._depth_inf = np.float32(np.inf)  # Pre-compute for depth buffer
         self._depth_safe_eps = np.float32(1e-10)  # Pre-compute for depth division
+        self._half = np.float32(0.5)  # Pre-compute for marching cubes edge interpolation
 
     def _setup_mc_cache(self) -> None:
         """Initialize marching cubes lookup tables on device."""
@@ -880,7 +882,7 @@ class MLXOcMesher:
         s0 = a_sdf[:, ev[:, 0]]
         s1 = a_sdf[:, ev[:, 1]]
         denom = s0 - s1
-        denom = np.where(np.abs(denom) < _DENOM_EPS, 0.5, s0 / denom)
+        denom = np.where(np.abs(denom) < _DENOM_EPS, self._half, s0 / denom)
         t = np.clip(denom, 0.0, 1.0)
 
         p0 = a_corners[:, ev[:, 0]]
