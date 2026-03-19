@@ -54,6 +54,9 @@ _CORNER_QUANT_SCALE = CORNER_QUANT_SCALE  # Alias for internal use
 _VIS_BIN_FACTOR = VIS_BIN_FACTOR  # Alias for internal use
 _BIT_SHIFTS = BIT_SHIFTS  # Alias for internal use
 
+# Chunk size for SDF batch evaluation: prevents excessive memory usage per thread.
+_SDF_CHUNK_SIZE = 50_000
+
 # Edge table: for each of the 256 cube configurations, a 12-bit mask
 # indicating which edges are intersected by the iso-surface.
 _EDGE_TABLE: list[int] = [
@@ -553,7 +556,7 @@ class MLXOcMesher:
         if n_points == 0:
             return np.zeros((0, n_kernels), dtype=np.float32)
 
-        chunk_size = max(1, min(n_points, 50000 // n_kernels))
+        chunk_size = max(1, min(n_points, _SDF_CHUNK_SIZE // n_kernels))
         results: list[np.ndarray] = []
 
         for start in range(0, n_points, chunk_size):
