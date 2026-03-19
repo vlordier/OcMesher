@@ -706,56 +706,84 @@ class MLXOcMesher:
         coords: np.ndarray,
         levels: np.ndarray,
         corner_sdf: np.ndarray | None = None,
+        max_iters: int = 3,
     ) -> tuple[np.ndarray, np.ndarray, np.ndarray | None]:
-        """Refine surface cubes to achieve target resolution."""
-        n = len(coords)
-        if n == 0:
-            return coords, levels, corner_sdf
+        """Iteratively subdivide surface cubes that project large on screen.
 
-        refined_coords = [coords[0:1]]
-        refined_levels = [levels[0:1]]
-        refined_corner_sdf = [corner_sdf[0:1]] if corner_sdf is not None else None
+        Uses a conservative budget to avoid over-refinement. Matches Torch's
+        _refine_surface_octree algorithm.
 
-        for i in range(n - 1):
-            c = coords[i:i+1]
-            lvl = levels[i:i+1]
-            csdf = corner_sdf[i:i+1] if corner_sdf is not None else None
+        When *corner_sdf* is provided, kept (non-expanded) cubes reuse their
+        cached SDF values, so only newly-created children are evaluated.
 
-            proj_size = self._projected_sizes(self._cube_centers(c, lvl), lvl)[0]
+        Args:
+            kernels: SDF kernel list.
+            coords: ``(N, 3)`` int64 octree coordinates.
+            levels: ``(N,)`` int64 octree levels.
+            corner_sdf: ``(N, 8, K)`` float32 cached SDF values at cube
+                corners from a prior :meth:`_find_surface_cubes` call.
+            max_iters: maximum refinement iterations.
 
-            if proj_size >= self.pixels_per_cube * 2 and lvl[0] < 20:
-                children = c + self._child_offsets
-                child_levels = np.full(8, lvl[0] + 1, dtype=np.int64)
+        Returns:
+            ``(coords, levels, corner_sdf)`` where *corner_sdf* is the
+            ``(N, 8, K)`` float32 tensor from the last
+            :meth:`_find_surface_cubes` evaluation.
+        """
+        target_cubes = self.coarse_count * 4
 
-                child_corners = self._cube_corner_positions(children, child_levels)
-                flat_child_pos = child_corners.reshape(-1, 3)
-                child_sdf = self._evaluate_sdf(kernels, flat_child_pos)
-                child_sdf_reshaped = child_sdf.reshape(8, 8, len(kernels))
+        for _ in range(max_iters):
+            n = len(coords)
+            if n == 0:
+                break
+            if n >= target_cubes:
+                break
 
-                child_min = child_sdf_reshaped.min(axis=1)
-                if self.enclosed:
-                    child_surface = child_min.min(axis=1) < 0
-                else:
-                    child_max = child_sdf_reshaped.max(axis=1)
-                    child_surface = (child_min.min(axis=1) < 0) & (child_max.max(axis=1) > 0)
+            # Compute scale once and share between centers and projection.
+            cube_scales = self._cube_scales(levels)
+            positions = self._cube_centers(coords, levels, cube_scales=cube_scales)
+            proj = self._projected_sizes(positions, levels, cube_scales=cube_scales)
+            to_expand = proj > self.inv_scale
 
-                for j in range(8):
-                    if child_surface[j]:
-                        refined_coords.append(children[j:j+1])
-                        refined_levels.append(np.array([lvl[0] + 1]))
-                        if refined_corner_sdf is not None and csdf is not None:
-                            refined_corner_sdf.append(child_sdf_reshaped[j:j+1, :, :])
+            if not to_expand.any():
+                break
+
+            expand_idx = np.where(to_expand)[0]
+            n_expand = len(expand_idx)
+            n_keep = n - n_expand
+
+            budget = max(1, (target_cubes - n_keep) // 8)
+            if n_expand > budget:
+                sorted_idx = np.argsort(proj[expand_idx])[::-1]
+                expand_idx = expand_idx[sorted_idx[:budget]]
+                to_expand = np.zeros(n, dtype=bool)
+                to_expand[expand_idx] = True
+                n_expand = len(expand_idx)
+                n_keep = n - n_expand
+
+            keep_mask = ~to_expand
+            # Generate 8 children for each cube to expand
+            child_c = (coords[expand_idx, np.newaxis, :] * 2 + self._child_offsets[np.newaxis, :, :]).reshape(-1, 3)
+            child_l = np.full(n_expand * 8, levels[expand_idx[0]] + 1, dtype=np.int64)
+
+            if corner_sdf is not None:
+                # Optimised path: kept cubes already have valid corner SDF
+                # values — evaluate only the new children.
+                child_mask, child_corner_sdf = self._find_surface_cubes(
+                    kernels, child_c, child_l
+                )
+                coords = np.concatenate([coords[keep_mask], child_c[child_mask]])
+                levels = np.concatenate([levels[keep_mask], child_l[child_mask]])
+                corner_sdf = np.concatenate([corner_sdf[keep_mask], child_corner_sdf[child_mask]])
             else:
-                refined_coords.append(c)
-                refined_levels.append(lvl)
-                if refined_corner_sdf is not None and csdf is not None:
-                    refined_corner_sdf.append(csdf)
+                # Fallback: no cached SDF — evaluate everything.
+                new_coords = np.concatenate([coords[keep_mask], child_c])
+                new_levels = np.concatenate([levels[keep_mask], child_l])
+                mask, corner_sdf_new = self._find_surface_cubes(kernels, new_coords, new_levels)
+                coords = new_coords[mask]
+                levels = new_levels[mask]
+                corner_sdf = corner_sdf_new[mask]
 
-        return (
-            np.concatenate(refined_coords, axis=0),
-            np.concatenate(refined_levels, axis=0),
-            np.concatenate(refined_corner_sdf, axis=0) if refined_corner_sdf is not None else None,
-        )
+        return coords, levels, corner_sdf
 
     def _visibility_filter(self, positions: np.ndarray) -> np.ndarray:
         """Depth-buffer visibility filtering using neighbor relaxation.
