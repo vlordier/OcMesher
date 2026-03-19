@@ -26,6 +26,12 @@ on:
       - "uv.lock"
       - ".github/workflows/docs.yml"
 
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+      - "uv.lock"
+      - ".github/workflows/docs.yml"
+
 permissions:
   contents: read
 

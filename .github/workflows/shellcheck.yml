@@ -8,6 +8,10 @@ on:
     paths:
       - "**.sh"
 
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
 jobs:
   shellcheck:
     name: ShellCheck
