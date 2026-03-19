@@ -41,8 +41,6 @@ dev = [
 ]
 benchmark = [
     "setuptools<81",  # vnoise currently imports pkg_resources
-    "numba>=0.60.0",  # JIT-compiled SDF (Opt-numba tier)
-    "mlx>=0.22.0",    # Apple Metal GPU SDF (Opt-metal tier, macOS-only)
 ]
 docs = [
     "mkdocs>=1.6.0",
