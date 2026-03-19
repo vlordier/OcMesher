@@ -93,6 +93,10 @@ _MAX_SPEC_CACHE_SIZE = 128
 _SPEC_TYPE_SPHERE = "sphere"
 _SPEC_TYPE_PLANE = "plane"
 
+# Common coordinate vectors used in spec inference.
+_ORIGIN_3D = [0.0, 0.0, 0.0]
+_UNIT_Z_3D = [0.0, 0.0, 1.0]
+
 
 def _device_family(device: str) -> str:
     normalized = device.strip().lower()
@@ -221,7 +225,7 @@ def _infer_native_primitive_specs(kernels: Sequence[Any]) -> list[dict[str, Any]
         if np.allclose(values[1:4], values[1], atol=SPEC_INFERENCE_ATOL) and np.isclose(values[1], values[4], atol=SPEC_INFERENCE_ATOL):
             radius = max(0.0, -float(values[0]))
             if np.isclose(values[1], 1.0 - radius, atol=SPEC_INFERENCE_RTOL):
-                specs.append({"type": _SPEC_TYPE_SPHERE, "center": [0.0, 0.0, 0.0], "radius": radius})
+                specs.append({"type": _SPEC_TYPE_SPHERE, "center": _ORIGIN_3D, "radius": radius})
                 continue
 
         # Z-plane: f(x)=z-offset.
@@ -230,7 +234,7 @@ def _infer_native_primitive_specs(kernels: Sequence[Any]) -> list[dict[str, Any]
         ):
             offset = -float(values[0])
             if np.isclose(values[3], 1.0 - offset, atol=SPEC_INFERENCE_RTOL) and np.isclose(values[4], -1.0 - offset, atol=SPEC_INFERENCE_RTOL):
-                specs.append({"type": _SPEC_TYPE_PLANE, "normal": [0.0, 0.0, 1.0], "offset": offset})
+                specs.append({"type": _SPEC_TYPE_PLANE, "normal": _UNIT_Z_3D, "offset": offset})
                 continue
 
         return None
