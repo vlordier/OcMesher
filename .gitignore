@@ -47,6 +47,7 @@ benchmark_artifacts/generated/
 # Build and demo artifacts
 *.obj
 test_*.sh
+_*test_*.sh
 
 # Test / coverage artifacts
 .pytest_cache/
