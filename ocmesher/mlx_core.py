@@ -316,12 +316,19 @@ class MLXOcMesher:
         bt = np.array(bounds, dtype=np.float64)
         self.bounds_min = bt[0::2]  # (3,)
         self.bounds_max = bt[1::2]  # (3,)
+        # Pre-compute float32 bounds for SDF evaluation (avoids per-call astype)
+        self._bounds_min_f32 = self.bounds_min.astype(np.float32)  # (3,)
+        self._bounds_max_f32 = self.bounds_max.astype(np.float32)  # (3,)
         self.center = (self.bounds_min + self.bounds_max) / 2
         extent = self.bounds_max - self.bounds_min
         self.size = float(extent.max() * 1.1)
 
-        # Pre-compute the world-space origin
+        # Pre-compute the world-space origin (already float64)
         self._origin = (self.center - self.size / 2).astype(np.float64)  # (3,)
+
+        # Pre-compute exp2(scales) for all possible levels (0-30) to avoid per-call exp2
+        all_levels = np.arange(31, dtype=np.float64)
+        self._exp2_scales = self.size / np.exp2(all_levels)  # (31,) indexed by level
 
         # Pre-compute octree child offsets
         self._child_offsets = np.array([
@@ -515,27 +522,30 @@ class MLXOcMesher:
 
     def _cube_scales(self, levels: np.ndarray) -> np.ndarray:
         """Compute world-space cube side lengths from octree levels."""
-        return self.size / np.exp2(levels.astype(np.float64))
+        return self._exp2_scales[levels.astype(np.int32)]
 
-    def _cube_centers(
+    def _cube_corner_positions(
         self, coords: np.ndarray, levels: np.ndarray, *, cube_scales: np.ndarray | None = None
     ) -> np.ndarray:
         """Integer octree coords -> world-space center positions."""
         if cube_scales is None:
             cube_scales = self._cube_scales(levels)
-        return self._origin + cube_scales[:, np.newaxis] * (coords.astype(np.float64) + 0.5)
+        # _origin is float64, coords is int, scale is float64 → result is float64, no astype needed
+        return self._origin + cube_scales[:, np.newaxis] * (coords + 0.5)
 
     def _cube_corner_positions(self, coords: np.ndarray, levels: np.ndarray) -> np.ndarray:
         """Return world positions of all 8 corners for each cube."""
         corner_coords = coords[:, np.newaxis, :] + self._corner_offsets[np.newaxis, :, :]
         scale = self._cube_scales(levels)[:, np.newaxis, np.newaxis]
-        return self._origin + scale * corner_coords.astype(np.float64)
+        # _origin is float64, scale is float64, corner_coords is int → result is float64
+        return self._origin + scale * corner_coords
 
     def _cube_corner_positions_f64(self, coords: np.ndarray, levels: np.ndarray) -> np.ndarray:
         """Like _cube_corner_positions but always in float64 on CPU."""
         corner_coords = coords[:, np.newaxis, :] + self._corner_offsets[np.newaxis, :, :]
-        scale = (self.size / np.exp2(levels.astype(np.float64)))[:, np.newaxis, np.newaxis]
-        return self._origin + scale * corner_coords.astype(np.float64)
+        scale = self._cube_scales(levels)[:, np.newaxis, np.newaxis]
+        # _origin is float64, scale is float64 → result is float64, no astype needed
+        return self._origin + scale * corner_coords
 
     def _projected_sizes(
         self, positions: np.ndarray, levels: np.ndarray, *, cube_scales: np.ndarray | None = None
@@ -578,8 +588,8 @@ class MLXOcMesher:
 
         # For enclosed mode, mark out-of-bounds points
         if self.enclosed:
-            b_min = self.bounds_min.astype(positions.dtype)
-            b_max = self.bounds_max.astype(positions.dtype)
+            b_min = self._bounds_min_f32
+            b_max = self._bounds_max_f32
             out_bound = np.any(positions <= b_min, axis=1) | np.any(positions >= b_max, axis=1)
 
         for start in range(0, n_points, chunk_size):
