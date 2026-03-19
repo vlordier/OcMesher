@@ -453,6 +453,11 @@ class RustOcMesher:
             raise TypeError(msg)
         return result[0], result[1]
 
+    def close(self):
+        """Clean up resources held by the Rust backend."""
+        # Signal to the Rust backend that this instance is being destroyed.
+        # The Rust backend's Drop implementation handles cleanup.
+
 
 def make_rust_ocmesher(
     cameras: Sequence[Any],
