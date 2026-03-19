@@ -79,6 +79,9 @@ _DEVICE_FAMILY_CPU = "cpu"
 _DEVICE_FAMILY_CUDA = "cuda"
 _DEVICE_FAMILY_MPS = "mps"
 
+# Preferred dtype for MPS (Apple Silicon) which requires float32.
+_MPS_PREFERRED_DTYPE = "float32"
+
 
 def _device_family(device: str) -> str:
     normalized = device.strip().lower()
@@ -313,7 +316,7 @@ class RustOcMesher:
 
         self.dtype: str | None
         if dtype is None and self._device_family == _DEVICE_FAMILY_MPS:
-            self.dtype = "float32"
+            self.dtype = _MPS_PREFERRED_DTYPE
         else:
             self.dtype = dtype
 
@@ -344,7 +347,7 @@ class RustOcMesher:
             "supports_cpu": True,
             "supports_cuda": self._device_caps["supports_cuda"],
             "supports_mps": self._device_caps["supports_mps"],
-            "preferred_dtype": "float32",
+            "preferred_dtype": _MPS_PREFERRED_DTYPE,
             "max_batch": self.max_batch,
             "max_batch_mps": self.max_batch if self._device_family == _DEVICE_FAMILY_MPS else None,
             "supports_async": self._device_family in (_DEVICE_FAMILY_CUDA, _DEVICE_FAMILY_MPS),
