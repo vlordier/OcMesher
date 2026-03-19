@@ -37,7 +37,7 @@ jobs:
 
       - name: Run clang-format
         run: |
-          find ocmesher/source -name "*.cpp" -o -name "*.h" | \
+          find ocmesher/source \( -name "*.cpp" -o -name "*.h" \) | \
             xargs clang-format-18 --dry-run --Werror
 
   clang-tidy:
