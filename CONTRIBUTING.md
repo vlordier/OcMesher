@@ -31,26 +31,29 @@ uv run pre-commit install
 ### Python
 
 ```bash
-# Run tests
-pytest tests/ -v
+# Run tests (parallel with pytest-xdist)
+uv run pytest tests/ -v --ignore=tests/cpp -n auto
 
 # Run linting and formatting
-ruff check ocmesher/ tests/
-ruff format ocmesher/ tests/
+uv run ruff check .
+uv run ruff format --check .
+
+# Run all quality checks (lint + tests)
+make quality
 ```
 
 ### Rust
 
 ```bash
-# Build the Rust project
+# Build the Rust project (toolchain auto-detected via rust-toolchain.toml)
 cargo build --release
 
 # Run all Rust tests
 cargo test
 
-# Lint and format
-cargo fmt --all -- --check
-cargo clippy --all-targets --all-features -- -D warnings
+# Lint and format (clippy and fmt are auto-configured via rust-toolchain.toml)
+cargo fmt --all --check
+cargo clippy --workspace --all-targets -- -D warnings
 ```
 
 You can also use the provided `Makefile` shortcuts (for convenience):
