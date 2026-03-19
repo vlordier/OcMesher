@@ -4,10 +4,10 @@
 [![Lint](https://github.com/princeton-vl/OcMesher/actions/workflows/lint.yml/badge.svg)](https://github.com/princeton-vl/OcMesher/actions/workflows/lint.yml)
 [![Static Analysis](https://github.com/princeton-vl/OcMesher/actions/workflows/static-analysis.yml/badge.svg)](https://github.com/princeton-vl/OcMesher/actions/workflows/static-analysis.yml)
 [![Docs](https://github.com/princeton-vl/OcMesher/actions/workflows/docs.yml/badge.svg)](https://princeton-vl.github.io/OcMesher/)
-[![Python 3.10+](https://img.shields.io/badge/python-3.10%2B-blue)](https://www.python.org/downloads/)
+[![Python 3.11+](https://img.shields.io/badge/python-3.11%2B-blue)](https://www.python.org/downloads/)
 [![License: BSD-3-Clause](https://img.shields.io/badge/license-BSD--3--Clause-blue.svg)](https://github.com/princeton-vl/OcMesher/blob/main/LICENSE)
 
-Implementation source-code for <it>OcMesher</it>, which extracts a mesh for an unbounded scene represented by signed distance functions (SDFs). Even though the scene is unbounded, the mesh is memory-efficient, and highly detailed from a given set of camera views. OcMesher is used by default in [Infinigen](https://github.com/princeton-vl/infinigen) to speed up video generation, improve rendering quality, and export terrain meshes to external simulators.
+Implementation source-code for *OcMesher*, which extracts a mesh for an unbounded scene represented by signed distance functions (SDFs). Even though the scene is unbounded, the mesh is memory-efficient, and highly detailed from a given set of camera views. OcMesher is used by default in [Infinigen](https://github.com/princeton-vl/infinigen) to speed up video generation, improve rendering quality, and export terrain meshes to external simulators.
 
 <img src=".github/OcMesher.png" width='1000'>
 
@@ -42,7 +42,7 @@ Please view the video [here](https://youtu.be/YA1c5L0Ncuw) for more qualitative 
 ### Prerequisites
 
 - [uv](https://docs.astral.sh/uv/getting-started/installation/) (Python package manager)
-- Python >= 3.10 (managed automatically by uv)
+- Python >= 3.11 (managed automatically by uv)
 - A C++ compiler: `g++` on Linux, or LLVM's `clang++` on macOS
 
 ### Standalone Installation
@@ -118,48 +118,20 @@ For local performance and regression validation, use the Rust-native benchmark s
 
 ```bash
 cargo bench
-uv run python benchmarks/bench_rust_scene.py --runs 3 --snapshot-json benchmark_artifacts/generated/bench_rust_scene_snapshot.json
 ```
 
 To persist benchmark results with run metadata for later branch-to-branch comparison, use the output from `cargo bench` or custom Rust-native benchmarking tools.
 
-The benchmark helpers also support comparing snapshot files from two runs or
-branches:
+To run API parity checks against the upstream branch:
 
 ```bash
-uv run python benchmarks/bench_python_overhead.py --compare old.json new.json
-uv run python benchmarks/bench_e2e.py --compare old.json new.json
-uv run python benchmarks/bench_rust_scene.py --compare benchmark_artifacts/generated/bench_rust_scene_snapshot.json benchmark_artifacts/generated/bench_rust_scene_mps_snapshot.json
+uv run python benchmarks/bench_api_parity_upstream.py
 ```
 
 Notes:
 - Snapshot files include execution metadata such as branch, commit, Python version, platform, and command line.
 - Local run outputs should go under `benchmark_artifacts/generated/` (git-ignored) to keep `benchmark_artifacts/` snapshots tidy.
 - Optional runtime tiers such as `numba` and `mlx` are skipped automatically when their dependencies are not installed.
-- The MLX benchmark is a narrow SDF-only pilot on macOS, not a full mesher backend.
-- The Rust scene benchmark compares the compiled `extract_native_scene(...)` and `extract_tch_scene(...)` pilot paths on the same primitive list.
-- The Rust scene benchmark can also compare two snapshot JSON files directly, which is useful for CPU-vs-MPS or branch-to-branch pilot comparisons.
-
-To perform deterministic numerical parity checks against `main`, ensure both branches are built with the default build script (`bash install.sh`) and compare mesh counts/sums for the same fixed camera/SDF case.
-
-```bash
-# default parity check against main
-uv run python benchmark.py --upstream-parity
-
-# stricter automation-friendly parity check (non-zero exit on mismatch)
-uv run python benchmark.py --upstream-parity --upstream-parity-strict
-
-# custom parity mesh settings and tolerance
-uv run python benchmark.py --upstream-parity main --parity-pixels-per-cube 24 --parity-coarse-count 200000 --parity-atol 1e-10
-
-# write parity payload to JSON for tooling/CI artifacts
-uv run python benchmark.py --upstream-parity --json benchmark_parity.json
-```
-
-Notes:
-- `--upstream-parity-strict` requires `--upstream-parity`.
-- `--parity-pixels-per-cube` and `--parity-coarse-count` must be >= 1.
-- `--parity-atol` must be >= 0.
 
 ### Speedup Plot (Plotters)
 
