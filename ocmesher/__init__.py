@@ -11,7 +11,7 @@ from importlib.metadata import PackageNotFoundError, version
 # "No handlers could be found for logger 'ocmesher'" warnings.
 logging.getLogger(__name__).addHandler(logging.NullHandler())
 
-__all__ = ["CAMERA_DATA_STRIDE", "OcMesher", "RustOcMesher", "TorchOcMesher", "make_ocmesher", "make_rust_ocmesher"]
+__all__ = ["CAMERA_DATA_STRIDE", "OcMesher", "RustOcMesher", "TorchOcMesher", "MLXOcMesher", "make_ocmesher", "make_rust_ocmesher"]
 
 try:
     __version__ = version("ocmesher")
@@ -37,6 +37,10 @@ def __getattr__(name: str):
         from .rust_backend import RustOcMesher
 
         return RustOcMesher
+    if name == "MLXOcMesher":
+        from .mlx_core import MLXOcMesher
+
+        return MLXOcMesher
     if name == "make_rust_ocmesher":
         from .rust_backend import make_rust_ocmesher
 

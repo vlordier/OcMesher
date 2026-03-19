@@ -15,6 +15,7 @@ __all__ = ["make_ocmesher"]
 _BACKEND_CPP = "cpp"
 _BACKEND_TORCH = "torch"
 _BACKEND_RUST = "rust"
+_BACKEND_MLX = "mlx"
 
 
 def make_ocmesher(
@@ -34,6 +35,7 @@ def make_ocmesher(
             - ``"cpp"``: original C++ backend via ``OcMesher``
             - ``"torch"``: PyTorch backend via ``TorchOcMesher``
             - ``"rust"``: Rust wrapper backend via ``make_rust_ocmesher``
+            - ``"mlx"``: MLX backend via ``MLXOcMesher`` (Apple Silicon)
         device: Optional device for ``torch``/``rust`` backends (e.g. ``cpu``, ``mps``, ``cuda``).
         **kwargs: Forwarded to the selected backend constructor/factory.
             Rust backend supports ``kernel_runtime`` (``"auto"|"native"|"tch"``).
@@ -60,5 +62,10 @@ def make_ocmesher(
             return make_rust_ocmesher(cameras, bounds, **kwargs)
         return make_rust_ocmesher(cameras, bounds, device=device, **kwargs)
 
-    msg = f"Unknown backend {backend!r}. Expected one of: {_BACKEND_CPP!r}, {_BACKEND_TORCH!r}, {_BACKEND_RUST!r}."
+    if backend == _BACKEND_MLX:
+        from .mlx_core import MLXOcMesher
+
+        return MLXOcMesher(cameras, bounds, device=device, **kwargs)
+
+    msg = f"Unknown backend {backend!r}. Expected one of: {_BACKEND_CPP!r}, {_BACKEND_TORCH!r}, {_BACKEND_RUST!r}, {_BACKEND_MLX!r}."
     raise ValueError(msg)
