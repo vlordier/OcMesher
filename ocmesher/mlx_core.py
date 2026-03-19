@@ -367,8 +367,6 @@ class MLXOcMesher:
 
     def _setup_camera_tensors(self) -> None:
         """Convert and upload camera data to MLX device."""
-        import mlx.core as mx
-
         # Stack camera poses: (C, 4, 4)
         cam_poses = np.stack([p.astype(np.float32) for p in self.cameras[0]], axis=0)
 
@@ -416,7 +414,6 @@ class MLXOcMesher:
     def _setup_mc_cache(self) -> None:
         """Initialize marching cubes lookup tables on device."""
         import mlx.core as mx
-        from mlx.core import array as mx_array
 
         if self.device not in self._mc_cache:
             # Edge table
@@ -558,7 +555,6 @@ class MLXOcMesher:
             cube_scales = self._cube_scales(levels)
 
         positions_f = positions.astype(np.float32)
-        n_pos = positions_f.shape[0]
 
         # Pre-split rotation/translation from precomputed camera projection
         # cam_coords[c, n] = R[c] @ pos[n] + t[c]
@@ -721,14 +717,14 @@ class MLXOcMesher:
 
         for i in range(n - 1):
             c = coords[i:i+1]
-            l = levels[i:i+1]
+            lvl = levels[i:i+1]
             csdf = corner_sdf[i:i+1] if corner_sdf is not None else None
 
-            proj_size = self._projected_sizes(self._cube_centers(c, l), l)[0]
+            proj_size = self._projected_sizes(self._cube_centers(c, lvl), lvl)[0]
 
-            if proj_size >= self.pixels_per_cube * 2 and l[0] < 20:
+            if proj_size >= self.pixels_per_cube * 2 and lvl[0] < 20:
                 children = c + self._child_offsets
-                child_levels = np.full(8, l[0] + 1, dtype=np.int64)
+                child_levels = np.full(8, lvl[0] + 1, dtype=np.int64)
 
                 child_corners = self._cube_corner_positions(children, child_levels)
                 flat_child_pos = child_corners.reshape(-1, 3)
@@ -745,12 +741,12 @@ class MLXOcMesher:
                 for j in range(8):
                     if child_surface[j]:
                         refined_coords.append(children[j:j+1])
-                        refined_levels.append(np.array([l[0] + 1]))
+                        refined_levels.append(np.array([lvl[0] + 1]))
                         if refined_corner_sdf is not None and csdf is not None:
                             refined_corner_sdf.append(child_sdf_reshaped[j:j+1, :, :])
             else:
                 refined_coords.append(c)
-                refined_levels.append(l)
+                refined_levels.append(lvl)
                 if refined_corner_sdf is not None and csdf is not None:
                     refined_corner_sdf.append(csdf)
 
@@ -785,7 +781,13 @@ class MLXOcMesher:
         # Per-camera in-view check
         h_all = self._Hs_f32  # (C,)
         w_all = self._Ws_f32  # (C,)
-        in_view_all = (depth > 0) & (px >= 0) & (px < w_all[:, np.newaxis]) & (py >= 0) & (py < h_all[:, np.newaxis])  # (C, N)
+        in_view_all = (
+            (depth > 0) &
+            (px >= 0) &
+            (px < w_all[:, np.newaxis]) &
+            (py >= 0) &
+            (py < h_all[:, np.newaxis])
+        )  # (C, N)
 
         # Early exit if no points in any view
         if not in_view_all.any():
