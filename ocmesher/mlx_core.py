@@ -321,7 +321,7 @@ class MLXOcMesher:
         self.size = float(extent.max() * 1.1)
 
         # Pre-compute the world-space origin
-        self._origin = self.center - self.size / 2  # (3,)
+        self._origin = (self.center - self.size / 2).astype(np.float64)  # (3,)
 
         # Pre-compute octree child offsets
         self._child_offsets = np.array([
@@ -371,8 +371,8 @@ class MLXOcMesher:
         # Heights and widths: (C,)
         self._Hs_np = np.array(self.cameras[2], dtype=np.int32)
         self._Ws_np = np.array(self.cameras[3], dtype=np.int32)
-        self._Hs_t = mx.array(self.cameras[2], dtype=mx.int32)
-        self._Ws_t = mx.array(self.cameras[3], dtype=mx.int32)
+        self._Hs_f32 = self._Hs_np.astype(np.float32)  # Pre-cast for visibility filter
+        self._Ws_f32 = self._Ws_np.astype(np.float32)
 
         self.n_cameras = len(self.cameras[0])
 
@@ -400,7 +400,8 @@ class MLXOcMesher:
         vis_wb = [max(1, int(w / _VIS_BIN_FACTOR)) for w in self.cameras[3]]
         self._vis_hb = np.array(vis_hb, dtype=np.int32)
         self._vis_wb = np.array(vis_wb, dtype=np.int32)
-        self._vis_inv_factor = float(_VIS_BIN_FACTOR)  # Pre-compute for visibility filter
+        self._vis_inv_factor = float(_VIS_BIN_FACTOR)
+        self._depth_inf = np.float32(np.inf)  # Pre-compute for depth buffer
 
     def _setup_mc_cache(self) -> None:
         """Initialize marching cubes lookup tables on device."""
@@ -522,8 +523,7 @@ class MLXOcMesher:
         """Integer octree coords -> world-space center positions."""
         if cube_scales is None:
             cube_scales = self._cube_scales(levels)
-        origin = self._origin.astype(np.float64)
-        return origin + cube_scales[:, np.newaxis] * (coords.astype(np.float64) + 0.5)
+        return self._origin + cube_scales[:, np.newaxis] * (coords.astype(np.float64) + 0.5)
 
     def _cube_corner_positions(self, coords: np.ndarray, levels: np.ndarray) -> np.ndarray:
         """Return world positions of all 8 corners for each cube."""
@@ -773,8 +773,8 @@ class MLXOcMesher:
         py = cam_coords[:, :, 1] / depth_safe
 
         # Per-camera in-view check
-        h_all = self._Hs_np.astype(np.float32)  # (C,)
-        w_all = self._Ws_np.astype(np.float32)  # (C,)
+        h_all = self._Hs_f32  # (C,)
+        w_all = self._Ws_f32  # (C,)
         in_view_all = (depth > 0) & (px >= 0) & (px < w_all[:, np.newaxis]) & (py >= 0) & (py < h_all[:, np.newaxis])  # (C, N)
 
         # Early exit if no points in any view
@@ -807,8 +807,7 @@ class MLXOcMesher:
             idx_c = bx_c * hb + by_c  # (N,)
 
             # Build depth buffer: for each bin, store minimum depth
-            # Use sorting + unique for efficient min-per-bin computation
-            depth_buf = np.full(buf_size, np.inf, dtype=np.float32)
+            depth_buf = np.full(buf_size, self._depth_inf, dtype=np.float32)
             valid_idx = idx_c[valid_mask]
             valid_depth = depth[c, valid_mask]
             sort_order = np.argsort(valid_idx)
