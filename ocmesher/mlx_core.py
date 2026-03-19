@@ -393,11 +393,11 @@ class MLXOcMesher:
         self._inv_pose_t = inv_poses_np[:, :, 3]  # (C, 3)
 
         # Visibility bin dimensions
-        factor = _VIS_BIN_FACTOR
-        vis_hb = [max(1, int(h / factor)) for h in self.cameras[2]]
-        vis_wb = [max(1, int(w / factor)) for w in self.cameras[3]]
+        vis_hb = [max(1, int(h / _VIS_BIN_FACTOR)) for h in self.cameras[2]]
+        vis_wb = [max(1, int(w / _VIS_BIN_FACTOR)) for w in self.cameras[3]]
         self._vis_hb = np.array(vis_hb, dtype=np.int32)
         self._vis_wb = np.array(vis_wb, dtype=np.int32)
+        self._vis_inv_factor = float(_VIS_BIN_FACTOR)  # Pre-compute for visibility filter
 
     def _setup_mc_cache(self) -> None:
         """Initialize marching cubes lookup tables on device."""
@@ -779,9 +779,8 @@ class MLXOcMesher:
             return np.zeros(n_pos, dtype=bool)
 
         # Bin coordinates for all cameras at once
-        factor = float(_VIS_BIN_FACTOR)
-        bx_all = np.clip((px * factor).astype(np.int32), 0, None)  # (C, N)
-        by_all = np.clip((py * factor).astype(np.int32), 0, None)  # (C, N)
+        bx_all = np.clip((px * self._vis_inv_factor).astype(np.int32), 0, None)  # (C, N)
+        by_all = np.clip((py * self._vis_inv_factor).astype(np.int32), 0, None)  # (C, N)
 
         vis_mask = np.zeros(n_pos, dtype=bool)
 
