@@ -265,7 +265,7 @@ markers = [
     "integration: marks tests requiring compiled C++ library",
 ]
 filterwarnings = [
-    "ignore::DeprecationWarning",
+    "ignore::DeprecationWarning:pkg_resources",
 ]
 
 [tool.coverage.run]
