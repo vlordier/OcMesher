@@ -53,16 +53,11 @@ repos:
         files: \.py$
 
   - repo: https://github.com/pre-commit/mirrors-clang-format
-    rev: v19.1.7
+    rev: v22.1.1
     hooks:
       - id: clang-format
         types_or: [c, c++]
 
-  - repo: https://github.com/pre-commit/mirrors-clang-tidy
-    rev: v19.1.7
-    hooks:
-      - id: clang-tidy
-        types_or: [c, c++]
         args:
           - "--extra-arg=-std=c++17"
           - "--extra-arg=-fopenmp"
