@@ -51,8 +51,9 @@ def _mps_available() -> bool:
     return hasattr(torch.backends, "mps") and torch.backends.mps.is_available()
 
 
-# Epsilon for safe division in marching-cubes interpolation.
-_DENOM_EPS = 1e-12
+from ._constants import DENOM_EPS
+
+_DENOM_EPS = DENOM_EPS  # Alias for internal use
 
 # Whether torch.compile is available (PyTorch ≥ 2.0).
 _HAS_COMPILE = hasattr(torch, "compile")

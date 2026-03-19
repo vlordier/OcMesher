@@ -47,8 +47,9 @@ def _mlx_available() -> bool:
         return False
 
 
-# Epsilon for safe division in marching-cubes interpolation.
-_DENOM_EPS = 1e-12
+from ._constants import DENOM_EPS
+
+_DENOM_EPS = DENOM_EPS  # Alias for internal use
 
 # Edge table: for each of the 256 cube configurations, a 12-bit mask
 # indicating which edges are intersected by the iso-surface.
