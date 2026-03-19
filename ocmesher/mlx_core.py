@@ -562,7 +562,7 @@ class MLXOcMesher:
 
             with ThreadPoolExecutor(max_workers=self.n_sdf_workers) as executor:
                 chunk_results = list(executor.map(
-                    lambda k_p: self._evaluate_sdf_kernel(k_p[0], k_p[1]),
+                    self._evaluate_sdf_kernel,
                     [(k, chunk_pos) for k in kernels]
                 ))
 
