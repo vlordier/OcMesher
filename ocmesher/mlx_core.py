@@ -1,5 +1,6 @@
 # Copyright (c) Princeton University.
-# This source code is licensed under the BSD 3-Clause license found in the LICENSE file in the root directory of this source tree.
+# This source code is licensed under the BSD 3-Clause license found in the
+# LICENSE file in the root directory of this source tree.
 
 """MLX-based octree mesher with native Apple Silicon acceleration.
 
@@ -24,36 +25,36 @@ float32 for all computations when running on MLX device.
 from __future__ import annotations
 
 import logging
-from typing import Any, ClassVar
+from typing import TYPE_CHECKING, Any, ClassVar
 
 import numpy as np
 import trimesh
 
-from ._types import BoundsLike, CamerasTuple, KernelSequence, MeshResult
+from ._constants import DENOM_EPS, CORNER_QUANT_SCALE, VIS_BIN_FACTOR, BIT_SHIFTS
 from ._validation import validate_bounds, validate_cameras, validate_kernels, validate_mesher_params
 from .utils.timer import Timer
+
+if TYPE_CHECKING:
+    from ._types import BoundsLike, CamerasTuple, KernelSequence, MeshResult
 
 logger = logging.getLogger(__name__)
 
 __all__ = ["MLXOcMesher"]
 
-
-def _mlx_available() -> bool:
-    """Return True if MLX is available on this system."""
-    try:
-        import mlx.core as mx
-
-        return True
-    except ImportError:
-        return False
-
-
-from ._constants import DENOM_EPS, CORNER_QUANT_SCALE, VIS_BIN_FACTOR, BIT_SHIFTS
-
 _DENOM_EPS = DENOM_EPS  # Alias for internal use
 _CORNER_QUANT_SCALE = CORNER_QUANT_SCALE  # Alias for internal use
 _VIS_BIN_FACTOR = VIS_BIN_FACTOR  # Alias for internal use
 _BIT_SHIFTS = BIT_SHIFTS  # Alias for internal use
+
+
+def _mlx_available() -> bool:
+    """Return True if MLX is available on this system."""
+    try:
+        import mlx.core as mx  # noqa: F401
+
+        return True
+    except ImportError:
+        return False
 
 # Chunk size for SDF batch evaluation: prevents excessive memory usage per thread.
 _SDF_CHUNK_SIZE = 50_000
