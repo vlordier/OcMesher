@@ -25,10 +25,10 @@ install:
 	bash install.sh
 
 test:
-	uv run python -m pytest tests/ -v --ignore=tests/cpp
+	uv run python -m pytest tests/ -v --ignore=tests/cpp -n auto
 
 coverage:
-	uv run python -m pytest tests/ -v --ignore=tests/cpp --cov=ocmesher --cov-report=term-missing --cov-report=html
+	uv run python -m pytest tests/ -v --ignore=tests/cpp -n auto --cov=ocmesher --cov-report=term-missing --cov-report=html
 
 lint:
 	$(MAKE) lint-python
@@ -64,7 +64,7 @@ typecheck:
 quality:
 	$(MAKE) lint-python
 	$(MAKE) lint-rust
-	uv run python -m pytest tests/ -v --ignore=tests/cpp
+	uv run python -m pytest tests/ -v --ignore=tests/cpp -n auto
 
 fix:
 	uv run ruff check . --fix

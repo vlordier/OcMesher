@@ -69,7 +69,7 @@ jobs:
       - name: Run Python tests
         run: |
           if [ -d tests ]; then
-            uv run python -m pytest tests/ -v --ignore=tests/cpp
+            uv run python -m pytest tests/ -v --ignore=tests/cpp -n auto
           else
             echo "No Python tests directory found, skipping."
           fi
