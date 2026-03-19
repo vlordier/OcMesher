@@ -27,6 +27,7 @@ import logging
 from typing import Any, ClassVar
 
 import numpy as np
+import trimesh
 
 from ._types import BoundsLike, CamerasTuple, KernelSequence, MeshResult
 from ._validation import validate_bounds, validate_cameras, validate_kernels, validate_mesher_params
@@ -373,7 +374,7 @@ class MLXOcMesher:
 
         # Pre-split rotation/translation components for projection
         self._inv_pose_R = inv_poses_np[:, :, :3]  # (C, 3, 3)
-        self._inv_pose_t = inv_poses_np[:, :, 3:4]  # (C, 1, 3)
+        self._inv_pose_t = inv_poses_np[:, :, 3]  # (C, 3)
 
         # Visibility bin dimensions
         factor = _VIS_BIN_FACTOR
@@ -565,7 +566,7 @@ class MLXOcMesher:
 
             with ThreadPoolExecutor(max_workers=self.n_sdf_workers) as executor:
                 chunk_results = list(executor.map(
-                    self._evaluate_sdf_kernel,
+                    lambda k_p: MLXOcMesher._evaluate_sdf_kernel(k_p[0], k_p[1]),
                     [(k, chunk_pos) for k in kernels]
                 ))
 
