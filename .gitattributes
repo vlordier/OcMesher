@@ -1,0 +1,23 @@
+# Auto detect text files and normalize line endings
+* text=auto
+
+# Python, Rust, C++, shell, and config files always use LF
+*.py     text eol=lf
+*.rs     text eol=lf
+*.cpp    text eol=lf
+*.h      text eol=lf
+*.sh     text eol=lf
+*.toml   text eol=lf
+*.yml    text eol=lf
+*.yaml   text eol=lf
+*.json   text eol=lf
+*.md     text eol=lf
+*.cff    text eol=lf
+
+# Ensure generated files stay binary
+*.png    binary
+*.jpg    binary
+*.webp   binary
+*.gif    binary
+*.ico    binary
+*.pdf    binary
