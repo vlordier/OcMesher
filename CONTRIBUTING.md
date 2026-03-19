@@ -15,6 +15,12 @@ uv sync
 bash install.sh
 ```
 
+> **Apple Silicon M4 note:** For Apple Silicon (M1–M4) benchmarking with the
+> Rust-native backend, use `install_optimized.sh` instead:
+> ```bash
+> bash install_optimized.sh
+> ```
+
 4. (Optional) Install pre-commit hooks to automatically lint and format before each commit:
 
 ```bash
