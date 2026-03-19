@@ -11,6 +11,11 @@ from .core import OcMesher
 
 __all__ = ["make_ocmesher"]
 
+# Supported backend identifiers.
+_BACKEND_CPP = "cpp"
+_BACKEND_TORCH = "torch"
+_BACKEND_RUST = "rust"
+
 
 def make_ocmesher(
     cameras: Any,
@@ -40,20 +45,20 @@ def make_ocmesher(
         ValueError: If backend is not one of ``cpp``, ``torch``, or ``rust``.
         ImportError: If the required backend module is not installed.
     """
-    if backend == "cpp":
+    if backend == _BACKEND_CPP:
         return OcMesher(cameras, bounds, **kwargs)
 
-    if backend == "torch":
+    if backend == _BACKEND_TORCH:
         from .torch_core import TorchOcMesher
 
         return TorchOcMesher(cameras, bounds, device=device, **kwargs)
 
-    if backend == "rust":
+    if backend == _BACKEND_RUST:
         from .rust_backend import make_rust_ocmesher
 
         if device is None:
             return make_rust_ocmesher(cameras, bounds, **kwargs)
         return make_rust_ocmesher(cameras, bounds, device=device, **kwargs)
 
-    msg = f"Unknown backend {backend!r}. Expected one of: 'cpp', 'torch', 'rust'."
+    msg = f"Unknown backend {backend!r}. Expected one of: {_BACKEND_CPP!r}, {_BACKEND_TORCH!r}, {_BACKEND_RUST!r}."
     raise ValueError(msg)

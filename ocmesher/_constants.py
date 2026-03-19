@@ -8,6 +8,8 @@ from __future__ import annotations
 
 import os
 
+import numpy as np
+
 __all__ = [
     "CAMERA_DATA_STRIDE",
     "CORNER_QUANT_SCALE",
@@ -30,7 +32,12 @@ __all__ = [
     "HASH_PRIME_Z",
     "KERNEL_RUNTIME_VALUES",
     "MAX_SDF_WORKERS",
+    "NUMPY_FLOAT64",
+    "NUMPY_INT32",
     "SDF_BATCH_SIZE",
+    "SERIAL_MULTI_KERNEL_MAX",
+    "SPEC_INFERENCE_ATOL",
+    "SPEC_INFERENCE_RTOL",
     "STREAM_POLICY_VALUES",
     "TORCH_SDF_CHUNK_SIZE",
 ]
@@ -89,6 +96,12 @@ HASH_PRIME_Z: int = 1_000_000_021
 TORCH_SDF_CHUNK_SIZE: int = 2_000_000
 
 # ---------------------------------------------------------------------------
+# NumPy dtype aliases (canonical forms used throughout the codebase)
+# ---------------------------------------------------------------------------
+NUMPY_FLOAT64: type = np.float64  # type: ignore[attr-defined]
+NUMPY_INT32: type = np.int32  # type: ignore[attr-defined]
+
+# ---------------------------------------------------------------------------
 # Rust-backend defaults (mirrored from OcMesher for API parity)
 # ---------------------------------------------------------------------------
 DEFAULT_PIXELS_PER_CUBE: int = 8
@@ -101,6 +114,21 @@ DEFAULT_ENCLOSED: bool = True
 DEFAULT_SIMPLIFY_OCCLUDED: bool = True
 DEFAULT_VISIBLE_RELAX_ITER: int = 2
 DEFAULT_COARSE_COUNT: int = 500_000
+
+# ---------------------------------------------------------------------------
+# Tolerance constants for native primitive spec inference
+# ---------------------------------------------------------------------------
+# Absolute tolerance for checking SDF values at test points.
+SPEC_INFERENCE_ATOL: float = 1e-5
+
+# Relative tolerance for comparing SDF values against expected primitives.
+SPEC_INFERENCE_RTOL: float = 1e-4
+
+# ---------------------------------------------------------------------------
+# Serial multi-kernel threshold
+# ---------------------------------------------------------------------------
+# Keep very small multi-kernel batches serial to avoid pool startup overhead.
+SERIAL_MULTI_KERNEL_MAX: int = 4096
 
 # Valid values for ``kernel_runtime`` in Rust backend.
 # - "auto": choose best available runtime automatically (default)

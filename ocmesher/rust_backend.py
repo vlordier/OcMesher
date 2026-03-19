@@ -14,7 +14,14 @@ from typing import TYPE_CHECKING, Any, Protocol, cast
 
 import numpy as np
 
-from ._constants import DEVICE_VALUES, KERNEL_RUNTIME_VALUES, STREAM_POLICY_VALUES
+from ._constants import (
+    DEVICE_VALUES,
+    KERNEL_RUNTIME_VALUES,
+    NUMPY_FLOAT64,
+    SPEC_INFERENCE_ATOL,
+    SPEC_INFERENCE_RTOL,
+    STREAM_POLICY_VALUES,
+)
 from ._validation import (
     validate_bounds,
     validate_cameras,
@@ -33,6 +40,19 @@ __all__ = [
 ]
 
 RESULT_ARITY = 2
+
+# Probe points for native primitive spec inference.
+# Five points: origin, three unit-axis tips, and the negative unit-z tip.
+_SPEC_PROBE_POINTS = np.asarray(
+    [
+        [0.0, 0.0, 0.0],
+        [1.0, 0.0, 0.0],
+        [0.0, 1.0, 0.0],
+        [0.0, 0.0, 1.0],
+        [0.0, 0.0, -1.0],
+    ],
+    dtype=NUMPY_FLOAT64,
+)
 
 
 def _normalize_rust_device(device: str) -> str:
@@ -61,6 +81,13 @@ def _device_family(device: str) -> str:
     if normalized == "mps":
         return "mps"
     return "cpu"
+
+
+def _normalize_stream_policy(policy: str) -> str:
+    if policy not in STREAM_POLICY_VALUES:
+        msg = f"stream_policy must be one of: {', '.join(repr(v) for v in STREAM_POLICY_VALUES)}"
+        raise ValueError(msg)
+    return policy
 
 
 def _torch_device_capabilities() -> dict[str, bool]:
@@ -161,37 +188,28 @@ def _infer_native_primitive_specs(kernels: Sequence[Any]) -> list[dict[str, Any]
     """
     specs: list[dict[str, Any]] = []
     for kernel in kernels:
-        probe = np.asarray(
-            [
-                [0.0, 0.0, 0.0],
-                [1.0, 0.0, 0.0],
-                [0.0, 1.0, 0.0],
-                [0.0, 0.0, 1.0],
-                [0.0, 0.0, -1.0],
-            ],
-            dtype=np.float64,
-        )
+        probe = _SPEC_PROBE_POINTS
         eval_batch = getattr(kernel, "evaluate_batch", None)
         if callable(eval_batch):
-            values = np.asarray(_extract_sdf(eval_batch(probe)), dtype=np.float64).reshape(-1)
+            values = np.asarray(_extract_sdf(eval_batch(probe)), dtype=NUMPY_FLOAT64).reshape(-1)
         else:
-            values = np.asarray(kernel(probe), dtype=np.float64).reshape(-1)
+            values = np.asarray(kernel(probe), dtype=NUMPY_FLOAT64).reshape(-1)
         if values.shape[0] != probe.shape[0]:
             return None
 
         # Sphere centered at origin: f(x)=||x||-r (same value on unit axes).
-        if np.allclose(values[1:4], values[1], atol=1e-5) and np.isclose(values[1], values[4], atol=1e-5):
+        if np.allclose(values[1:4], values[1], atol=SPEC_INFERENCE_ATOL) and np.isclose(values[1], values[4], atol=SPEC_INFERENCE_ATOL):
             radius = max(0.0, -float(values[0]))
-            if np.isclose(values[1], 1.0 - radius, atol=1e-4):
+            if np.isclose(values[1], 1.0 - radius, atol=SPEC_INFERENCE_RTOL):
                 specs.append({"type": "sphere", "center": [0.0, 0.0, 0.0], "radius": radius})
                 continue
 
         # Z-plane: f(x)=z-offset.
-        if np.isclose(values[0], 0.0, atol=1e-5) and np.isclose(values[1], 0.0, atol=1e-5) and np.isclose(
-            values[2], 0.0, atol=1e-5
+        if np.isclose(values[0], 0.0, atol=SPEC_INFERENCE_ATOL) and np.isclose(values[1], 0.0, atol=SPEC_INFERENCE_ATOL) and np.isclose(
+            values[2], 0.0, atol=SPEC_INFERENCE_ATOL
         ):
             offset = -float(values[0])
-            if np.isclose(values[3], 1.0 - offset, atol=1e-4) and np.isclose(values[4], -1.0 - offset, atol=1e-4):
+            if np.isclose(values[3], 1.0 - offset, atol=SPEC_INFERENCE_RTOL) and np.isclose(values[4], -1.0 - offset, atol=SPEC_INFERENCE_RTOL):
                 specs.append({"type": "plane", "normal": [0.0, 0.0, 1.0], "offset": offset})
                 continue
 
@@ -306,9 +324,7 @@ class RustOcMesher:
             self.stream_policy = "sync"
         else:
             self.stream_policy = stream_policy
-        if self.stream_policy not in STREAM_POLICY_VALUES:
-            msg = f"stream_policy must be one of: {', '.join(repr(v) for v in STREAM_POLICY_VALUES)}"
-            raise ValueError(msg)
+        self.stream_policy = _normalize_stream_policy(self.stream_policy)
         self.use_primitive_inference = use_primitive_inference
         self.kernel_runtime = _validate_kernel_runtime(kernel_runtime)
 
