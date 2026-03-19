@@ -86,6 +86,9 @@ _MPS_PREFERRED_DTYPE = "float32"
 _SDF_KEY_LOWER = "sdf"
 _SDF_KEY_UPPER = "SDF"
 
+# Maximum number of entries in the primitive inference cache.
+_MAX_SPEC_CACHE_SIZE = 128
+
 
 def _device_family(device: str) -> str:
     normalized = device.strip().lower()
@@ -390,7 +393,7 @@ class RustOcMesher:
             specs = self._inferred_specs_cache.get(cache_key)
             if specs is None and cache_key not in self._inferred_specs_cache:
                 specs = _infer_native_primitive_specs(kernels_list)
-                if len(self._inferred_specs_cache) > 128:
+                if len(self._inferred_specs_cache) > _MAX_SPEC_CACHE_SIZE:
                     self._inferred_specs_cache.clear()
                 self._inferred_specs_cache[cache_key] = specs
 
