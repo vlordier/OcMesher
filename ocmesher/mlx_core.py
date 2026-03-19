@@ -384,7 +384,7 @@ class MLXOcMesher:
 
         # Pre-compute per-camera pixel angular size (numpy)
         fx_all = Ks[:, 0, 0]  # (C,)
-        w_all = self._Ws_np.astype(np.float32)
+        w_all = self._Ws_f32
         self._pix_ang = np.arctan(w_all / 2 / fx_all) * 2 / w_all  # (C,)
 
         # Pre-compute projection angular threshold
@@ -529,16 +529,13 @@ class MLXOcMesher:
         """Return world positions of all 8 corners for each cube."""
         corner_coords = coords[:, np.newaxis, :] + self._corner_offsets[np.newaxis, :, :]
         scale = self._cube_scales(levels)[:, np.newaxis, np.newaxis]
-        origin = self._origin.astype(np.float64)
-        return origin + scale * corner_coords.astype(np.float64)
+        return self._origin + scale * corner_coords.astype(np.float64)
 
     def _cube_corner_positions_f64(self, coords: np.ndarray, levels: np.ndarray) -> np.ndarray:
         """Like _cube_corner_positions but always in float64 on CPU."""
         corner_coords = coords[:, np.newaxis, :] + self._corner_offsets[np.newaxis, :, :]
-        levels_f64 = levels.astype(np.float64)
-        scale = (self.size / np.exp2(levels_f64))[:, np.newaxis, np.newaxis]
-        origin = self._origin.astype(np.float64)
-        return origin + scale * corner_coords.astype(np.float64)
+        scale = (self.size / np.exp2(levels.astype(np.float64)))[:, np.newaxis, np.newaxis]
+        return self._origin + scale * corner_coords.astype(np.float64)
 
     def _projected_sizes(
         self, positions: np.ndarray, levels: np.ndarray, *, cube_scales: np.ndarray | None = None
