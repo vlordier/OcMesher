@@ -30,8 +30,6 @@ jobs:
 
       - name: Set up Rust
         uses: dtolnay/rust-toolchain@stable
-        with:
-          components: rustfmt
 
       - name: Run rustfmt
         working-directory: ocmesher-rust
@@ -45,8 +43,6 @@ jobs:
 
       - name: Set up Rust
         uses: dtolnay/rust-toolchain@stable
-        with:
-          components: clippy
 
       - name: Run clippy
         working-directory: ocmesher-rust
