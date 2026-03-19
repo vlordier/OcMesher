@@ -348,6 +348,11 @@ class MLXOcMesher:
         for i, row in enumerate(_TRI_TABLE):
             self._mc_tri_table[i, : len(row)] = row
 
+        # Pre-compute hash primes for vertex deduplication
+        self._dedup_prime_x = 1000000007
+        self._dedup_prime_y = 1000000009
+        self._dedup_prime_z = 1000000021
+
         # Cache for marching cubes lookup tables (MLX GPU arrays)
         self._setup_mc_cache()
 
@@ -895,9 +900,9 @@ class MLXOcMesher:
 
         quantized = (verts_flat * _CORNER_QUANT_SCALE).round().astype(np.int64)
         hash_vals = (
-            quantized[:, 0] * 1000000007 +
-            quantized[:, 1] * 1000000009 +
-            quantized[:, 2] * 1000000021
+            quantized[:, 0] * self._dedup_prime_x +
+            quantized[:, 1] * self._dedup_prime_y +
+            quantized[:, 2] * self._dedup_prime_z
         )
         unique_hashes, inverse = np.unique(hash_vals, return_inverse=True)
         n_unique = len(unique_hashes)
