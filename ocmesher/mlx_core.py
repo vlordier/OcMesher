@@ -525,7 +525,7 @@ class MLXOcMesher:
         """Compute world-space cube side lengths from octree levels."""
         return self._exp2_scales[levels.astype(np.int32)]
 
-    def _cube_corner_positions(
+    def _cube_centers(
         self, coords: np.ndarray, levels: np.ndarray, *, cube_scales: np.ndarray | None = None
     ) -> np.ndarray:
         """Integer octree coords -> world-space center positions."""
