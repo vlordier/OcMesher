@@ -382,20 +382,20 @@ class MLXOcMesher:
 
         self.n_cameras = len(self.cameras[0])
 
-        # Compute inverse poses as numpy arrays for projection
+        # Compute inverse poses as numpy arrays for projection (float64 to match Torch precision)
         inv_poses_np = np.stack([
             np.linalg.inv(cam_poses[i])[:3, :4] for i in range(self.n_cameras)
-        ]).astype(np.float32)
+        ]).astype(np.float64)
         self._inv_poses_np = inv_poses_np
 
-        # Pre-compute per-camera pixel angular size (numpy)
+        # Pre-compute per-camera pixel angular size (numpy, float64 to match Torch precision)
         fx_all = Ks[:, 0, 0]  # (C,)
-        w_all = self._Ws_f32
+        w_all = self._Ws_np
         self._pix_ang = np.arctan(w_all / 2 / fx_all) * 2 / w_all  # (C,)
 
         # Pre-compute projection angular threshold
         self._pix_ang_ppc = (self._pix_ang * self.pixels_per_cube)[:, np.newaxis]  # (C, 1)
-        self._inv_pix_ang_ppc = 1.0 / self._pix_ang_ppc  # (C, 1)
+        self._inv_pix_ang_ppc = (1.0 / self._pix_ang_ppc).astype(np.float64)  # (C, 1)
 
         # Pre-split rotation/translation components for projection
         self._inv_pose_R = inv_poses_np[:, :, :3]  # (C, 3, 3)
@@ -554,10 +554,8 @@ class MLXOcMesher:
         if cube_scales is None:
             cube_scales = self._cube_scales(levels)
 
-        positions_f = positions.astype(np.float32)
-
         # cam_coords[c, n] = R[c] @ pos[n] + t[c]
-        cam_coords = np.einsum("cij,nj->cni", self._inv_pose_R, positions_f) + self._inv_pose_t
+        cam_coords = np.einsum("cij,nj->cni", self._inv_pose_R, positions) + self._inv_pose_t
 
         r = np.linalg.norm(cam_coords, axis=2).clip(min=self.min_dist)  # (C, N)
         proj = cube_scales[np.newaxis, :] * self._inv_pix_ang_ppc / r  # (C, N)
