@@ -31,7 +31,7 @@ from __future__ import annotations
 
 import logging
 from concurrent.futures import ThreadPoolExecutor
-from typing import ClassVar
+from typing import Any, Callable, ClassVar
 
 import numpy as np
 import torch
@@ -831,17 +831,17 @@ class TorchOcMesher:
         # Optionally JIT-compile hot-path methods for repeated use ----------
         if use_compile and _HAS_COMPILE:
             try:
-                self._projected_sizes = torch.compile(  # type: ignore[method-assign]
+                self._projected_sizes: Callable[..., Any] = torch.compile(
                     self._projected_sizes,
                     dynamic=True,
                     fullgraph=False,
                 )
-                self._visibility_filter = torch.compile(  # type: ignore[method-assign]
+                self._visibility_filter: Callable[..., Any] = torch.compile(
                     self._visibility_filter,
                     dynamic=True,
                     fullgraph=False,
                 )
-                self._marching_cubes = torch.compile(  # type: ignore[method-assign]
+                self._marching_cubes: Callable[..., Any] = torch.compile(
                     self._marching_cubes,
                     dynamic=True,
                     fullgraph=False,
