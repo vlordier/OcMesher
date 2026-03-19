@@ -354,6 +354,8 @@ class MLXOcMesher:
         self._mc_tri_table = np.full((256, max_tri_entries), -1, dtype=np.int16)
         for i, row in enumerate(_TRI_TABLE):
             self._mc_tri_table[i, : len(row)] = row
+        # Pre-compute tri table divisions
+        self._max_tris_per_cube = max_tri_entries // 3
 
         # Pre-compute hash primes for vertex deduplication
         self._dedup_prime_x = 1000000007
@@ -886,8 +888,7 @@ class MLXOcMesher:
         edge_positions = p0 + t[:, :, np.newaxis] * (p1 - p0)
 
         tri_entries = self._mc_tri_table[a_cfg]
-        max_tris_per_cube = max_tri_entries // 3
-        tri_edge_ids = tri_entries[:, : max_tris_per_cube * 3].reshape(-1, max_tris_per_cube, 3)
+        tri_edge_ids = tri_entries[:, : self._max_tris_per_cube * 3].reshape(-1, self._max_tris_per_cube, 3)
         tri_valid = tri_edge_ids[:, :, 0] >= 0
 
         valid_cube_idx, valid_tri_idx = np.where(tri_valid)
