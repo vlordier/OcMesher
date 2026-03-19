@@ -89,6 +89,10 @@ _SDF_KEY_UPPER = "SDF"
 # Maximum number of entries in the primitive inference cache.
 _MAX_SPEC_CACHE_SIZE = 128
 
+# Primitive type identifiers for native spec inference.
+_SPEC_TYPE_SPHERE = "sphere"
+_SPEC_TYPE_PLANE = "plane"
+
 
 def _device_family(device: str) -> str:
     normalized = device.strip().lower()
@@ -217,7 +221,7 @@ def _infer_native_primitive_specs(kernels: Sequence[Any]) -> list[dict[str, Any]
         if np.allclose(values[1:4], values[1], atol=SPEC_INFERENCE_ATOL) and np.isclose(values[1], values[4], atol=SPEC_INFERENCE_ATOL):
             radius = max(0.0, -float(values[0]))
             if np.isclose(values[1], 1.0 - radius, atol=SPEC_INFERENCE_RTOL):
-                specs.append({"type": "sphere", "center": [0.0, 0.0, 0.0], "radius": radius})
+                specs.append({"type": _SPEC_TYPE_SPHERE, "center": [0.0, 0.0, 0.0], "radius": radius})
                 continue
 
         # Z-plane: f(x)=z-offset.
@@ -226,7 +230,7 @@ def _infer_native_primitive_specs(kernels: Sequence[Any]) -> list[dict[str, Any]
         ):
             offset = -float(values[0])
             if np.isclose(values[3], 1.0 - offset, atol=SPEC_INFERENCE_RTOL) and np.isclose(values[4], -1.0 - offset, atol=SPEC_INFERENCE_RTOL):
-                specs.append({"type": "plane", "normal": [0.0, 0.0, 1.0], "offset": offset})
+                specs.append({"type": _SPEC_TYPE_PLANE, "normal": [0.0, 0.0, 1.0], "offset": offset})
                 continue
 
         return None
@@ -240,9 +244,9 @@ def _split_sphere_plane_specs(
     sphere: dict[str, Any] | None = None
     plane: dict[str, Any] | None = None
     for spec in specs:
-        if spec.get("type") == "sphere" and sphere is None:
+        if spec.get("type") == _SPEC_TYPE_SPHERE and sphere is None:
             sphere = spec
-        elif spec.get("type") == "plane" and plane is None:
+        elif spec.get("type") == _SPEC_TYPE_PLANE and plane is None:
             plane = spec
     return sphere, plane
 
