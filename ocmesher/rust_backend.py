@@ -74,13 +74,19 @@ def _validate_kernel_runtime(kernel_runtime: str) -> str:
     return kernel_runtime
 
 
+# Device family constants for grouping.
+_DEVICE_FAMILY_CPU = "cpu"
+_DEVICE_FAMILY_CUDA = "cuda"
+_DEVICE_FAMILY_MPS = "mps"
+
+
 def _device_family(device: str) -> str:
     normalized = device.strip().lower()
     if normalized.startswith("cuda"):
-        return "cuda"
+        return _DEVICE_FAMILY_CUDA
     if normalized == "mps":
-        return "mps"
-    return "cpu"
+        return _DEVICE_FAMILY_MPS
+    return _DEVICE_FAMILY_CPU
 
 
 def _normalize_stream_policy(policy: str) -> str:
@@ -296,17 +302,17 @@ class RustOcMesher:
         caps = _torch_device_capabilities()
         if device is None:
             if caps["supports_cuda"]:
-                self.device = "cuda"
+                self.device = _DEVICE_FAMILY_CUDA
             elif caps["supports_mps"]:
-                self.device = "mps"
+                self.device = _DEVICE_FAMILY_MPS
             else:
-                self.device = "cpu"
+                self.device = _DEVICE_FAMILY_CPU
         else:
             self.device = _normalize_rust_device(device)
         self._device_family = _device_family(self.device)
 
         self.dtype: str | None
-        if dtype is None and self._device_family == "mps":
+        if dtype is None and self._device_family == _DEVICE_FAMILY_MPS:
             self.dtype = "float32"
         else:
             self.dtype = dtype
@@ -320,7 +326,7 @@ class RustOcMesher:
             else (batch_size if batch_size is not None else max_batch)
         )
 
-        if stream_policy == "auto" and self._device_family not in ("cuda", "mps"):
+        if stream_policy == "auto" and self._device_family not in (_DEVICE_FAMILY_CUDA, _DEVICE_FAMILY_MPS):
             self.stream_policy = "sync"
         else:
             self.stream_policy = stream_policy
@@ -340,8 +346,8 @@ class RustOcMesher:
             "supports_mps": self._device_caps["supports_mps"],
             "preferred_dtype": "float32",
             "max_batch": self.max_batch,
-            "max_batch_mps": self.max_batch if self._device_family == "mps" else None,
-            "supports_async": self._device_family in ("cuda", "mps"),
+            "max_batch_mps": self.max_batch if self._device_family == _DEVICE_FAMILY_MPS else None,
+            "supports_async": self._device_family in (_DEVICE_FAMILY_CUDA, _DEVICE_FAMILY_MPS),
             "default_stream_policy": self.stream_policy,
             "version": self.__version__,
         }
@@ -385,7 +391,7 @@ class RustOcMesher:
             # Choose native/tch scene extraction according to runtime policy.
             sphere_spec, plane_spec = _split_sphere_plane_specs(specs)
             prefer_tch = self.kernel_runtime == "tch" or (
-                self.kernel_runtime == "auto" and self._device_family in ("mps", "cuda")
+                self.kernel_runtime == "auto" and self._device_family in (_DEVICE_FAMILY_MPS, _DEVICE_FAMILY_CUDA)
             )
             if prefer_tch:
                 if len(specs) == 1 and sphere_spec is not None and hasattr(self._backend, "extract_tch_sphere"):
