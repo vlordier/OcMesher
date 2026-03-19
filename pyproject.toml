@@ -11,6 +11,8 @@ classifiers = [
     "License :: OSI Approved :: BSD License",
     "Programming Language :: Python :: 3",
     "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
     "Topic :: Scientific/Engineering :: Artificial Intelligence",
     "Topic :: Scientific/Engineering :: Image Processing",
 ]
@@ -21,9 +23,6 @@ dependencies = [
     "gin-config>=0.5.0",
     "tqdm>=4.65.0",
     "psutil>=5.9.0",
-    "mkdocs[docs]>=1.6.1",
-    "mkdocs-material[docs]>=9.7.5",
-    "mkdocstrings[docs,python]>=1.0.3",
 ]
 
 [project.optional-dependencies]
@@ -37,7 +36,7 @@ dev = [
     "pytest>=7.0",
     "pytest-cov>=4.0",
     "pyupgrade>=3.15",
-    "ruff>=0.4.0",
+    "ruff>=0.15.6",
 ]
 benchmark = [
     "setuptools<81",  # vnoise currently imports pkg_resources
@@ -169,19 +168,6 @@ ignore = [
     "PLR0912",  # too-many-branches (benchmark main)
     "PLR0913",  # too-many-arguments (benchmark functions mirror mesher API)
 ]
-# Python overhead micro-benchmark
-"benchmarks/bench_python_overhead.py" = [
-    "SLF001",   # private member access (benchmarking internal methods)
-    "T201",     # print statements (benchmark output)
-]
-# End-to-end benchmark (branch comparison)
-"benchmarks/bench_e2e.py" = [
-    "SLF001",   # private member access (benchmarking internal methods)
-    "T201",     # print statements (benchmark output)
-    "C901",     # complex functions OK in benchmark main/regression_check
-    "PLR0912",  # too-many-branches in regression_check
-    "PLR0915",  # too-many-statements in main
-]
 # API parity benchmark (upstream comparison)
 "benchmarks/bench_api_parity_upstream.py" = [
     "EXE001",   # shebang present but not executable (run via python -m)
@@ -195,7 +181,6 @@ ignore = [
 "benchmarks/result_utils.py" = [
     "FBT001",   # boolean-typed positional arg (API backwards-compat)
     "SIM108",   # if-else-block instead of ternary (readability)
-    "F841",     # unused variable (debug artifact)
 ]
 # tests - allow assertions, magic values, no docstrings, etc.
 "tests/**/*.py" = [
@@ -302,4 +287,6 @@ min_confidence = 80
 [dependency-groups]
 dev = [
     "ruff>=0.15.6",
+    "pytest>=7.0",
+    "pytest-cov>=4.0",
 ]

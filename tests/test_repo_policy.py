@@ -80,12 +80,13 @@ def test_lint_workflow_tracks_toolchain_files() -> None:
     assert '"uv.lock"' in workflow
 
 
-def test_pyproject_advertises_python_311_only() -> None:
+def test_pyproject_advertises_supported_python_versions() -> None:
     pyproject = tomllib.loads(_read("pyproject.toml"))
     classifiers = pyproject["project"]["classifiers"]
 
     assert "Programming Language :: Python :: 3.11" in classifiers
-    assert "Programming Language :: Python :: 3.12" not in classifiers
+    assert "Programming Language :: Python :: 3.12" in classifiers
+    assert "Programming Language :: Python :: 3.13" in classifiers
 
 
 def test_pre_commit_clang_tidy_is_strict() -> None:

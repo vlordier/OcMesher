@@ -914,9 +914,6 @@ version = "1.0.0"
 source = { editable = "." }
 dependencies = [
     { name = "gin-config" },
-    { name = "mkdocs" },
-    { name = "mkdocs-material" },
-    { name = "mkdocstrings", extra = ["python"] },
     { name = "numpy" },
     { name = "psutil" },
     { name = "tqdm" },
@@ -950,6 +947,8 @@ torch = [
 
 [package.dev-dependencies]
 dev = [
+    { name = "pytest" },
+    { name = "pytest-cov" },
     { name = "ruff" },
 ]
 
@@ -958,10 +957,7 @@ requires-dist = [
     { name = "gin-config", specifier = ">=0.5.0" },
     { name = "maturin", marker = "extra == 'rust'", specifier = ">=1.7.0" },
     { name = "mkdocs", marker = "extra == 'docs'", specifier = ">=1.6.0" },
-    { name = "mkdocs", extras = ["docs"], specifier = ">=1.6.1" },
     { name = "mkdocs-material", marker = "extra == 'docs'", specifier = ">=9.5.0" },
-    { name = "mkdocs-material", extras = ["docs"], specifier = ">=9.7.5" },
-    { name = "mkdocstrings", extras = ["docs", "python"], specifier = ">=1.0.3" },
     { name = "mkdocstrings", extras = ["python"], marker = "extra == 'docs'", specifier = ">=0.29.0" },
     { name = "mlx", marker = "extra == 'benchmark'", specifier = ">=0.22.0" },
     { name = "numba", marker = "extra == 'benchmark'", specifier = ">=0.60.0" },
@@ -970,7 +966,7 @@ requires-dist = [
     { name = "pytest", marker = "extra == 'dev'", specifier = ">=7.0" },
     { name = "pytest-cov", marker = "extra == 'dev'", specifier = ">=4.0" },
     { name = "pyupgrade", marker = "extra == 'dev'", specifier = ">=3.15" },
-    { name = "ruff", marker = "extra == 'dev'", specifier = ">=0.4.0" },
+    { name = "ruff", marker = "extra == 'dev'", specifier = ">=0.15.6" },
     { name = "setuptools", marker = "extra == 'benchmark'", specifier = "<81" },
     { name = "torch", marker = "extra == 'torch'", specifier = ">=2.0.0" },
     { name = "tqdm", specifier = ">=4.65.0" },
@@ -980,7 +976,11 @@ requires-dist = [
 provides-extras = ["torch", "rust", "dev", "benchmark", "docs"]
 
 [package.metadata.requires-dev]
-dev = [{ name = "ruff", specifier = ">=0.15.6" }]
+dev = [
+    { name = "pytest", specifier = ">=7.0" },
+    { name = "pytest-cov", specifier = ">=4.0" },
+    { name = "ruff", specifier = ">=0.15.6" },
+]
 
 [[package]]
 name = "packaging"
