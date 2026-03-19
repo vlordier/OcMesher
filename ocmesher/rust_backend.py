@@ -82,6 +82,10 @@ _DEVICE_FAMILY_MPS = "mps"
 # Preferred dtype for MPS (Apple Silicon) which requires float32.
 _MPS_PREFERRED_DTYPE = "float32"
 
+# Dict keys for SDF kernel output extraction.
+_SDF_KEY_LOWER = "sdf"
+_SDF_KEY_UPPER = "SDF"
+
 
 def _device_family(device: str) -> str:
     normalized = device.strip().lower()
@@ -118,10 +122,10 @@ def _torch_device_capabilities() -> dict[str, bool]:
 
 def _extract_sdf(output: Any) -> np.ndarray[Any, Any]:
     if isinstance(output, dict):
-        if "sdf" in output:
-            return np.asarray(output["sdf"])
-        if "SDF" in output:
-            return np.asarray(output["SDF"])
+        if _SDF_KEY_LOWER in output:
+            return np.asarray(output[_SDF_KEY_LOWER])
+        if _SDF_KEY_UPPER in output:
+            return np.asarray(output[_SDF_KEY_UPPER])
         msg = "kernel output dict must contain 'sdf' or 'SDF'"
         raise KeyError(msg)
     return np.asarray(output)
