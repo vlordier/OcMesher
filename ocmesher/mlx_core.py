@@ -863,7 +863,7 @@ class MLXOcMesher:
 
         # CPU-based marching cubes with numpy (using pre-cached tables)
         neg_mask = (sdf < 0).astype(np.int32)  # (N, 8)
-        cube_idx = (neg_mask * self._mc_bit_shifts[np.newaxis, :]).sum(axis=1).astype(np.int32)  # (N,)
+        cube_idx = (neg_mask * self._mc_bit_shifts[np.newaxis, :]).sum(axis=1)  # (N,) - already int32
 
         edge_mask = self._mc_edge_table[cube_idx]
         active = edge_mask != 0
