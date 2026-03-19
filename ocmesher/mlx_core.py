@@ -409,6 +409,7 @@ class MLXOcMesher:
         self._vis_wb = np.array(vis_wb, dtype=np.int32)
         self._vis_inv_factor = float(_VIS_BIN_FACTOR)
         self._depth_inf = np.float32(np.inf)  # Pre-compute for depth buffer
+        self._depth_safe_eps = np.float32(1e-10)  # Pre-compute for depth division
 
     def _setup_mc_cache(self) -> None:
         """Initialize marching cubes lookup tables on device."""
@@ -773,7 +774,7 @@ class MLXOcMesher:
         # Project all positions to camera coordinates
         cam_coords = np.einsum("cij,nj->cni", self._inv_pose_R, positions_f) + self._inv_pose_t
         depth = cam_coords[:, :, 2]  # (C, N)
-        depth_safe = depth + 1e-10
+        depth_safe = depth + self._depth_safe_eps
 
         # Pixel coordinates (C, N)
         px = cam_coords[:, :, 0] / depth_safe
