@@ -332,7 +332,23 @@ class MLXOcMesher:
         self._corner_offsets = np.array(_CORNER_OFFSETS, dtype=np.int64)
         self._edge_vertices = np.array(_EDGE_VERTICES, dtype=np.int64)
 
-        # Cache for marching cubes lookup tables
+        # Pre-compute visibility relaxation neighbor offsets (once, not per-call)
+        rl = self.visible_relax_iter
+        dx_range = np.arange(-rl, rl + 1, dtype=np.int32)
+        dy_range = np.arange(-rl, rl + 1, dtype=np.int32)
+        grid_dx, grid_dy = np.meshgrid(dx_range, dy_range, indexing="ij")
+        self._relax_dx = grid_dx.reshape(-1)
+        self._relax_dy = grid_dy.reshape(-1)
+
+        # Pre-cache marching cubes tables for CPU numpy path
+        self._mc_edge_table = np.array(_EDGE_TABLE, dtype=np.int32)
+        self._mc_bit_shifts = np.array(_BIT_SHIFTS, dtype=np.int32)
+        max_tri_entries = 16
+        self._mc_tri_table = np.full((256, max_tri_entries), -1, dtype=np.int16)
+        for i, row in enumerate(_TRI_TABLE):
+            self._mc_tri_table[i, : len(row)] = row
+
+        # Cache for marching cubes lookup tables (MLX GPU arrays)
         self._setup_mc_cache()
 
     def _setup_camera_tensors(self) -> None:
@@ -762,15 +778,6 @@ class MLXOcMesher:
         if not in_view_all.any():
             return np.zeros(n_pos, dtype=bool)
 
-        # Pre-compute neighbor offsets based on visible_relax_iter
-        rl = self.visible_relax_iter
-        dx_range = np.arange(-rl, rl + 1, dtype=np.int32)
-        dy_range = np.arange(-rl, rl + 1, dtype=np.int32)
-        grid_dx, grid_dy = np.meshgrid(dx_range, dy_range, indexing="ij")
-        self._relax_dx = grid_dx.reshape(-1)
-        self._relax_dy = grid_dy.reshape(-1)
-        self._n_relax = len(self._relax_dx)
-
         # Bin coordinates for all cameras at once
         factor = float(_VIS_BIN_FACTOR)
         bx_all = np.clip((px * factor).astype(np.int32), 0, None)  # (C, N)
@@ -845,13 +852,11 @@ class MLXOcMesher:
         if n == 0:
             return np.zeros((0, 3), dtype=np.float64), np.zeros((0, 3), dtype=np.int32)
 
-        # CPU-based marching cubes with numpy
+        # CPU-based marching cubes with numpy (using pre-cached tables)
         neg_mask = (sdf < 0).astype(np.int32)  # (N, 8)
-        bit_shifts = np.array(_BIT_SHIFTS, dtype=np.int32)
-        cube_idx = (neg_mask * bit_shifts[np.newaxis, :]).sum(axis=1).astype(np.int32)  # (N,)
+        cube_idx = (neg_mask * self._mc_bit_shifts[np.newaxis, :]).sum(axis=1).astype(np.int32)  # (N,)
 
-        edge_table = np.array(_EDGE_TABLE, dtype=np.int32)
-        edge_mask = edge_table[cube_idx]
+        edge_mask = self._mc_edge_table[cube_idx]
         active = edge_mask != 0
 
         if not active.any():
@@ -873,12 +878,7 @@ class MLXOcMesher:
         p1 = a_corners[:, ev[:, 1]]
         edge_positions = p0 + t[:, :, np.newaxis] * (p1 - p0)
 
-        max_tri_entries = max(len(row) for row in _TRI_TABLE)
-        tri_table = np.full((256, max_tri_entries), -1, dtype=np.int16)
-        for i, row in enumerate(_TRI_TABLE):
-            tri_table[i, : len(row)] = row
-
-        tri_entries = tri_table[a_cfg]
+        tri_entries = self._mc_tri_table[a_cfg]
         max_tris_per_cube = max_tri_entries // 3
         tri_edge_ids = tri_entries[:, : max_tris_per_cube * 3].reshape(-1, max_tris_per_cube, 3)
         tri_valid = tri_edge_ids[:, :, 0] >= 0
