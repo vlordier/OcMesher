@@ -840,7 +840,9 @@ class TorchOcMesher:
                     dynamic=True,
                     fullgraph=False,
                 )
-            except Exception:  # noqa: BLE001
+            except (AttributeError, TypeError, RuntimeError):
+                # torch.compile may fail if the backend is unavailable or
+                # if some operations can't be compiled; fall back to eager.
                 logger.warning(
                     "torch.compile failed to initialise (backend unavailable); falling back to eager execution."
                 )
