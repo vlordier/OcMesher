@@ -47,9 +47,12 @@ def _mlx_available() -> bool:
         return False
 
 
-from ._constants import DENOM_EPS
+from ._constants import DENOM_EPS, CORNER_QUANT_SCALE, VIS_BIN_FACTOR, BIT_SHIFTS
 
 _DENOM_EPS = DENOM_EPS  # Alias for internal use
+_CORNER_QUANT_SCALE = CORNER_QUANT_SCALE  # Alias for internal use
+_VIS_BIN_FACTOR = VIS_BIN_FACTOR  # Alias for internal use
+_BIT_SHIFTS = BIT_SHIFTS  # Alias for internal use
 
 # Edge table: for each of the 256 cube configurations, a 12-bit mask
 # indicating which edges are intersected by the iso-surface.

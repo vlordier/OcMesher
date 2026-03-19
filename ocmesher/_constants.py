@@ -27,6 +27,7 @@ __all__ = [
     "DENOM_EPS",
     "DEVICE_FAMILY_VALUES",
     "DEVICE_VALUES",
+    "BIT_SHIFTS",
     "HASH_PRIME_X",
     "HASH_PRIME_Y",
     "HASH_PRIME_Z",
@@ -81,6 +82,12 @@ DEVICE_FAMILY_VALUES: tuple[str, str, str, str] = ("cpu", "cuda", "mps", "mlx")
 # deduplication.  1e8 gives 10-nanometre resolution — fine enough to
 # distinguish corners at the deepest practical octree level.
 CORNER_QUANT_SCALE: float = 1e8
+
+# Factor for computing visibility bin dimensions from image size.
+VIS_BIN_FACTOR: float = 10.0
+
+# Bit shift values for cube configuration indexing (8 corners of a cube).
+BIT_SHIFTS: list[int] = [1 << i for i in range(8)]
 
 # Large primes used for spatial hashing of quantised 3-D coordinates.
 # ``hash = x * P0 + y * P1 + z * P2`` produces a well-distributed 1-D

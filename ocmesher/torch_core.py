@@ -51,24 +51,15 @@ def _mps_available() -> bool:
     return hasattr(torch.backends, "mps") and torch.backends.mps.is_available()
 
 
-from ._constants import DENOM_EPS
+from ._constants import DENOM_EPS, CORNER_QUANT_SCALE, VIS_BIN_FACTOR, BIT_SHIFTS
 
 _DENOM_EPS = DENOM_EPS  # Alias for internal use
+_CORNER_QUANT_SCALE = CORNER_QUANT_SCALE  # Alias for internal use
+_VIS_BIN_FACTOR = VIS_BIN_FACTOR  # Alias for internal use
+_BIT_SHIFTS = BIT_SHIFTS  # Alias for internal use
 
 # Whether torch.compile is available (PyTorch ≥ 2.0).
 _HAS_COMPILE = hasattr(torch, "compile")
-
-# Scale factor for quantising corner positions to int64 before deduplication.
-# 1e8 gives 10-nanometre resolution — fine enough to distinguish corners at
-# the deepest practical octree level (2^20 subdivisions of a ~10 m scene
-# yields ~10 µm cubes) while keeping quantised values within int64 range.
-_CORNER_QUANT_SCALE = 1e8
-
-# Factor for computing visibility bin dimensions from image size.
-_VIS_BIN_FACTOR = 10.0
-
-# Bit shift values for cube configuration indexing.
-_BIT_SHIFTS = [1 << i for i in range(8)]
 
 # ---------------------------------------------------------------------------
 # Marching-cubes lookup tables (classic Lorensen & Cline, 1987)
