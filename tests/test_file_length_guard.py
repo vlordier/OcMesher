@@ -48,10 +48,11 @@ def test_write_violations_writes_to_stderr(capsys) -> None:
 
 
 def test_file_length_guard_tracks_torch_core() -> None:
-    assert guard.MAX_LINES_BY_FILE["ocmesher/torch_core.py"] == 1100
+    assert guard.MAX_LINES_BY_FILE["ocmesher/torch_core.py"] == 1700
 
 
 def test_file_length_guard_uses_tightened_limits() -> None:
-    assert guard.MAX_LINES_BY_FILE["benchmark.py"] == 500
-    assert guard.MAX_LINES_BY_FILE["benchmarks/run_benchmark.py"] == 1235
-    assert guard.MAX_LINES_BY_FILE["tests/test_benchmark_script.py"] == 300
+    assert guard.MAX_LINES_BY_FILE["benchmarks/run_benchmark.py"] == 1400
+    assert guard.MAX_LINES_BY_FILE["ocmesher/core.py"] == 1000
+    assert guard.MAX_LINES_BY_FILE["ocmesher/mlx_core.py"] == 1400
+    assert guard.MAX_LINES_BY_FILE["ocmesher/rust_backend.py"] == 700

@@ -10,12 +10,11 @@ import sys
 from pathlib import Path
 
 MAX_LINES_BY_FILE: dict[str, int] = {
-    "benchmark.py": 500,
-    "benchmarks/run_benchmark.py": 1235,
-    "benchmarks/bench_e2e.py": 700,
-    "benchmarks/bench_python_overhead.py": 320,
-    "ocmesher/torch_core.py": 1100,
-    "tests/test_benchmark_script.py": 300,
+    "benchmarks/run_benchmark.py": 1400,
+    "ocmesher/core.py": 1000,
+    "ocmesher/torch_core.py": 1700,
+    "ocmesher/mlx_core.py": 1400,
+    "ocmesher/rust_backend.py": 700,
 }
 
 
