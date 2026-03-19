@@ -70,11 +70,12 @@ DENOM_EPS: float = 1e-12
 # - "cpu": use CPU via PyTorch
 # - "mps": use Apple Silicon GPU via PyTorch
 # - "cuda": use NVIDIA GPU via PyTorch
+# - "mlx": use Apple Silicon via MLX (native Apple Silicon ML framework)
 # - "cuda:<index>": use specific NVIDIA GPU by ordinal
-DEVICE_VALUES: tuple[str, str, str] = ("cpu", "mps", "cuda")
+DEVICE_VALUES: tuple[str, str, str, str] = ("cpu", "mps", "cuda", "mlx")
 
 # Device families for grouping devices.
-DEVICE_FAMILY_VALUES: tuple[str, str, str] = ("cpu", "cuda", "mps")
+DEVICE_FAMILY_VALUES: tuple[str, str, str, str] = ("cpu", "cuda", "mps", "mlx")
 
 # Scale factor for quantising corner positions to ``int64`` before
 # deduplication.  1e8 gives 10-nanometre resolution — fine enough to

@@ -78,6 +78,7 @@ def _validate_kernel_runtime(kernel_runtime: str) -> str:
 _DEVICE_FAMILY_CPU = "cpu"
 _DEVICE_FAMILY_CUDA = "cuda"
 _DEVICE_FAMILY_MPS = "mps"
+_DEVICE_FAMILY_MLX = "mlx"
 
 # Preferred dtype for MPS (Apple Silicon) which requires float32.
 _MPS_PREFERRED_DTYPE = "float32"
@@ -107,6 +108,8 @@ def _device_family(device: str) -> str:
         return _DEVICE_FAMILY_CUDA
     if normalized == "mps":
         return _DEVICE_FAMILY_MPS
+    if normalized == "mlx":
+        return _DEVICE_FAMILY_MLX
     return _DEVICE_FAMILY_CPU
 
 
@@ -130,6 +133,19 @@ def _torch_device_capabilities() -> dict[str, bool]:
     return {
         "supports_cuda": supports_cuda,
         "supports_mps": supports_mps,
+        "supports_cpu": True,
+    }
+
+
+def _mlx_device_capabilities() -> dict[str, bool]:
+    """Return MLX device capabilities for Apple Silicon."""
+    supports_mlx = False
+    if sys.modules.get("mlx") is not None:
+        # MLX is available - Apple Silicon with MLX supports GPU acceleration
+        supports_mlx = True
+
+    return {
+        "supports_mlx": supports_mlx,
         "supports_cpu": True,
     }
 
@@ -321,11 +337,14 @@ class RustOcMesher:
         self.coarse_count = coarse_count
 
         caps = _torch_device_capabilities()
+        mlx_caps = _mlx_device_capabilities()
         if device is None:
             if caps["supports_cuda"]:
                 self.device = _DEVICE_FAMILY_CUDA
             elif caps["supports_mps"]:
                 self.device = _DEVICE_FAMILY_MPS
+            elif mlx_caps["supports_mlx"]:
+                self.device = _DEVICE_FAMILY_MLX
             else:
                 self.device = _DEVICE_FAMILY_CPU
         else:
@@ -333,7 +352,8 @@ class RustOcMesher:
         self._device_family = _device_family(self.device)
 
         self.dtype: str | None
-        if dtype is None and self._device_family == _DEVICE_FAMILY_MPS:
+        # MLX and MPS both require float32 on Apple Silicon
+        if dtype is None and self._device_family in (_DEVICE_FAMILY_MPS, _DEVICE_FAMILY_MLX):
             self.dtype = _MPS_PREFERRED_DTYPE
         else:
             self.dtype = dtype
@@ -347,7 +367,7 @@ class RustOcMesher:
             else (batch_size if batch_size is not None else max_batch)
         )
 
-        if stream_policy == "auto" and self._device_family not in (_DEVICE_FAMILY_CUDA, _DEVICE_FAMILY_MPS):
+        if stream_policy == "auto" and self._device_family not in (_DEVICE_FAMILY_CUDA, _DEVICE_FAMILY_MPS, _DEVICE_FAMILY_MLX):
             self.stream_policy = "sync"
         else:
             self.stream_policy = stream_policy
@@ -356,6 +376,7 @@ class RustOcMesher:
         self.kernel_runtime = _validate_kernel_runtime(kernel_runtime)
 
         self._device_caps = caps
+        self._mlx_caps = mlx_caps
         self._backend = backend
         self._inferred_specs_cache: dict[tuple[int, ...], list[dict[str, Any]] | None] = {}
 
@@ -365,10 +386,11 @@ class RustOcMesher:
             "supports_cpu": True,
             "supports_cuda": self._device_caps["supports_cuda"],
             "supports_mps": self._device_caps["supports_mps"],
+            "supports_mlx": self._mlx_caps["supports_mlx"],
             "preferred_dtype": _MPS_PREFERRED_DTYPE,
             "max_batch": self.max_batch,
-            "max_batch_mps": self.max_batch if self._device_family == _DEVICE_FAMILY_MPS else None,
-            "supports_async": self._device_family in (_DEVICE_FAMILY_CUDA, _DEVICE_FAMILY_MPS),
+            "max_batch_mps": self.max_batch if self._device_family in (_DEVICE_FAMILY_MPS, _DEVICE_FAMILY_MLX) else None,
+            "supports_async": self._device_family in (_DEVICE_FAMILY_CUDA, _DEVICE_FAMILY_MPS, _DEVICE_FAMILY_MLX),
             "default_stream_policy": self.stream_policy,
             "version": self.__version__,
         }
