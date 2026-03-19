@@ -24,7 +24,7 @@ float32 for all computations when running on MLX device.
 from __future__ import annotations
 
 import logging
-from typing import ClassVar
+from typing import Any, ClassVar
 
 import numpy as np
 
