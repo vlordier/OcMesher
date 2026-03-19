@@ -13,7 +13,7 @@
 #   make typecheck  run ty static type checker
 #   make lint-rust  run Rust fmt + clippy baseline
 #   make lint-cpp   run C++ formatting/static-analysis checks when tools exist
-#   make bench-clean remove generated benchmark artifacts (keeps tracked snapshots)
+#   make bench-clean remove generated benchmark artifacts and result files
 #   make clean      remove compiled artifacts and generated results
 #   make fix        auto-fix lint + apply formatting
 #   make bench      run benchmarks
@@ -72,7 +72,6 @@ fix:
 
 bench-clean:
 	rm -rf benchmark_artifacts/generated
-	rm -rf benchmark_artifacts/legacy_root_results
 	rm -f benchmark_results*.json
 
 clean:
