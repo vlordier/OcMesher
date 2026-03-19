@@ -14,8 +14,8 @@
 #   make lint-rust  run Rust fmt + clippy baseline
 #   make lint-cpp   run C++ formatting/static-analysis checks when tools exist
 #   make bench-clean remove generated benchmark artifacts (keeps tracked snapshots)
+#   make clean      remove compiled artifacts and generated results
 #   make fix        auto-fix lint + apply formatting
-#   make clean      remove compiled artifacts
 #   make bench      run benchmarks
 
 .PHONY: install test coverage lint lint-python lint-rust lint-cpp format typecheck quality fix bench-clean clean bench
