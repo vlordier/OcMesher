@@ -20,6 +20,8 @@ if TYPE_CHECKING:
     from ._types import BoundsLike, CamerasTuple, KernelSequence
 
 __all__ = [
+    "CAMERA_SHAPE_DESC",
+    "K_SHAPE_DESC",
     "bounds_min_max",
     "coerce_kernel_sdf",
     "out_of_bounds_mask",
@@ -32,6 +34,10 @@ __all__ = [
 
 _AXIS_NAMES = ("x", "y", "z")
 _CAMERAS_TUPLE_LENGTH = 4
+
+# Human-readable shape descriptors used in validation error messages.
+CAMERA_SHAPE_DESC = "4x4 matrix"
+K_SHAPE_DESC = "3x3 matrix"
 
 
 def _validate_camera_structure(cameras: CamerasTuple) -> tuple[Any, Any, Any, Any]:
@@ -74,11 +80,11 @@ def _validate_camera_arrays(
     Ks = [np.asarray(k, dtype=np.float64) for k in Ks]
     for i, pose in enumerate(cam_poses):
         if pose.shape != (4, 4):
-            msg = f"cam_poses[{i}] must be a 4x4 matrix, got shape {pose.shape}"
+            msg = f"cam_poses[{i}] must be a {CAMERA_SHAPE_DESC}, got shape {pose.shape}"
             raise ValueError(msg)
     for i, k in enumerate(Ks):
         if k.shape != (3, 3):
-            msg = f"Ks[{i}] must be a 3x3 matrix, got shape {k.shape}"
+            msg = f"Ks[{i}] must be a {K_SHAPE_DESC}, got shape {k.shape}"
             raise ValueError(msg)
     return cam_poses, Ks
 

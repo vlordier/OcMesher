@@ -21,6 +21,7 @@ import inspect
 import numpy as np
 import pytest
 
+from ocmesher import CAMERA_DATA_STRIDE
 from ocmesher.core import OcMesher
 
 # ---------------------------------------------------------------------------
@@ -349,9 +350,9 @@ class TestCameraPackingRegression:
         ws = [1280] * n_cameras
 
         # Reference: develop/main loop
-        cameras_loop = np.zeros(23 * n_cameras, dtype=np_float_type)
+        cameras_loop = np.zeros(CAMERA_DATA_STRIDE * n_cameras, dtype=np_float_type)
         for i in range(n_cameras):
-            cameras_loop[23 * i : 23 * (i + 1)] = np.concatenate(
+            cameras_loop[CAMERA_DATA_STRIDE * i : CAMERA_DATA_STRIDE * (i + 1)] = np.concatenate(
                 [
                     np.linalg.inv(cam_poses[i])[:3, :4].reshape(-1),
                     ks[i].reshape(-1),
@@ -365,7 +366,7 @@ class TestCameraPackingRegression:
         ks_flat = np.array(ks).reshape(n_cameras, -1)
         h_arr = np.array(hs, dtype=np_float_type).reshape(n_cameras, 1)
         w_arr = np.array(ws, dtype=np_float_type).reshape(n_cameras, 1)
-        packed = np.empty((n_cameras, 23), dtype=np_float_type)
+        packed = np.empty((n_cameras, CAMERA_DATA_STRIDE), dtype=np_float_type)
         packed[:, :12] = inv_poses
         packed[:, 12:21] = ks_flat
         packed[:, 21:22] = h_arr

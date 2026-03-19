@@ -14,7 +14,7 @@ from typing import TYPE_CHECKING, Any, Protocol, cast
 
 import numpy as np
 
-from ._constants import KERNEL_RUNTIME_VALUES, STREAM_POLICY_VALUES
+from ._constants import DEVICE_VALUES, KERNEL_RUNTIME_VALUES, STREAM_POLICY_VALUES
 from ._validation import (
     validate_bounds,
     validate_cameras,
@@ -37,13 +37,13 @@ RESULT_ARITY = 2
 
 def _normalize_rust_device(device: str) -> str:
     normalized = device.strip().lower()
-    if normalized in {"cpu", "mps", "cuda"}:
+    if normalized in DEVICE_VALUES:
         return normalized
     if normalized.startswith("cuda:"):
         suffix = normalized.split(":", maxsplit=1)[1]
         if suffix.isdigit():
             return f"cuda:{int(suffix)}"
-    msg = "device must be one of: 'cpu', 'mps', 'cuda', or 'cuda:<index>'"
+    msg = f"device must be one of: {', '.join(repr(v) for v in DEVICE_VALUES)}, or 'cuda:<index>'"
     raise ValueError(msg)
 
 

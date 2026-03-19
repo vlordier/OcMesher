@@ -11,7 +11,7 @@ from importlib.metadata import PackageNotFoundError, version
 # "No handlers could be found for logger 'ocmesher'" warnings.
 logging.getLogger(__name__).addHandler(logging.NullHandler())
 
-__all__ = ["OcMesher", "RustOcMesher", "TorchOcMesher", "make_ocmesher", "make_rust_ocmesher"]
+__all__ = ["CAMERA_DATA_STRIDE", "OcMesher", "RustOcMesher", "TorchOcMesher", "make_ocmesher", "make_rust_ocmesher"]
 
 try:
     __version__ = version("ocmesher")
@@ -21,6 +21,10 @@ except PackageNotFoundError:
 
 def __getattr__(name: str):
     """Lazy-import backends so optional runtimes load only when needed."""
+    if name == "CAMERA_DATA_STRIDE":
+        from ._constants import CAMERA_DATA_STRIDE
+
+        return CAMERA_DATA_STRIDE
     if name == "OcMesher":
         from .core import OcMesher
 

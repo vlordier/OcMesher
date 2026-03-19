@@ -11,8 +11,20 @@ import os
 __all__ = [
     "CAMERA_DATA_STRIDE",
     "CORNER_QUANT_SCALE",
+    "DEFAULT_BISECTION_ITERS",
+    "DEFAULT_BISECTION_TOL",
+    "DEFAULT_COARSE_COUNT",
+    "DEFAULT_ENCLOSED",
+    "DEFAULT_INV_SCALE",
+    "DEFAULT_MEMORY_LIMIT_MB",
+    "DEFAULT_MIN_DIST",
+    "DEFAULT_PIXELS_PER_CUBE",
     "DEFAULT_SDF_WORKERS",
+    "DEFAULT_SIMPLIFY_OCCLUDED",
+    "DEFAULT_VISIBLE_RELAX_ITER",
     "DENOM_EPS",
+    "DEVICE_FAMILY_VALUES",
+    "DEVICE_VALUES",
     "HASH_PRIME_X",
     "HASH_PRIME_Y",
     "HASH_PRIME_Z",
@@ -47,6 +59,16 @@ MAX_SDF_WORKERS: int = int(
 # Epsilon for safe division in marching-cubes edge interpolation.
 DENOM_EPS: float = 1e-12
 
+# Valid device identifiers for Rust backend.
+# - "cpu": use CPU via PyTorch
+# - "mps": use Apple Silicon GPU via PyTorch
+# - "cuda": use NVIDIA GPU via PyTorch
+# - "cuda:<index>": use specific NVIDIA GPU by ordinal
+DEVICE_VALUES: tuple[str, str, str] = ("cpu", "mps", "cuda")
+
+# Device families for grouping devices.
+DEVICE_FAMILY_VALUES: tuple[str, str, str] = ("cpu", "cuda", "mps")
+
 # Scale factor for quantising corner positions to ``int64`` before
 # deduplication.  1e8 gives 10-nanometre resolution — fine enough to
 # distinguish corners at the deepest practical octree level.
@@ -65,6 +87,20 @@ HASH_PRIME_Z: int = 1_000_000_021
 # Smaller than SDF_BATCH_SIZE (which targets the C++ backend) to
 # improve cache locality during GPU→CPU transfers.
 TORCH_SDF_CHUNK_SIZE: int = 2_000_000
+
+# ---------------------------------------------------------------------------
+# Rust-backend defaults (mirrored from OcMesher for API parity)
+# ---------------------------------------------------------------------------
+DEFAULT_PIXELS_PER_CUBE: int = 8
+DEFAULT_INV_SCALE: int = 10
+DEFAULT_MIN_DIST: int = 1
+DEFAULT_MEMORY_LIMIT_MB: int = 1000
+DEFAULT_BISECTION_ITERS: int = 15
+DEFAULT_BISECTION_TOL: float = 0.0
+DEFAULT_ENCLOSED: bool = True
+DEFAULT_SIMPLIFY_OCCLUDED: bool = True
+DEFAULT_VISIBLE_RELAX_ITER: int = 2
+DEFAULT_COARSE_COUNT: int = 500_000
 
 # Valid values for ``kernel_runtime`` in Rust backend.
 # - "auto": choose best available runtime automatically (default)
