@@ -1385,7 +1385,7 @@ class TorchOcMesher:
             for i, row in enumerate(_TRI_TABLE):
                 tri_table_np[i, : len(row)] = row
             tri_table_t = torch.from_numpy(tri_table_np)
-            bit_shifts = torch.tensor([1 << i for i in range(8)], dtype=torch.int32)
+            bit_shifts = torch.tensor(_BIT_SHIFTS, dtype=torch.int32)
             TorchOcMesher._mc_cache[device_cpu] = {
                 "edge_table": edge_table_t,
                 "tri_table": tri_table_t,
