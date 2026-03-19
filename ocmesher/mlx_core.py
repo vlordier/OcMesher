@@ -30,7 +30,7 @@ from typing import TYPE_CHECKING, Any, ClassVar
 import numpy as np
 import trimesh
 
-from ._constants import DENOM_EPS, CORNER_QUANT_SCALE, VIS_BIN_FACTOR, BIT_SHIFTS
+from ._constants import BIT_SHIFTS, CORNER_QUANT_SCALE, DENOM_EPS, VIS_BIN_FACTOR
 from ._validation import validate_bounds, validate_cameras, validate_kernels, validate_mesher_params
 from .utils.timer import Timer
 
@@ -261,7 +261,6 @@ class MLXOcMesher:
         coarse_count: int = 500000,
         device: str | None = None,
         n_sdf_workers: int = _MLX_SDF_THREADS,
-        **kwargs: Any,
     ) -> None:
         if not _mlx_available():
             msg = "MLX is not installed. Install with: pip install mlx"
@@ -438,7 +437,7 @@ class MLXOcMesher:
                 "bit_shifts": bit_shifts,
             }
 
-    def close(self) -> "MLXOcMesher":
+    def close(self) -> MLXOcMesher:
         """Clean up resources (no-op for MLX backend). Returns self for chaining."""
         return self
 
@@ -557,7 +556,6 @@ class MLXOcMesher:
 
         positions_f = positions.astype(np.float32)
 
-        # Pre-split rotation/translation from precomputed camera projection
         # cam_coords[c, n] = R[c] @ pos[n] + t[c]
         cam_coords = np.einsum("cij,nj->cni", self._inv_pose_R, positions_f) + self._inv_pose_t
 

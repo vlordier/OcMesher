@@ -117,6 +117,20 @@ ignore = [
 "ocmesher/utils/interface.py" = [
     "PLR0913",  # too-many-arguments (register_func has 6 params for ctypes binding)
 ]
+# MLX mesher – complex scientific code with Apple Silicon GPU tensor ops
+"ocmesher/mlx_core.py" = [
+    "FBT001",   # boolean-typed positional arg (__init__ bool kwargs are public API)
+    "FBT002",   # boolean default positional args (API backwards-compat)
+    "PLR0913",  # too-many-arguments (constructor mirrors original API)
+    "PLR0915",  # too-many-statements (complex meshing pipeline)
+    "PLR0912",  # too-many-branches (refinement dispatch logic)
+    "C901",     # complex functions (SDF evaluation)
+    "D107",     # missing docstring in __init__ (simple timer class)
+    "ARG002",   # unused method argument (kwargs forwarded to parent)
+    "ERA001",   # commented-out code (legacy camera math annotation)
+    "PLC0415",  # local imports avoid top-level import cost for optional MLX
+    "TRY300",   # try/except for optional dependency detection
+]
 # timer utility – logs timing info
 "ocmesher/utils/timer.py" = [
     "FBT001",   # boolean-typed positional arg (API backwards-compat)
