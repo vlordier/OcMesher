@@ -63,6 +63,9 @@ _HAS_COMPILE = hasattr(torch, "compile")
 # yields ~10 µm cubes) while keeping quantised values within int64 range.
 _CORNER_QUANT_SCALE = 1e8
 
+# Factor for computing visibility bin dimensions from image size.
+_VIS_BIN_FACTOR = 10.0
+
 # ---------------------------------------------------------------------------
 # Marching-cubes lookup tables (classic Lorensen & Cline, 1987)
 # ---------------------------------------------------------------------------
@@ -802,7 +805,7 @@ class TorchOcMesher:
         # The buffer is sized for the largest (reduced-resolution) depth image
         # across all cameras, avoiding repeated torch.full() allocation inside
         # the per-camera loop of _visibility_filter.  fill_() resets it cheaply.
-        factor = 10.0
+        factor = _VIS_BIN_FACTOR
         # Pre-compute per-camera bin dimensions as tensors for batched
         # visibility filtering (avoids int()/max() inside the hot loop).
         vis_hb_list = [max(1, int(h / factor)) for h in self.cam_heights]
