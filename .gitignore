@@ -44,6 +44,10 @@ results/
 benchmark_results/
 benchmark_artifacts/generated/
 
+# Build and demo artifacts
+*.obj
+test_*.sh
+
 # Test / coverage artifacts
 .pytest_cache/
 htmlcov/
