@@ -5,7 +5,7 @@ set -euo pipefail
 OS=$(uname -s)
 ARCH=$(uname -m)
 
-if [ -n "$CXX" ]; then
+if [ -n "${CXX:-}" ]; then
 	compiler="$CXX"
 else
 	if [ "${OS}" = "Linux" ]; then
@@ -22,13 +22,15 @@ else
 	fi
 fi
 
-CXXFLAGS_ARRAY=()
 if [[ -n "${CXXFLAGS:-}" ]]; then
 	read -ra CXXFLAGS_ARRAY <<< "${CXXFLAGS}"
+else
+	CXXFLAGS_ARRAY=()
 fi
-LDFLAGS_ARRAY=()
 if [[ -n "${LDFLAGS:-}" ]]; then
 	read -ra LDFLAGS_ARRAY <<< "${LDFLAGS}"
+else
+	LDFLAGS_ARRAY=()
 fi
 
 MARCH_FLAGS=""
@@ -59,7 +61,7 @@ gx1() {
 	local out_obj="$1"
 	local defines="$2"
 	local omp_flags="$3"
-	"${compiler}" "${CXXFLAGS_ARRAY[@]}" -O3 -std=c++17 ${MARCH_FLAGS} ${defines} -c -fpic ${omp_flags} -o "${out_obj}" ocmesher/source/core.cpp
+	"${compiler}" "${CXXFLAGS_ARRAY[@]:-}" -O3 -std=c++17 ${MARCH_FLAGS} ${defines} -c -fpic ${omp_flags} -o "${out_obj}" ocmesher/source/core.cpp
 }
 
 gx2() {
@@ -77,7 +79,7 @@ gx2() {
 		fi
 	fi
 	
-	"${compiler}" "${LDFLAGS_ARRAY[@]}" -O3 -shared ${omp_flags} ${rpath_flags} -o "${out_so}" "${in_obj}"
+	"${compiler}" "${LDFLAGS_ARRAY[@]:-}" -O3 -shared ${omp_flags} ${rpath_flags} -o "${out_so}" "${in_obj}"
 }
 
 patch_core_omp_runtime_macos() {
