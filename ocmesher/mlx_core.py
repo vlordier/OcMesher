@@ -642,18 +642,20 @@ class MLXOcMesher:
             if remaining < n_expand * 8:
                 budget = max(1, remaining // 8)
                 # Get indices of cubes with highest projected sizes
-                sorted_idx = np.argsort(proj[expand_idx])[::-1]
-                expand_idx = expand_idx[sorted_idx[:budget]]
+                # Use argpartition + sort to match Torch's topk behavior
+                proj_expand = proj[expand_idx]
+                top_k = np.argpartition(proj_expand, -budget)[-budget:]
+                # Sort top_k by proj value descending to match Torch's topk output order
+                top_k = top_k[np.argsort(proj_expand[top_k])[::-1]]
+                expand_idx = expand_idx[top_k]
                 to_expand = np.zeros(n, dtype=bool)
                 to_expand[expand_idx] = True
-                n_expand = len(expand_idx)
-                n_keep = n - n_expand
 
             keep_mask = ~to_expand
             # Generate 8 children for each cube to expand
             # Child coords are parent * 2 + offset (standard octree coordinate system)
             child_c = (coords[expand_idx, np.newaxis, :] * 2 + self._child_offsets[np.newaxis, :, :]).reshape(-1, 3)
-            child_l = np.full(len(expand_idx) * 8, levels[expand_idx[0]] + 1, dtype=np.int64)
+            child_l = np.repeat(levels[expand_idx] + 1, 8).astype(np.int64)
 
             coords = np.concatenate([coords[keep_mask], child_c])
             levels = np.concatenate([levels[keep_mask], child_l])
@@ -755,13 +757,11 @@ class MLXOcMesher:
                 expand_idx = expand_idx[sorted_idx[:budget]]
                 to_expand = np.zeros(n, dtype=bool)
                 to_expand[expand_idx] = True
-                n_expand = len(expand_idx)
-                n_keep = n - n_expand
 
             keep_mask = ~to_expand
             # Generate 8 children for each cube to expand
             child_c = (coords[expand_idx, np.newaxis, :] * 2 + self._child_offsets[np.newaxis, :, :]).reshape(-1, 3)
-            child_l = np.full(n_expand * 8, levels[expand_idx[0]] + 1, dtype=np.int64)
+            child_l = np.repeat(levels[expand_idx] + 1, 8).astype(np.int64)
 
             if corner_sdf is not None:
                 # Optimised path: kept cubes already have valid corner SDF
