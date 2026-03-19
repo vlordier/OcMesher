@@ -363,12 +363,10 @@ class MLXOcMesher:
         # Stack camera poses: (C, 4, 4)
         cam_poses = np.stack([p.astype(np.float32) for p in self.cameras[0]], axis=0)
         self._cam_poses_np = cam_poses  # Keep numpy for projection
-        self._cam_poses_t = mx.array(cam_poses)  # MLX version for reference
 
         # Stack intrinsics: (C, 3, 3)
         Ks = np.stack([k.astype(np.float32) for k in self.cameras[1]], axis=0)
         self._Ks_np = Ks
-        self._Ks_t = mx.array(Ks)
 
         # Heights and widths: (C,)
         self._Hs_np = np.array(self.cameras[2], dtype=np.int32)
