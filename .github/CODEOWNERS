@@ -1,0 +1,11 @@
+# Default owners for all files (fallback)
+* @princeton-vl/maintainers
+
+# Python / CI / Documentation
+**/*.py .pre-commit-config.yaml pyproject.toml Makefile .github/workflows/ .github/ISSUE_TEMPLATE/ .github/PULL_REQUEST_TEMPLATE/ @princeton-vl/ocmesher-reviewers
+
+# Rust backend
+ocmesher-rust/ @princeton-vl/ocmesher-reviewers
+
+# C++ core
+ocmesher/source/ @princeton-vl/ocmesher-reviewers
