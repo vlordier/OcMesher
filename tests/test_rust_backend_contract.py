@@ -562,7 +562,9 @@ def test_make_rust_ocmesher_exported_from_package():
 
 @pytest.mark.integration
 def test_make_rust_ocmesher_runs_with_compiled_extension(sample_cameras, sample_bounds, sphere_kernel):
-    pytest.importorskip("ocmesher_rust", reason="compiled Rust extension not installed")
+    ocmesher_rust = pytest.importorskip("ocmesher_rust", reason="compiled Rust extension not installed")
+    if not hasattr(ocmesher_rust, "Backend"):
+        pytest.skip("compiled Rust extension not built")
 
     core_so = Path(__file__).resolve().parents[1] / "ocmesher" / "lib" / "core.so"
     if not core_so.exists():
@@ -595,6 +597,8 @@ def test_make_rust_ocmesher_runs_with_compiled_extension(sample_cameras, sample_
 @pytest.mark.integration
 def test_compiled_extension_extract_native_sphere(sample_cameras, sample_bounds):
     ocmesher_rust = pytest.importorskip("ocmesher_rust", reason="compiled Rust extension not installed")
+    if not hasattr(ocmesher_rust, "Backend"):
+        pytest.skip("compiled Rust extension not built")
 
     core_so = Path(__file__).resolve().parents[1] / "ocmesher" / "lib" / "core.so"
     if not core_so.exists():
@@ -629,6 +633,8 @@ def test_compiled_extension_extract_native_sphere(sample_cameras, sample_bounds)
 @pytest.mark.integration
 def test_compiled_extension_extract_tch_sphere(sample_cameras, sample_bounds):
     ocmesher_rust = pytest.importorskip("ocmesher_rust", reason="compiled Rust extension not installed")
+    if not hasattr(ocmesher_rust, "Backend"):
+        pytest.skip("compiled Rust extension not built")
 
     if not hasattr(ocmesher_rust.Backend, "extract_tch_sphere"):
         pytest.skip("compiled Rust extension was not built with tch-kernels")
