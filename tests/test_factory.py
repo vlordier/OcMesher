@@ -143,3 +143,46 @@ class TestMakeOcMesherRustBackend:
 
         assert calls[-1]["coarse_count"] == 123
         assert calls[-1]["device"] is None
+
+
+class TestMakeOcMesherMlxBackend:
+    """MLX backend import and argument forwarding."""
+
+    def test_mlx_backend_uses_lazy_import(self, sample_camera_pose, sample_intrinsics, monkeypatch):
+        from ocmesher import factory
+
+        captured: dict[str, object] = {}
+
+        class DummyMlx:
+            def __init__(self, _cameras, _bounds, *, device=None, **kwargs):
+                captured["device"] = device
+                captured["kwargs"] = kwargs
+
+        fake_module = types.ModuleType("ocmesher.mlx_core")
+        fake_module.MLXOcMesher = DummyMlx
+        monkeypatch.setitem(sys.modules, "ocmesher.mlx_core", fake_module)
+
+        cameras, bounds = _sample_inputs(sample_camera_pose, sample_intrinsics)
+        mesher = factory.make_ocmesher(cameras, bounds, backend="mlx", device="mps")
+
+        assert isinstance(mesher, DummyMlx)
+        assert captured["device"] == "mps"
+
+    def test_mlx_backend_without_device(self, sample_camera_pose, sample_intrinsics, monkeypatch):
+        from ocmesher import factory
+
+        calls: list[dict[str, object]] = []
+
+        def dummy_make_mlx_ocmesher(_cameras, _bounds, **kwargs):
+            calls.append(kwargs)
+            return {"backend": "mlx"}
+
+        fake_module = types.ModuleType("ocmesher.mlx_core")
+        fake_module.MLXOcMesher = lambda *a, **k: dummy_make_mlx_ocmesher(*a, **k)
+        monkeypatch.setitem(sys.modules, "ocmesher.mlx_core", fake_module)
+
+        cameras, bounds = _sample_inputs(sample_camera_pose, sample_intrinsics)
+        result = factory.make_ocmesher(cameras, bounds, backend="mlx", enclosed=False)
+
+        assert result["backend"] == "mlx"
+        assert calls[-1]["enclosed"] is False
