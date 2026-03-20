@@ -672,6 +672,8 @@ def test_compiled_extension_extract_tch_sphere(sample_cameras, sample_bounds):
 @pytest.mark.integration
 def test_compiled_extension_extract_native_plane(sample_cameras, sample_bounds):
     ocmesher_rust = pytest.importorskip("ocmesher_rust", reason="compiled Rust extension not installed")
+    if not hasattr(ocmesher_rust, "Backend"):
+        pytest.skip("compiled Rust extension not built")
 
     if not hasattr(ocmesher_rust.Backend, "extract_native_plane"):
         pytest.skip("compiled Rust extension was not built with plane support")
@@ -709,6 +711,8 @@ def test_compiled_extension_extract_native_plane(sample_cameras, sample_bounds):
 @pytest.mark.integration
 def test_compiled_extension_extract_tch_plane(sample_cameras, sample_bounds):
     ocmesher_rust = pytest.importorskip("ocmesher_rust", reason="compiled Rust extension not installed")
+    if not hasattr(ocmesher_rust, "Backend"):
+        pytest.skip("compiled Rust extension not built")
 
     if not hasattr(ocmesher_rust.Backend, "extract_tch_plane"):
         pytest.skip("compiled Rust extension was not built with tch-kernels")
@@ -746,6 +750,8 @@ def test_compiled_extension_extract_tch_plane(sample_cameras, sample_bounds):
 @pytest.mark.integration
 def test_compiled_extension_extract_native_sphere_plane(sample_cameras, sample_bounds):
     ocmesher_rust = pytest.importorskip("ocmesher_rust", reason="compiled Rust extension not installed")
+    if not hasattr(ocmesher_rust, "Backend"):
+        pytest.skip("compiled Rust extension not built")
 
     if not hasattr(ocmesher_rust.Backend, "extract_native_sphere_plane"):
         pytest.skip("compiled Rust extension was not built with composed scene support")
@@ -783,6 +789,8 @@ def test_compiled_extension_extract_native_sphere_plane(sample_cameras, sample_b
 @pytest.mark.integration
 def test_compiled_extension_extract_tch_sphere_plane(sample_cameras, sample_bounds):
     ocmesher_rust = pytest.importorskip("ocmesher_rust", reason="compiled Rust extension not installed")
+    if not hasattr(ocmesher_rust, "Backend"):
+        pytest.skip("compiled Rust extension not built")
 
     if not hasattr(ocmesher_rust.Backend, "extract_tch_sphere_plane"):
         pytest.skip("compiled Rust extension was not built with tch-kernels")
@@ -820,6 +828,8 @@ def test_compiled_extension_extract_tch_sphere_plane(sample_cameras, sample_boun
 @pytest.mark.integration
 def test_compiled_extension_extract_native_scene(sample_cameras, sample_bounds):
     ocmesher_rust = pytest.importorskip("ocmesher_rust", reason="compiled Rust extension not installed")
+    if not hasattr(ocmesher_rust, "Backend"):
+        pytest.skip("compiled Rust extension not built")
 
     if not hasattr(ocmesher_rust.Backend, "extract_native_scene"):
         pytest.skip("compiled Rust extension was not built with scene-spec support")
@@ -862,6 +872,8 @@ def test_compiled_extension_extract_native_scene(sample_cameras, sample_bounds):
 @pytest.mark.integration
 def test_compiled_extension_extract_tch_scene(sample_cameras, sample_bounds):
     ocmesher_rust = pytest.importorskip("ocmesher_rust", reason="compiled Rust extension not installed")
+    if not hasattr(ocmesher_rust, "Backend"):
+        pytest.skip("compiled Rust extension not built")
 
     if not hasattr(ocmesher_rust.Backend, "extract_tch_scene"):
         pytest.skip("compiled Rust extension was not built with tch-kernels")
@@ -904,6 +916,8 @@ def test_compiled_extension_extract_tch_scene(sample_cameras, sample_bounds):
 @pytest.mark.integration
 def test_compiled_extension_native_vs_tch_mps_signature_regression(sample_cameras, sample_bounds):
     ocmesher_rust = pytest.importorskip("ocmesher_rust", reason="compiled Rust extension not installed")
+    if not hasattr(ocmesher_rust, "Backend"):
+        pytest.skip("compiled Rust extension not built")
     torch = pytest.importorskip("torch", reason="torch not installed")
 
     if not hasattr(ocmesher_rust.Backend, "extract_native_scene"):
@@ -1021,6 +1035,8 @@ def test_compiled_extension_extract_native_scene_rejects_unknown_type(sample_cam
 @pytest.mark.integration
 def test_compiled_extension_extract_tch_scene_rejects_non_dict(sample_cameras, sample_bounds):
     ocmesher_rust = pytest.importorskip("ocmesher_rust", reason="compiled Rust extension not installed")
+    if not hasattr(ocmesher_rust, "Backend"):
+        pytest.skip("compiled Rust extension not built")
 
     if not hasattr(ocmesher_rust.Backend, "extract_tch_scene"):
         pytest.skip("compiled Rust extension was not built with tch-kernels")
@@ -1050,6 +1066,8 @@ def test_compiled_extension_extract_tch_scene_rejects_non_dict(sample_cameras, s
 @pytest.mark.integration
 def test_compiled_extension_extract_tch_scene_rejects_negative_radius(sample_cameras, sample_bounds):
     ocmesher_rust = pytest.importorskip("ocmesher_rust", reason="compiled Rust extension not installed")
+    if not hasattr(ocmesher_rust, "Backend"):
+        pytest.skip("compiled Rust extension not built")
 
     if not hasattr(ocmesher_rust.Backend, "extract_tch_scene"):
         pytest.skip("compiled Rust extension was not built with tch-kernels")
