@@ -75,7 +75,11 @@ line-length = 120
 docstring-code-format = true
 
 [tool.ruff.lint]
-select = ["ALL"]
+select = [
+    "ALL",
+    # Explicitly call out subprocess safety checks to avoid ambiguity.
+    "S603",
+]
 ignore = [
     # -- Line length (explicitly requested to ignore) -----------------------
     "E501",
