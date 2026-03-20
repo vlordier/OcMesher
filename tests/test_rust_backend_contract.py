@@ -1012,6 +1012,9 @@ def test_compiled_extension_extract_native_scene_rejects_empty(sample_cameras, s
 def test_compiled_extension_extract_native_scene_rejects_unknown_type(sample_cameras, sample_bounds):
     ocmesher_rust = pytest.importorskip("ocmesher_rust", reason="compiled Rust extension not installed")
 
+    if not hasattr(ocmesher_rust, "Backend"):
+        pytest.skip("compiled Rust extension not built")
+
     core_so = Path(__file__).resolve().parents[1] / "ocmesher" / "lib" / "core.so"
     if not core_so.exists():
         pytest.skip("compiled core.so not available")
