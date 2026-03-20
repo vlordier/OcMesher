@@ -10,6 +10,11 @@ on:
       - ".github/PULL_REQUEST_TEMPLATE/**"
   pull_request:
     branches: [main, develop]
+    paths-ignore:
+      - "docs/**"
+      - "*.md"
+      - ".github/ISSUE_TEMPLATE/**"
+      - ".github/PULL_REQUEST_TEMPLATE/**"
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
