@@ -332,6 +332,16 @@ class TestPackageInitGetattr:
 
         assert cls is TorchOcMesher
 
+    def test_getattr_mlx_ocmesher_skips_if_no_mlx(self):
+        """If mlx is not installed, accessing MLXOcMesher should raise ImportError."""
+        mlx = pytest.importorskip("mlx")  # noqa: F841
+        import ocmesher
+
+        cls = ocmesher.__getattr__("MLXOcMesher")
+        from ocmesher.mlx_core import MLXOcMesher
+
+        assert cls is MLXOcMesher
+
     def test_getattr_unknown_name_raises_attribute_error(self):
         import ocmesher
 
