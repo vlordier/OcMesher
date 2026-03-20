@@ -178,7 +178,7 @@ class TestMakeOcMesherMlxBackend:
             return {"backend": "mlx"}
 
         fake_module = types.ModuleType("ocmesher.mlx_core")
-        fake_module.MLXOcMesher = lambda *a, **k: dummy_make_mlx_ocmesher(*a, **k)
+        fake_module.MLXOcMesher = dummy_make_mlx_ocmesher
         monkeypatch.setitem(sys.modules, "ocmesher.mlx_core", fake_module)
 
         cameras, bounds = _sample_inputs(sample_camera_pose, sample_intrinsics)
